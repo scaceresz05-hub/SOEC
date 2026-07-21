@@ -6,6 +6,27 @@
 
 **Modo de trabajo Fase 1:** avanzar en el mayor bloque seguro; no pedir validación cuando haya evidencia objetiva (compilar, probar, verificar conformidad #15); la implementación no modifica la arquitectura; toda decisión técnica deriva de la Biblioteca, declara su nivel A/B/C y mantiene trazabilidad. Detenerse solo por: (1) modificar la Biblioteca · (2) contradicción estructural · (3) decisión estratégica de negocio · (4) alternativas equivalentes de alto impacto · (5) riesgo a datos/producción · (6) acción externa no automatizable (credenciales, pagos, licencias…).
 
+## ✅ BLOQUE F1-CAP-01 (Sistema de Capacidades Ejecutable) — CERRADO Y VERIFICADO (2026-07-21)
+
+Composiciones de operaciones intelectuales orientadas a un propósito humano, realizando #14 y **cerrando el arco conceptual ejecutable ECE → Operaciones → Capacidades → Persona**.
+
+| Exigencia de cierre (§28) | Estado |
+|---|---|
+| Anatomía ejecutable de capacidad · definiciones versionadas | ✅ `@soec/capacidades` (capdef append-only) |
+| Componen operaciones · sin dependencia inversa · sin acceso directo al ECE | ✅ vía `OperacionesPort`; prueba arquitectónica (escenario J) |
+| Composición simple, secuencial y paralela · productos intermedios · producto compuesto | ✅ probados; intermedios conservados y recuperables |
+| Soberanía · anti-atrofia · abstención · rechazo de ciclos | ✅ guardarraíles; abstención compuesta; `CicloDetectadoError` |
+| PostgreSQL real · migraciones desde cero · proyecciones reconstruibles · API · worker | ✅ `proj_capdef`/`proj_capexec`; 7 pruebas PG; drenaje único |
+| Suite completa verde · sin acciones externas · sin UI comercial · sin IA real | ✅ 223/223 |
+
+**Resultados exactos (2026-07-21):** `pnpm -r typecheck` 10/10 OK · `pnpm lint` limpio · `pnpm test` **223 passed (42 files)** — nuevos capacidades: registry 6 · composición 5 · escenarios A–I 9 · guards 6 · proyección 2 · arquitectura (J) 4 · pg 7 (Postgres real) · api 3. Verde también desde base recién creada.
+
+**Escenarios sintéticos (§23):** A capacidad simple · B secuencial sin convertir detección en decisión · C paralela conservando diferencias · D abstención intermedia · E contradicción abierta remitida al juicio humano · F versionado sin recálculo · G idempotencia · H no efecto · I rechazo de ciclo · J no atajo (arquitectónica) — todos probados.
+
+**Arco conceptual ejecutable completo:** MED+MDM → ECE → Operaciones → Capacidades → Persona. El siguiente bloque lo determina el grafo del #17 (roadmap); **no** se inició aquí.
+
+**Deuda técnica / límites declarados:** la composición cubre secuencia/paralelo/convergencia por `dependeDe`/`usaProductoDe` (no un motor genérico de workflows, por diseño §6) · `usaProductoDe` alimenta la configuración del paso siguiente incorporando el resumen del producto previo al propósito (composición a nivel de orquestador, sin motor de paso de datos arbitrario) · las definiciones sintéticas viven como fixtures de prueba, no como taxonomía comercial permanente (§9).
+
 ## ✅ BLOQUE F1-OI-01 (Sistema de Operaciones Intelectuales Ejecutable) — CERRADO Y VERIFICADO (2026-07-20)
 
 Las cuatro operaciones que operan sobre el ECE, realizando #13 sin redefinirlo y sin implementar capacidades (#14) ni IA real.
