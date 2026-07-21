@@ -1,4 +1,5 @@
 import type { Migration } from '@soec/event-store/pg';
+import { migracionesHastaEce } from '@soec/ece/pg';
 
 /** Proyección de ejecuciones de operaciones intelectuales (tabla propia del dominio). */
 export const oiMigrations: ReadonlyArray<Migration> = [
@@ -23,3 +24,6 @@ export const oiMigrations: ReadonlyArray<Migration> = [
     `,
   },
 ];
+
+/** Conjunto acumulado hasta las Operaciones (Base + Modelos + ECE + Operaciones). */
+export const migracionesHastaOperaciones: ReadonlyArray<Migration> = [...migracionesHastaEce, ...oiMigrations];

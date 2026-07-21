@@ -23,6 +23,7 @@ import {
   SolicitudInvalidaError,
 } from '../domain/errors';
 import { type CorteEce, type ProductoIntelectual, esOpaco, violaSoberania } from '../domain/product';
+import type { OperacionesPort } from './operations-port';
 import { abstener, baseProducto, construir } from './product-builder';
 
 export interface OiResultado {
@@ -32,7 +33,7 @@ export interface OiResultado {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-export class OperacionesService {
+export class OperacionesService implements OperacionesPort {
   private readonly mecanismos: readonly MecanismoOperacion[];
 
   constructor(
@@ -47,6 +48,11 @@ export class OperacionesService {
   private async cargar(ctx: RequestContext, executionId: string): Promise<OiState> {
     const events = await this.store.readStream(ctx, oiStreamId(executionId));
     return reconstruirOi(executionId, ctx.organizationId, events);
+  }
+
+  /** Frontera pública: producto de una ejecución previa (o null si no existe). */
+  async producto(ctx: RequestContext, executionId: string): Promise<ProductoIntelectual | null> {
+    return (await this.cargar(ctx, executionId)).producto;
   }
 
   private seleccionar(sol: SolicitudOperacion): MecanismoOperacion {

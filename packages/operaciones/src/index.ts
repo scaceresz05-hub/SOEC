@@ -13,6 +13,7 @@ export * from './domain/mechanism';
 export * from './domain/aggregate';
 export * from './domain/errors';
 export * from './app/operations-service';
+export * from './app/operations-port';
 export * from './app/mechanisms/deterministic';
 export * from './app/mechanisms/simulated';
 export * from './projections/projection';
