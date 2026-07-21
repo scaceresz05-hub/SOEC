@@ -1,0 +1,24 @@
+# PostgreSQL local para desarrollo y pruebas de SOEC.
+# AISLADO de otros proyectos: nombres soec_*, puerto 5544 (no 5433 de SSR Control),
+# volumen propio. Proyecto compose: soec.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: soec_postgres
+    environment:
+      POSTGRES_USER: soec
+      POSTGRES_PASSWORD: soec
+      POSTGRES_DB: soec
+    ports:
+      - '5544:5432'
+    volumes:
+      - soec_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U soec -d soec']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  soec_pgdata:
+    name: soec_pgdata
