@@ -42,12 +42,20 @@ import {
   SinPoliticaVigenteError,
   SolicitudOperativaInvalidaError,
 } from '@soec/operacional';
+import {
+  ComandoMarketingInvalidoError,
+  ObjetivoNoEncontradoError,
+  ObjetivoNoEvaluableError,
+  PlanNoEncontradoError,
+  SinAccionDisponibleError,
+} from '@soec/marketing';
 import { registerModelRoutes } from './model-routes';
 import { registerEceRoutes } from './ece-routes';
 import { registerOperationsRoutes } from './operations-routes';
 import { registerCapabilityRoutes } from './capabilities-routes';
 import { registerExperienceRoutes } from './experience-routes';
 import { registerOperationalRoutes } from './operational-routes';
+import { registerMarketingRoutes } from './marketing-routes';
 
 export interface AppDeps {
   store: EventStore;
@@ -110,14 +118,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       err instanceof DefinicionNoEncontradaError ||
       err instanceof EjecucionCapacidadNoEncontradaError ||
       err instanceof AccionNoEncontradaError ||
-      err instanceof PoliticaNoEncontradaError
+      err instanceof PoliticaNoEncontradaError ||
+      err instanceof ObjetivoNoEncontradoError ||
+      err instanceof PlanNoEncontradoError
     ) {
       return reply.code(404).send({ error: err.name, message: err.message });
     }
     if (
       err instanceof SinPoliticaVigenteError ||
       err instanceof SolicitudOperativaInvalidaError ||
-      err instanceof AdaptadorNoDisponibleError
+      err instanceof AdaptadorNoDisponibleError ||
+      err instanceof ObjetivoNoEvaluableError ||
+      err instanceof SinAccionDisponibleError ||
+      err instanceof ComandoMarketingInvalidoError
     ) {
       return reply.code(422).send({ error: err.name, message: err.message });
     }
@@ -148,6 +161,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerCapabilityRoutes(app, deps.store);
   registerExperienceRoutes(app, deps.store);
   registerOperationalRoutes(app, deps.store);
+  registerMarketingRoutes(app, deps.store);
 
   app.post('/events', async (req, reply) => {
     const ctx = contextFrom(req);
