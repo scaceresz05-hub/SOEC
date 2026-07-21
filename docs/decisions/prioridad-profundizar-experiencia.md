@@ -37,11 +37,34 @@ Nombre y objetivo fijados por la Autoridad Estratégica para cuando se abra el b
 
 > **Pregunta rectora:** ¿Cómo debe conversar una persona con SOEC para comprender mejor su empresa **sin perder trazabilidad ni soberanía**?
 
-**Tres principios de diseño** (realizan invariantes congelados; no crean arquitectura):
+**Cuatro principios de diseño** (realizan invariantes congelados; no crean arquitectura):
 
 1. **Comprensión antes que información** — la pantalla ayuda a *entender*, no solo a mostrar datos (realiza anti-atrofia y explicabilidad, #13/#14 inv. · #9 inv. 7).
 2. **Progresividad** — visión simple primero; el usuario profundiza hasta la evidencia técnica cuando lo necesita (ya iniciado como trazabilidad progresiva en F1-UI-01).
 3. **Transparencia** — cada afirmación importante se rastrea hasta su origen, dejando siempre claro **qué sabe el sistema, qué no sabe y qué debe decidir la persona** (realiza atribución, procedencia y frontera de soberanía).
+4. **Fidelidad** — *la forma de comunicar nunca puede alterar el significado del conocimiento que comunica.* Una narrativa puede reorganizar, simplificar, resumir y adaptar el lenguaje; **nunca** aumentar la certeza, eliminar limitaciones, ocultar contradicciones, inventar relaciones, suavizar abstenciones ni convertir una orientación en recomendación vinculante. Es el puente entre la arquitectura y la experiencia. (Realiza Transporte #9 inv. 3, No eleva la certeza #13 inv. 3, Hereda el alcance #14 inv. 4, Explicabilidad #14 inv. 5.)
+
+## Restricción arquitectónica del bloque — La narrativa es una VISTA, no una fuente
+
+> **Toda narrativa producida por SOEC es una representación del conocimiento existente, nunca una fuente nueva de conocimiento.**
+
+Encuadre de gobernanza: se registra como **realización/interpretación** de invariantes ya congelados (Transporte #9 inv. 3; No eleva la certeza #13 inv. 3; Hereda el alcance #14 inv. 4; Explicabilidad #14 inv. 5), **no** como enmienda a la Fundación. Elevarlo a norma constitucional universal formalmente declarada exigiría el circuito #8→#6→#7→#5 y demostrar laguna/contradicción — innecesario, porque el invariante de Transporte ya lo establece. Queda pendiente de decisión explícita de la Autoridad si desea esa formalización universal.
+
+Separación conceptual de capas de F2-UX-01:
+
+```text
+Capacidad → Producto compuesto → Narrativa conversacional → Interfaz
+```
+
+La **Narrativa conversacional no posee conocimiento propio**. Su única responsabilidad es transformar un producto estructurado en discurso humano **conservando exactamente**: evidencia · procedencia · incertidumbre · limitaciones · información faltante · decisión reservada a la persona.
+
+Consecuencias verificables (para cuando se abra el bloque):
+
+- el resumen conversacional **expresa** conclusiones existentes; no las **genera**;
+- cada frase importante se rastrea a un producto intelectual existente;
+- ante *«¿por qué dices eso?»*, la respuesta surge de la **misma cadena de evidencia**, no de una generación independiente;
+- sin evidencia suficiente, la conversación **lo dice explícitamente**; no rellena vacíos;
+- la conversación debe ser **equivalente** al producto intelectual subyacente, solo en lenguaje más natural (evita que la explicación difiera del razonamiento ejecutado).
 
 **Consecuencia buscada:** si esta experiencia se resuelve bien, las futuras capacidades (Anticipar, Orientar, …) se incorporan **de forma natural**, sin rediseñar la interacción desde cero. **Condición:** el bloque se abre por decisión explícita de la Autoridad; su ejecución respeta la capa conceptual congelada y los pilares de soberanía.
 
