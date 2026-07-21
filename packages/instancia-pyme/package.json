@@ -1,0 +1,23 @@
+{
+  "name": "@soec/instancia-pyme",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@soec/contracts": "workspace:*",
+    "@soec/models": "workspace:*",
+    "@soec/ece": "workspace:*",
+    "@soec/operaciones": "workspace:*",
+    "@soec/capacidades": "workspace:*"
+  },
+  "devDependencies": {
+    "@soec/event-store": "workspace:*"
+  }
+}
