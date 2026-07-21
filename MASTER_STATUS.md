@@ -6,6 +6,29 @@
 
 **Modo de trabajo Fase 1:** avanzar en el mayor bloque seguro; no pedir validación cuando haya evidencia objetiva (compilar, probar, verificar conformidad #15); la implementación no modifica la arquitectura; toda decisión técnica deriva de la Biblioteca, declara su nivel A/B/C y mantiene trazabilidad. Detenerse solo por: (1) modificar la Biblioteca · (2) contradicción estructural · (3) decisión estratégica de negocio · (4) alternativas equivalentes de alto impacto · (5) riesgo a datos/producción · (6) acción externa no automatizable (credenciales, pagos, licencias…).
 
+## ✅ BLOQUE F1-MOD-01 (Núcleo de Modelos MED y MDM) — CERRADO Y VERIFICADO (2026-07-20)
+
+Vertical de dominio ejecutable sobre la Base Técnica, realizando #9/#10/#11 sin redefinirlos.
+
+| Exigencia de cierre (§18) | Estado |
+|---|---|
+| MED y MDM como verticales ejecutables | ✅ paquete `@soec/models` (`MedService`, `MdmService`) |
+| Separación MED ╪ MDM conservada | ✅ streams y tablas separados; guarda `ModelSeparationError`; probado |
+| Afirmaciones y evidencias de primera clase | ✅ estados pendiente/respaldada/cuestionada/superada; evidencia con procedencia, sin elevación automática |
+| Persistencia PostgreSQL real | ✅ 7 pruebas contra `soec_postgres` |
+| Consultas actuales e históricas | ✅ `estadoActual` / `estadoHistorico` (reconstrucción por `recordedAt`) |
+| Proyecciones reconstruibles | ✅ borrar+reconstruir = incremental; idempotencia por secuencia |
+| Worker procesa ambos modelos | ✅ `drenarProyecciones` sobre outbox; idempotente |
+| Migración desde cero | ✅ `{"migrated":["0001_init","0002_model_projections"]}` |
+| ADR y documentación sincronizados | ✅ ADR-0003; MASTER_STATUS + CHANGELOG |
+| Git limpio · sin datos reales · sin mezcla · sin ECE anticipado | ✅ |
+
+**Resultados exactos (2026-07-20):** `pnpm -r typecheck` 7/7 OK · `pnpm lint` limpio · `pnpm test` **80 passed (15 files)** — de ellos nuevos: models pg 7 (Postgres real) · med-vertical 9 · mdm-vertical 4 · evidence 4 · aggregate 4 · projection 5 · separation 3 · link 3 · architecture 4 · api modelos 6. Suite verde también desde base recién creada.
+
+**Puertos para el ECE (#12):** servicios y proyecciones de MED y MDM quedan como frontera estable; el bloque **no** integra comprensión. El siguiente bloque del grafo (#17) es el ECE, y **no** se inició aquí.
+
+**Deuda técnica / límites declarados:** el worker de proyecciones es un drenaje de una pasada (sin loop/daemon ni checkpoints persistidos por evento — la idempotencia es por secuencia en la propia proyección) · la API de modelos es técnica mínima (no pública) y valida forma en el borde de dominio, no con esquemas Zod · reconstrucción de proyecciones re-lee la tabla de eventos (operación de sistema).
+
 ## ✅ BLOQUE F1-BT-01 (Base Técnica Ejecutable) — CERRADO Y VERIFICADO (2026-07-20)
 
 **Custodia versionada — repo Git activo.** Rama `main`; commit basal `cdfa754` (Fundación 19/19 + ADR). `.gitignore` y `.gitattributes` (LF) en su sitio. Árbol limpio tras el cierre.
