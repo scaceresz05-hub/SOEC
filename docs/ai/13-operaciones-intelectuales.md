@@ -67,7 +67,7 @@ Una realización de las operaciones intelectuales que viole cualquiera de estos 
 4. **Declara incertidumbre y puede abstenerse.** La ignorancia y la incertidumbre son resultados legítimos, no fallos.
 5. **Explicable.** Todo producto puede seguirse hasta la comprensión y las representaciones que lo originaron.
 6. **Anti-atrofia.** Las operaciones amplían la capacidad de comprender de las personas; no crean dependencia ni la sustituyen.
-7. **No cierra el ciclo.** Las operaciones orientan; la persona decide y actúa; eso reingresa como eventos.
+7. **No cierra el ciclo estratégico** *(v1.7)*. Las **operaciones intelectuales** orientan y entregan productos no vinculantes; no deciden ni ejecutan. La decisión estratégica es humana. La **ejecución de acciones operativas** autorizadas por política vive en las capacidades operacionales (#14 §6), fuera de este documento: las operaciones intelectuales siguen sin cerrar el lazo por sí mismas.
 8. **Independientes del sustrato.** Las operaciones son las mismas cualquiera sea la tecnología que las realice.
 9. **Extensibles.** Nuevas operaciones se incorporan sin romper las existentes.
 

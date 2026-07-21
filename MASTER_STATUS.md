@@ -6,6 +6,16 @@
 
 **Modo de trabajo Fase 1:** avanzar en el mayor bloque seguro; no pedir validación cuando haya evidencia objetiva (compilar, probar, verificar conformidad #15); la implementación no modifica la arquitectura; toda decisión técnica deriva de la Biblioteca, declara su nivel A/B/C y mantiene trazabilidad. Detenerse solo por: (1) modificar la Biblioteca · (2) contradicción estructural · (3) decisión estratégica de negocio · (4) alternativas equivalentes de alto impacto · (5) riesgo a datos/producción · (6) acción externa no automatizable (credenciales, pagos, licencias…).
 
+## 🔨 BLOQUE F2-AUT-01 (Departamento de Marketing Autónomo · Realineamiento + primera vertical) — EN CURSO (2026-07-21)
+
+**Reorientación estratégica** (Directiva Maestra): SOEC pasa de comprender/orientar a **ejecutar** trabajo operativo de marketing bajo **políticas humanas vigentes**. La medida de éxito es cuánto trabajo real de marketing asume de forma segura, trazable y autónoma. Registro: `docs/decisions/reorientacion-departamento-marketing-autonomo.md`.
+
+**Realineamiento constitucional — HECHO y registrado:** enmienda **Constitución v1.7** (Art. 2.1 y 2.4) por el circuito #8→#6→#7→#5, con la Directiva como aprobación del Propietario (Art. 8.3.c). Distingue **decisión estratégica reservada** (humana) de **acción operativa autorizada por política** (delegable). **Soberanía transformada**, **propósito raíz 2.2 intacto** (Prueba de Propósito, Art. 8.2). Invariantes acotados: #9 inv. 9, #13 inv. 7, #14 §6 (dos clases de capacidad). Deliberación + ADR-0009.
+
+**Guardarraíles inseparables:** ninguna acción operativa sin política válida; ningún efecto externo **real** sin autorización explícita (causal de parada); en este bloque **solo adaptadores simulados/sandbox**.
+
+**Pendiente en el bloque:** primera vertical técnica (Política vigente → Plan operativo → Acción simulada → Verificación → Registro/auditoría) con persistencia real, idempotencia, autorización permitir/denegar, pausa/revocación, PostgreSQL real y pruebas. Al cerrar se actualizará este estado a CERRADO.
+
 ## ✅ BLOQUE F1-UI-01 (Primera Interfaz · «Comprender el estado de mi empresa») — CERRADO Y VERIFICADO (2026-07-21)
 
 Primera experiencia de usuario completa consumiendo una capacidad real. Realiza la prioridad estratégica registrada (`docs/decisions/prioridad-primera-interfaz.md`). Interfaz = realización #16 (Nivel C); no introduce arquitectura de dominio.

@@ -6,7 +6,7 @@
 >
 > **Lo que este documento NO gobierna:** la ubicación de las capacidades en el mapa (→ #9), las operaciones intelectuales que componen (→ #13), el ECE y los modelos (→ #10, #11, #12), y **toda la implementación** —interfaces, agentes, APIs, flujos de ejecución, pantallas, tecnologías— (→ #16). El **juicio y la decisión** son humanos (Const. 2.4).
 
-- **Versión:** 1.0 · **Fecha:** 2026-07-19 · **Estado:** 🔵 En revisión.
+- **Versión:** 1.1 · **Fecha:** 2026-07-21 · **Estado:** 🔵 En revisión. *(v1.1: §6 y ajuste del invariante 3 — dos clases de capacidad, intelectual y operacional; enmienda v1.7 por el circuito #8→#6→#7→#5. Ver Const. 2.1/2.4 v1.7 y ADR-0009.)*
 
 ---
 
@@ -65,12 +65,27 @@ Una realización de las capacidades que viole cualquiera de estos no pertenece a
 
 1. **Composición, no operación.** Toda capacidad compone operaciones del #13; ninguna es una operación elemental ni inventa operaciones nuevas.
 2. **Propósito humano declarado.** Una capacidad sin un propósito humano identificable no es una capacidad.
-3. **Entrega al juicio, no decisión.** Toda capacidad termina entregando un producto a una persona; ninguna decide, prioriza como acto vinculante ni sustituye el juicio (soberanía).
+3. **Entrega al juicio, no decisión estratégica** *(v1.7)*. Ninguna capacidad decide la **estrategia** por la persona ni sustituye su juicio. Las **capacidades intelectuales** terminan entregando un producto no vinculante a una persona. Las **capacidades operacionales** (§6) ejecutan únicamente **acciones operativas previamente autorizadas por una política humana vigente**, dentro de sus límites, de forma trazable, reversible donde sea posible, supervisada y revocable; su cierre operativo puede ocurrir dentro del sistema sin que ello sustituya la decisión estratégica humana (Const. 2.4, v1.7).
 4. **Hereda el alcance.** Una capacidad no produce resultados con más autoridad, certeza o alcance que las operaciones y representaciones que la componen.
 5. **Explicable.** Todo producto de una capacidad puede seguirse hasta las operaciones, la comprensión y las representaciones que lo originaron.
 6. **Anti-atrofia.** Las capacidades amplían lo que las personas pueden comprender y hacer por sí mismas; no crean dependencia. Una capacidad que, al retirarse, dejara a la organización más incapaz que antes, contradice este sistema.
 7. **Conceptual, no técnica.** Una capacidad se define por su propósito, sus operaciones y su producto; nunca por su tecnología, su interfaz ni su forma de presentación.
 8. **Extensible.** Nuevas capacidades se incorporan sin romper las existentes; cada organización instancia las que necesita.
+
+## 6. Dos clases de capacidad *(enmienda v1.7 — ejecución operativa autorizada por política)*
+
+> Introducida por el circuito #8→#6→#7→#5 bajo la Directiva Maestra (2026-07-21) y la enmienda constitucional v1.7. No crea motores paralelos: ambas clases comparten anatomía (propósito humano · composición · producto · límite) y se distinguen por lo que producen.
+
+- **Capacidades intelectuales** — componen operaciones intelectuales (#13) y producen **conocimiento** (comprensión, evidencia, hipótesis, alternativas). Su producto es **no vinculante** y se ofrece al juicio humano. No ejecutan por sí mismas una acción comercial irreversible. *(Son las del arco original: comprender el estado, detectar, anticipar, orientar…)*
+- **Capacidades operacionales** — ejecutan **acciones operativas** previamente autorizadas por una **política humana vigente**. Consumen —por contratos públicos— productos intelectuales trazables, políticas, autorizaciones y evidencia; **no** son un núcleo intelectual paralelo. Ninguna se ejecuta sin política válida ni fuera de sus límites de presupuesto y riesgo; toda ejecución es trazable, verificable, reversible donde sea posible, supervisada y revocable.
+
+Relación obligatoria (no invertible):
+
+```text
+Capacidades intelectuales → Producto intelectual trazable → Política y autorización → Plan operativo → Capacidades operacionales → Efectos registrados
+```
+
+**Invariantes propios de la capacidad operacional** (además de los internos aplicables): (a) **No hay acción sin política vigente que la autorice**; (b) **la autorización es evaluable y auditable** (permitir/denegar con motivo); (c) **idempotencia y reversibilidad donde sea posible**; (d) **soberanía transformada**: la persona conserva estrategia, presupuesto, prohibiciones, alto riesgo, supervisión, intervención y suspensión total; (e) **ningún efecto externo real sin autorización explícita**; (f) **anti-atrofia e interpretabilidad**: la persona debe poder comprender qué se hizo y por qué.
 
 ---
 
