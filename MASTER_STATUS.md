@@ -6,6 +6,29 @@
 
 **Modo de trabajo Fase 1:** avanzar en el mayor bloque seguro; no pedir validación cuando haya evidencia objetiva (compilar, probar, verificar conformidad #15); la implementación no modifica la arquitectura; toda decisión técnica deriva de la Biblioteca, declara su nivel A/B/C y mantiene trazabilidad. Detenerse solo por: (1) modificar la Biblioteca · (2) contradicción estructural · (3) decisión estratégica de negocio · (4) alternativas equivalentes de alto impacto · (5) riesgo a datos/producción · (6) acción externa no automatizable (credenciales, pagos, licencias…).
 
+## ✅ BLOQUE F1-UI-01 (Primera Interfaz · «Comprender el estado de mi empresa») — CERRADO Y VERIFICADO (2026-07-21)
+
+Primera experiencia de usuario completa consumiendo una capacidad real. Realiza la prioridad estratégica registrada (`docs/decisions/prioridad-primera-interfaz.md`). Interfaz = realización #16 (Nivel C); no introduce arquitectura de dominio.
+
+| Criterio de cierre (orden F1-UI-01) | Estado |
+|---|---|
+| `apps/web` con Next.js; capacidad iniciable desde la interfaz; resultado consultable | ✅ Next 15 App Router; `next build` ✓ |
+| detectar y esclarecer diferenciados; evidencia/procedencia/incertidumbre/limitaciones/faltante visibles | ✅ verificado en la app viva |
+| contradicciones abiertas no ocultas; abstención con experiencia propia; decisión reservada inequívoca | ✅ |
+| historial; refrescar no pierde la ejecución; sin efectos externos; sin acceso directo a ECE/MED/MDM | ✅ prueba arquitectónica de contrato |
+| validación visual real (no solo tests de función) | ✅ app conducida en vivo sobre la cadena real en PostgreSQL |
+| next build · typecheck · lint · pruebas de componentes e integración verdes; Git limpio; docs sincronizados | ✅ |
+
+**Organización por preguntas humanas** (no por arquitectura): 1) ¿Qué ocurre? 2) ¿Qué señales? 3) ¿En qué se basa? 4) ¿Qué no se sabe / es contradictorio? 5) ¿Qué revisar/decidir? La arquitectura aparece por **trazabilidad progresiva** bajo expansión. **Sin botones de acción**: SOEC presenta; la persona decide.
+
+**Arquitectura:** la web consume **solo la API pública de capacidades** (route handlers proxy server-side, misma-origin); no importa paquetes de dominio, no accede a PostgreSQL, no reconstruye productos ni aplica reglas. Capa de experiencia en `apps/api` (`/experiencia/comprender-estado/*`) ejecuta la **cadena real** (Capacidad → Operaciones → ECE → MED+MDM sintéticos persistidos), contexto sintético server-side.
+
+**Resultados exactos (2026-07-21):** `pnpm -r typecheck` OK (incl. web) · `pnpm lint` limpio · backend `pnpm test` **239 passed (46 files)** (incl. 4 de integración de experiencia con la cadena real) · web `pnpm -C apps/web test` **6 passed** · `next build` ✓. Validación visual: estados sin-análisis / completado-con-limitaciones / contradicción abierta / faltante / detalle evidencia+procedencia+mecanismo+corte / historial / detalle persistido / **error recuperable + reintento idempotente** — todos conducidos en vivo.
+
+**Límites de verificación declarados (honestidad de estado):** las **capturas raster** excedieron el timeout del entorno (30s); la validación visual se hizo **conduciendo la app viva** (clicks + árbol de accesibilidad) — artefactos verificables, no PNG. La **abstención total** no se dispara en el dominio sintético (el paso obligatorio `detectar` no se abstiene); su experiencia se valida por prueba de componente.
+
+**Siguiente nodo:** efectos externos, conectores, autenticación y otras capacidades (Anticipar/Orientar/Preservar) o dominios quedan como **nueva instanciación estratégica** reservada a la Autoridad (#17 §5), preservando la frontera Producto → Decisión humana → Acción.
+
 ## ✅ BLOQUE F1-RM-01 (Resolución del Roadmap · Primer Dominio Real) — CERRADO Y VERIFICADO (2026-07-21)
 
 Resolución del grafo del Documento #17: cerradas las fases 1–5 a nivel de marco, el siguiente nodo (Fase 2 «para un primer dominio» / Fase 6 Extensión) estaba **reservado a la Autoridad Estratégica** (#17 §5). Elevada la bifurcación; la Autoridad decidió y el nodo se ejecutó.
