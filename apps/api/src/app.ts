@@ -13,6 +13,15 @@ import {
   ScopeMismatchError,
   ScopeRequiredError,
 } from '@soec/contracts';
+import {
+  ComandoInvalidoError,
+  ModelAlreadyExistsError,
+  ModelNotFoundError,
+  ModelSeparationError,
+  ReferenteInexistenteError,
+  TransicionInvalidaError,
+} from '@soec/models';
+import { registerModelRoutes } from './model-routes';
 
 export interface AppDeps {
   store: EventStore;
@@ -60,14 +69,31 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (err instanceof AttributionRequiredError) {
       return reply.code(422).send({ error: err.name, message: err.message });
     }
-    if (err instanceof ConcurrencyError) {
+    if (
+      err instanceof ConcurrencyError ||
+      err instanceof ModelAlreadyExistsError ||
+      err instanceof ModelSeparationError
+    ) {
       return reply.code(409).send({ error: err.name, message: err.message });
+    }
+    if (err instanceof ModelNotFoundError) {
+      return reply.code(404).send({ error: err.name, message: err.message });
+    }
+    if (
+      err instanceof ReferenteInexistenteError ||
+      err instanceof TransicionInvalidaError ||
+      err instanceof ComandoInvalidoError
+    ) {
+      return reply.code(422).send({ error: err.name, message: err.message });
     }
     // Errores no clasificados → 500 sin filtrar secretos.
     return reply.code(500).send({ error: 'InternalError' });
   });
 
   app.get('/health', async () => ({ status: 'ok' }));
+
+  // Verticales de dominio MED y MDM (§12).
+  registerModelRoutes(app, deps.store);
 
   app.post('/events', async (req, reply) => {
     const ctx = contextFrom(req);

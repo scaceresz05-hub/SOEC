@@ -12,6 +12,7 @@
     "@soec/contracts": "workspace:*",
     "@soec/event-store": "workspace:*",
     "@soec/intelligence": "workspace:*",
+    "@soec/models": "workspace:*",
     "fastify": "^5.2.0"
   }
 }
