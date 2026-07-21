@@ -11,6 +11,10 @@ build/
 out/
 *.tsbuildinfo
 
+# Next.js (artefactos generados)
+.next/
+next-env.d.ts
+
 # Entorno y secretos (nunca versionar)
 .env
 .env.*
