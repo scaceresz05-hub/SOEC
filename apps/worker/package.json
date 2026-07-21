@@ -10,6 +10,7 @@
   "dependencies": {
     "@soec/contracts": "workspace:*",
     "@soec/event-store": "workspace:*",
-    "@soec/models": "workspace:*"
+    "@soec/models": "workspace:*",
+    "@soec/ece": "workspace:*"
   }
 }

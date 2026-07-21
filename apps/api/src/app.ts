@@ -21,7 +21,9 @@ import {
   ReferenteInexistenteError,
   TransicionInvalidaError,
 } from '@soec/models';
+import { ComandoEceInvalidoError, EceNotFoundError, ElementoInexistenteError } from '@soec/ece';
 import { registerModelRoutes } from './model-routes';
+import { registerEceRoutes } from './ece-routes';
 
 export interface AppDeps {
   store: EventStore;
@@ -76,13 +78,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     ) {
       return reply.code(409).send({ error: err.name, message: err.message });
     }
-    if (err instanceof ModelNotFoundError) {
+    if (err instanceof ModelNotFoundError || err instanceof EceNotFoundError) {
       return reply.code(404).send({ error: err.name, message: err.message });
     }
     if (
       err instanceof ReferenteInexistenteError ||
       err instanceof TransicionInvalidaError ||
-      err instanceof ComandoInvalidoError
+      err instanceof ComandoInvalidoError ||
+      err instanceof ElementoInexistenteError ||
+      err instanceof ComandoEceInvalidoError
     ) {
       return reply.code(422).send({ error: err.name, message: err.message });
     }
@@ -92,8 +96,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   app.get('/health', async () => ({ status: 'ok' }));
 
-  // Verticales de dominio MED y MDM (§12).
+  // Verticales de dominio MED y MDM (§12) y Estado Cognitivo Empresarial.
   registerModelRoutes(app, deps.store);
+  registerEceRoutes(app, deps.store);
 
   app.post('/events', async (req, reply) => {
     const ctx = contextFrom(req);

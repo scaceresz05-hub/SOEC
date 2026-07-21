@@ -13,6 +13,7 @@
     "@soec/event-store": "workspace:*",
     "@soec/intelligence": "workspace:*",
     "@soec/models": "workspace:*",
+    "@soec/ece": "workspace:*",
     "fastify": "^5.2.0"
   }
 }
