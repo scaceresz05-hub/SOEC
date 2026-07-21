@@ -38,6 +38,9 @@ importers:
       '@soec/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@soec/ece':
+        specifier: workspace:*
+        version: link:../../packages/ece
       '@soec/event-store':
         specifier: workspace:*
         version: link:../../packages/event-store
@@ -56,6 +59,9 @@ importers:
       '@soec/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@soec/ece':
+        specifier: workspace:*
+        version: link:../../packages/ece
       '@soec/event-store':
         specifier: workspace:*
         version: link:../../packages/event-store
@@ -64,6 +70,25 @@ importers:
         version: link:../../packages/models
 
   packages/contracts: {}
+
+  packages/ece:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      '@soec/models':
+        specifier: workspace:*
+        version: link:../models
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
 
   packages/event-store:
     dependencies:
