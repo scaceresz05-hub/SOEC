@@ -16,6 +16,7 @@
     "@soec/ece": "workspace:*",
     "@soec/operaciones": "workspace:*",
     "@soec/capacidades": "workspace:*",
+    "@soec/instancia-pyme": "workspace:*",
     "fastify": "^5.2.0"
   }
 }

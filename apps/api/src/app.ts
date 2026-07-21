@@ -39,6 +39,7 @@ import { registerModelRoutes } from './model-routes';
 import { registerEceRoutes } from './ece-routes';
 import { registerOperationsRoutes } from './operations-routes';
 import { registerCapabilityRoutes } from './capabilities-routes';
+import { registerExperienceRoutes } from './experience-routes';
 
 export interface AppDeps {
   store: EventStore;
@@ -128,6 +129,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerEceRoutes(app, deps.store);
   registerOperationsRoutes(app, deps.store);
   registerCapabilityRoutes(app, deps.store);
+  registerExperienceRoutes(app, deps.store);
 
   app.post('/events', async (req, reply) => {
     const ctx = contextFrom(req);
