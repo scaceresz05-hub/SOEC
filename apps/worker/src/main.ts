@@ -7,6 +7,8 @@ import { proyectarEventoOi } from '@soec/operaciones';
 import { PgOiProjectionStore } from '@soec/operaciones/pg';
 import { aplicarEventoAProyeccionCap } from '@soec/capacidades';
 import { PgCapDefProjectionStore, PgCapExecProjectionStore } from '@soec/capacidades/pg';
+import { aplicarEventoAProyeccionOperacional } from '@soec/operacional';
+import { PgPolicyProjectionStore, PgAccionProjectionStore } from '@soec/operacional/pg';
 import { drainOutbox } from './index';
 
 /**
@@ -22,6 +24,7 @@ const modelProj = new PgProjectionStore(pool);
 const eceProj = new PgEceProjectionStore(pool);
 const oiProj = new PgOiProjectionStore(pool);
 const capStores = { def: new PgCapDefProjectionStore(pool), exec: new PgCapExecProjectionStore(pool) };
+const opStores = { policy: new PgPolicyProjectionStore(pool), accion: new PgAccionProjectionStore(pool) };
 const build = new EceBuildService(store, new MedService(store), new MdmService(store));
 
 drainOutbox(outbox, async (event) => {
@@ -29,6 +32,7 @@ drainOutbox(outbox, async (event) => {
   await procesarEventoParaEce(event, { eceProjStore: eceProj, build });
   await proyectarEventoOi(oiProj, event);
   await aplicarEventoAProyeccionCap(capStores, event);
+  await aplicarEventoAProyeccionOperacional(opStores, event);
 })
   .then(async (n) => {
     console.log(JSON.stringify({ procesados: n }));

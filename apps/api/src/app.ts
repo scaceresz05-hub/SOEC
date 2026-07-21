@@ -35,11 +35,19 @@ import {
   OperacionDesconocidaError,
   VersionNoDisponibleError,
 } from '@soec/capacidades';
+import {
+  AccionNoEncontradaError,
+  AdaptadorNoDisponibleError,
+  PoliticaNoEncontradaError,
+  SinPoliticaVigenteError,
+  SolicitudOperativaInvalidaError,
+} from '@soec/operacional';
 import { registerModelRoutes } from './model-routes';
 import { registerEceRoutes } from './ece-routes';
 import { registerOperationsRoutes } from './operations-routes';
 import { registerCapabilityRoutes } from './capabilities-routes';
 import { registerExperienceRoutes } from './experience-routes';
+import { registerOperationalRoutes } from './operational-routes';
 
 export interface AppDeps {
   store: EventStore;
@@ -100,9 +108,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       err instanceof EceNotFoundError ||
       err instanceof EjecucionNoEncontradaError ||
       err instanceof DefinicionNoEncontradaError ||
-      err instanceof EjecucionCapacidadNoEncontradaError
+      err instanceof EjecucionCapacidadNoEncontradaError ||
+      err instanceof AccionNoEncontradaError ||
+      err instanceof PoliticaNoEncontradaError
     ) {
       return reply.code(404).send({ error: err.name, message: err.message });
+    }
+    if (
+      err instanceof SinPoliticaVigenteError ||
+      err instanceof SolicitudOperativaInvalidaError ||
+      err instanceof AdaptadorNoDisponibleError
+    ) {
+      return reply.code(422).send({ error: err.name, message: err.message });
     }
     if (
       err instanceof ReferenteInexistenteError ||
@@ -130,6 +147,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerOperationsRoutes(app, deps.store);
   registerCapabilityRoutes(app, deps.store);
   registerExperienceRoutes(app, deps.store);
+  registerOperationalRoutes(app, deps.store);
 
   app.post('/events', async (req, reply) => {
     const ctx = contextFrom(req);

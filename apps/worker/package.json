@@ -13,6 +13,7 @@
     "@soec/models": "workspace:*",
     "@soec/ece": "workspace:*",
     "@soec/operaciones": "workspace:*",
-    "@soec/capacidades": "workspace:*"
+    "@soec/capacidades": "workspace:*",
+    "@soec/operacional": "workspace:*"
   }
 }

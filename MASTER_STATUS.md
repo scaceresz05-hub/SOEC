@@ -6,7 +6,7 @@
 
 **Modo de trabajo Fase 1:** avanzar en el mayor bloque seguro; no pedir validación cuando haya evidencia objetiva (compilar, probar, verificar conformidad #15); la implementación no modifica la arquitectura; toda decisión técnica deriva de la Biblioteca, declara su nivel A/B/C y mantiene trazabilidad. Detenerse solo por: (1) modificar la Biblioteca · (2) contradicción estructural · (3) decisión estratégica de negocio · (4) alternativas equivalentes de alto impacto · (5) riesgo a datos/producción · (6) acción externa no automatizable (credenciales, pagos, licencias…).
 
-## 🔨 BLOQUE F2-AUT-01 (Departamento de Marketing Autónomo · Realineamiento + primera vertical) — EN CURSO (2026-07-21)
+## ✅ BLOQUE F2-AUT-01 (Departamento de Marketing Autónomo · Realineamiento + primera vertical) — CERRADO Y VERIFICADO (2026-07-21)
 
 **Reorientación estratégica** (Directiva Maestra): SOEC pasa de comprender/orientar a **ejecutar** trabajo operativo de marketing bajo **políticas humanas vigentes**. La medida de éxito es cuánto trabajo real de marketing asume de forma segura, trazable y autónoma. Registro: `docs/decisions/reorientacion-departamento-marketing-autonomo.md`.
 
@@ -14,7 +14,15 @@
 
 **Guardarraíles inseparables:** ninguna acción operativa sin política válida; ningún efecto externo **real** sin autorización explícita (causal de parada); en este bloque **solo adaptadores simulados/sandbox**.
 
-**Pendiente en el bloque:** primera vertical técnica (Política vigente → Plan operativo → Acción simulada → Verificación → Registro/auditoría) con persistencia real, idempotencia, autorización permitir/denegar, pausa/revocación, PostgreSQL real y pruebas. Al cerrar se actualizará este estado a CERRADO.
+**Primera vertical técnica — HECHA y verificada:** paquete `@soec/operacional` (event-sourced sobre la Base Técnica). **Política vigente → Autorización (permitir/denegar con motivo) → Ejecución por adaptador SIMULADO → Verificación → Registro/auditoría.** Ninguna acción sin política válida; ningún efecto externo real (`Efecto.simulado === true`). Políticas versionadas (registrar/publicar/suspender/reanudar/revocar); niveles de autonomía 0–5 y clases de riesgo; presupuesto acumulado; idempotencia por identidad de ejecución; reversibilidad simulada; aislamiento organizacional; proyecciones reconstruibles; worker de drenaje único extendido; API técnica mínima (`/operativo/*`) sin endpoint para «ejecutar en real» ni para saltar la autorización.
+
+**Resultados exactos (2026-07-21):** `pnpm -r typecheck` OK (12 workspaces) · `pnpm lint` limpio · backend `pnpm test` **272 passed (51 files)** — nuevos operacional: autorización 10 · vertical 8 · arquitectura 4 · pg 7 (Postgres real) · api 4. Migración desde cero: `0001…0006`. Suite verde también desde base nueva.
+
+**Guardarraíles verificados:** sin política → denegada sin efecto; canal/tipo/afirmación/aprobación/nivel/presupuesto → denegada con motivo; suspensión de política → detención (interruptor de pausa); reversión; idempotencia; efecto siempre simulado. Prueba arquitectónica: el dominio no importa paquetes intelectuales ni SDK; sin adaptadores de efecto real.
+
+**Siguiente nodo habilitado:** bloques B–I de la Directiva (núcleo de autonomía → modelo operativo → planificador → fábrica de contenido → adaptador de publicación controlada → medición → centro de control → piloto), cada uno vertical. Efectos externos **reales** siguen siendo causal de parada hasta autorización explícita.
+
+**Deuda técnica / límites:** efectos exclusivamente **simulados** (por decisión y guardarraíl); «plan operativo» explícito y modelo operativo rico (marca/campaña/contenido/lead…) se desarrollan en los bloques C–D; presupuesto diario declarado pero aún no acotado por ventana temporal (se refina con la medición, bloque G).
 
 ## ✅ BLOQUE F1-UI-01 (Primera Interfaz · «Comprender el estado de mi empresa») — CERRADO Y VERIFICADO (2026-07-21)
 
