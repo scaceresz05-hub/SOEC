@@ -6,6 +6,28 @@
 
 **Modo de trabajo Fase 1:** avanzar en el mayor bloque seguro; no pedir validación cuando haya evidencia objetiva (compilar, probar, verificar conformidad #15); la implementación no modifica la arquitectura; toda decisión técnica deriva de la Biblioteca, declara su nivel A/B/C y mantiene trazabilidad. Detenerse solo por: (1) modificar la Biblioteca · (2) contradicción estructural · (3) decisión estratégica de negocio · (4) alternativas equivalentes de alto impacto · (5) riesgo a datos/producción · (6) acción externa no automatizable (credenciales, pagos, licencias…).
 
+## ✅ BLOQUE F1-RM-01 (Resolución del Roadmap · Primer Dominio Real) — CERRADO Y VERIFICADO (2026-07-21)
+
+Resolución del grafo del Documento #17: cerradas las fases 1–5 a nivel de marco, el siguiente nodo (Fase 2 «para un primer dominio» / Fase 6 Extensión) estaba **reservado a la Autoridad Estratégica** (#17 §5). Elevada la bifurcación; la Autoridad decidió y el nodo se ejecutó.
+
+**Decisión estratégica registrada** (`docs/decisions/instanciacion-estrategica-primer-dominio.md`): dominio inicial = **pyme de servicios** · primera capacidad = **«Comprender el estado»** (esclarecer + detectar) · datos = **solo sintéticos**.
+
+| Exigencia (orden §8, §14 A) | Estado |
+|---|---|
+| Primer dominio real instanciado sobre el sistema existente (sin arquitectura ni migraciones nuevas) | ✅ `@soec/instancia-pyme`; migración desde cero = solo `0001`…`0005` |
+| Capacidad real registrada (definición versionada, no fixture) que compone operaciones existentes | ✅ «Comprender el estado» (detectar + esclarecer) registrada y publicada |
+| Producto compuesto no vinculante · soberanía · sin efectos · trazabilidad | ✅ `bindingDecision:false`; MED/MDM/ECE intactos tras ejecutar |
+| Distingue definición / ejecución / producto · respeta la capa cerrada | ✅ vía registro + orquestador existentes |
+| PostgreSQL real · aislamiento · worker · sin datos reales/credenciales | ✅ 4 pruebas PG; prueba arquitectónica |
+
+**Resultado del Roadmap:** *Resultado A (transición inequívoca)* tras resolver la bifurcación estratégica reservada. **Resultados exactos (2026-07-21):** `pnpm -r typecheck` 11/11 OK · `pnpm lint` limpio · `pnpm test` **235 passed (45 files)** — nuevos: instanciación 5 · pg 4 (Postgres real) · arquitectura 3. Verde también desde base recién creada.
+
+**Vertical de dominio real end-to-end:** MED (`pyme-servicios-01`) + MDM (`mundo-pyme-01`) → ECE (`ece-pyme-01`, con coherencia + contradicción + ausencia) → capacidad «Comprender el estado» → producto compuesto que hace visible el estado, conserva la contradicción abierta y los faltantes, y remite al juicio humano.
+
+**Siguiente nodo habilitado (Fase 6+ Extensión, #17):** nuevas capacidades (Anticipar / Orientar / Preservar-y-transmitir) o un nuevo dominio — cada uno es **nueva instanciación estratégica** reservada a la Autoridad (#17 §5); interfaces/conectores/efectos siguen requiriendo autorización explícita y frontera de soberanía (orden §9–§11).
+
+**Deuda técnica / límites:** los datos son sintéticos (sin conectores ni interfaz, por decisión); una sola capacidad instanciada; la interfaz consumidora de capacidades (#16) y otras familias quedan como instanciaciones futuras.
+
 ## ✅ BLOQUE F1-CAP-01 (Sistema de Capacidades Ejecutable) — CERRADO Y VERIFICADO (2026-07-21)
 
 Composiciones de operaciones intelectuales orientadas a un propósito humano, realizando #14 y **cerrando el arco conceptual ejecutable ECE → Operaciones → Capacidades → Persona**.
