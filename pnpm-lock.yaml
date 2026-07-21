@@ -53,6 +53,9 @@ importers:
       '@soec/intelligence':
         specifier: workspace:*
         version: link:../../packages/intelligence
+      '@soec/marketing':
+        specifier: workspace:*
+        version: link:../../packages/marketing
       '@soec/models':
         specifier: workspace:*
         version: link:../../packages/models
@@ -111,6 +114,9 @@ importers:
       '@soec/event-store':
         specifier: workspace:*
         version: link:../../packages/event-store
+      '@soec/marketing':
+        specifier: workspace:*
+        version: link:../../packages/marketing
       '@soec/models':
         specifier: workspace:*
         version: link:../../packages/models
@@ -207,6 +213,28 @@ importers:
       '@soec/contracts':
         specifier: workspace:*
         version: link:../contracts
+
+  packages/marketing:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      '@soec/operacional':
+        specifier: workspace:*
+        version: link:../operacional
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
+    devDependencies:
+      '@soec/capacidades':
+        specifier: workspace:*
+        version: link:../capacidades
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
 
   packages/models:
     dependencies:

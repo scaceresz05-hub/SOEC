@@ -17,6 +17,7 @@
     "@soec/operaciones": "workspace:*",
     "@soec/capacidades": "workspace:*",
     "@soec/operacional": "workspace:*",
+    "@soec/marketing": "workspace:*",
     "@soec/instancia-pyme": "workspace:*",
     "fastify": "^5.2.0"
   }
