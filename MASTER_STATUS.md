@@ -6,6 +6,29 @@
 
 **Modo de trabajo Fase 1:** avanzar en el mayor bloque seguro; no pedir validación cuando haya evidencia objetiva (compilar, probar, verificar conformidad #15); la implementación no modifica la arquitectura; toda decisión técnica deriva de la Biblioteca, declara su nivel A/B/C y mantiene trazabilidad. Detenerse solo por: (1) modificar la Biblioteca · (2) contradicción estructural · (3) decisión estratégica de negocio · (4) alternativas equivalentes de alto impacto · (5) riesgo a datos/producción · (6) acción externa no automatizable (credenciales, pagos, licencias…).
 
+## ✅ BLOQUE F1-ECE-01 (Estado Cognitivo Empresarial Ejecutable) — CERRADO Y VERIFICADO (2026-07-20)
+
+Representación derivada, persistente, histórica y verificable que integra MED y MDM, realizando #12 sin redefinirlo y sin implementar operaciones intelectuales (#13).
+
+| Exigencia de cierre (§26) | Estado |
+|---|---|
+| ECE como representación ejecutable derivada de MED y MDM | ✅ paquete `@soec/ece` (`EceBuildService`, `EceQueryService`) |
+| No fusiona MED y MDM · no inventa información · no resuelve contradicciones | ✅ streams/tablas separados; derivación estructural; contradicciones y ausencias de primera clase |
+| Conserva ausencias · permite reconstrucción histórica | ✅ ausencias→no evaluable; `estadoEnFecha` sin retroyección |
+| Persistencia PostgreSQL real · proyección actual | ✅ `proj_ece_current`; 7 pruebas contra `soec_postgres` |
+| Puede invalidarse y reconstruirse | ✅ `vigencia` on-demand + worker con causación; `reconstruir` conserva historia |
+| API técnica · worker · puerto de lectura para #13 | ✅ rutas ECE; drenaje único MED+MDM+ECE; `EceReadPort` |
+| Suite completa verde · migración desde cero | ✅ `{"migrated":["0001_init","0002_model_projections","0003_ece_projection"]}` |
+| Sin operaciones intelectuales · sin capacidades · sin IA real | ✅ pruebas arquitectónicas lo garantizan |
+
+**Resultados exactos (2026-07-20):** `pnpm -r typecheck` 8/8 OK · `pnpm lint` limpio · `pnpm test` **119 passed (23 files)** — nuevos ECE: derive 4 · build 6 · scenarios 6 (A–F) · temporal 4 · projection 3 · architecture 4 · pg 7 (Postgres real) · api 5. Verde también desde base recién creada.
+
+**Escenarios sintéticos (§22):** A coherencia · B contradicción MED↔MDM registrada sin decidir · C ausencia no evaluable · D dependencia insatisfecha→satisfecha en versión histórica · E brecha sin acción · F cambio temporal consultable sin contaminación — todos probados.
+
+**Puerto para el #13:** `EceReadPort` (solo lectura) queda como frontera estable; el bloque **no** implementa operaciones intelectuales ni capacidades. El siguiente bloque del grafo (#17) es el **Sistema de Operaciones Intelectuales (#13)**, y **no** se inició aquí.
+
+**Deuda técnica / límites declarados:** las relaciones cross-model (coherencia/contradicción/dependencia/brecha entre MED y MDM) se **registran declaradas** (atribuidas), no se infieren semánticamente (la inferencia sería operación intelectual, #13) · el worker es drenaje de una pasada (invalidación en cascada requiere pasadas sucesivas del outbox) · la derivación intra-modelo cubre coherencia/contradicción/ausencia por afirmación↔evidencia; dimensiones semánticas más ricas pertenecen al #13.
+
 ## ✅ BLOQUE F1-MOD-01 (Núcleo de Modelos MED y MDM) — CERRADO Y VERIFICADO (2026-07-20)
 
 Vertical de dominio ejecutable sobre la Base Técnica, realizando #9/#10/#11 sin redefinirlos.
