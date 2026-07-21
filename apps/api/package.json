@@ -1,0 +1,17 @@
+{
+  "name": "@soec/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@soec/contracts": "workspace:*",
+    "@soec/event-store": "workspace:*",
+    "@soec/intelligence": "workspace:*",
+    "fastify": "^5.2.0"
+  }
+}

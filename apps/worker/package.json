@@ -1,0 +1,14 @@
+{
+  "name": "@soec/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@soec/contracts": "workspace:*",
+    "@soec/event-store": "workspace:*"
+  }
+}
