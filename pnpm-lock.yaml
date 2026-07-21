@@ -56,6 +56,9 @@ importers:
       '@soec/models':
         specifier: workspace:*
         version: link:../../packages/models
+      '@soec/operacional':
+        specifier: workspace:*
+        version: link:../../packages/operacional
       '@soec/operaciones':
         specifier: workspace:*
         version: link:../../packages/operaciones
@@ -111,6 +114,9 @@ importers:
       '@soec/models':
         specifier: workspace:*
         version: link:../../packages/models
+      '@soec/operacional':
+        specifier: workspace:*
+        version: link:../../packages/operacional
       '@soec/operaciones':
         specifier: workspace:*
         version: link:../../packages/operaciones
@@ -214,6 +220,25 @@ importers:
         specifier: ^8.13.1
         version: 8.22.0
     devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+
+  packages/operacional:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
+    devDependencies:
+      '@soec/capacidades':
+        specifier: workspace:*
+        version: link:../capacidades
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0

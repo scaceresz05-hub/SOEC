@@ -1,4 +1,5 @@
-import type { Migration } from '@soec/event-store/pg';
+import { type Migration } from '@soec/event-store/pg';
+import { migracionesHastaOperaciones } from '@soec/operaciones/pg';
 
 /** Proyecciones de capacidades: definiciones y ejecuciones (tablas propias del dominio). */
 export const capMigrations: ReadonlyArray<Migration> = [
@@ -30,3 +31,6 @@ export const capMigrations: ReadonlyArray<Migration> = [
     `,
   },
 ];
+
+/** Conjunto acumulado hasta Capacidades (Base + Modelos + ECE + Operaciones + Capacidades). */
+export const migracionesHastaCapacidades: ReadonlyArray<Migration> = [...migracionesHastaOperaciones, ...capMigrations];
