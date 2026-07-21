@@ -6,6 +6,29 @@
 
 **Modo de trabajo Fase 1:** avanzar en el mayor bloque seguro; no pedir validación cuando haya evidencia objetiva (compilar, probar, verificar conformidad #15); la implementación no modifica la arquitectura; toda decisión técnica deriva de la Biblioteca, declara su nivel A/B/C y mantiene trazabilidad. Detenerse solo por: (1) modificar la Biblioteca · (2) contradicción estructural · (3) decisión estratégica de negocio · (4) alternativas equivalentes de alto impacto · (5) riesgo a datos/producción · (6) acción externa no automatizable (credenciales, pagos, licencias…).
 
+## ✅ BLOQUE F1-OI-01 (Sistema de Operaciones Intelectuales Ejecutable) — CERRADO Y VERIFICADO (2026-07-20)
+
+Las cuatro operaciones que operan sobre el ECE, realizando #13 sin redefinirlo y sin implementar capacidades (#14) ni IA real.
+
+| Exigencia de cierre (§31) | Estado |
+|---|---|
+| Las cuatro operaciones implementadas (esclarecer/detectar/proyectar/orientar) | ✅ `@soec/operaciones` |
+| Consumen el ECE por su frontera (`EceReadPort`), sin tocar MED/MDM/ECE | ✅ prueba arquitectónica; escenario H (no efecto) |
+| Productos persistentes y especializados; conservan evidencia/procedencia/faltante/incertidumbre | ✅ unión discriminada; anatomía común |
+| Pueden abstenerse | ✅ 11 causas clasificadas (conceptuales/técnicas) |
+| No crean decisiones ni ejecutan acciones · independientes de proveedores | ✅ `bindingDecision:false`; sin adaptadores de efecto; guardarraíles |
+| Mecanismo determinístico + prueba de sustituibilidad | ✅ determinístico + IA simulada (escenario G) |
+| PostgreSQL real · migraciones desde cero · proyecciones reconstruibles · API · worker | ✅ `proj_oi_current`; 7 pruebas PG; drenaje único |
+| Suite completa verde · sin capacidades · sin IA real | ✅ 182/182 |
+
+**Resultados exactos (2026-07-20):** `pnpm -r typecheck` 9/9 OK · `pnpm lint` limpio · `pnpm test` **182 passed (34 files)** — nuevos operaciones: service 10 · scenarios A–H 8 · esclarecer 6 · detectar 5 · proyectar 5 · orientar 5 · product 5 · projection 3 · architecture 5 · pg 7 (Postgres real) · api 4. Verde también desde base recién creada.
+
+**Guardarraíles verificados:** soberanía (`bindingDecision:false`; rechazo de productos vinculantes), anti-atrofia (rechazo de conclusiones opacas; todo producto muestra razones/evidencia/faltante y, si orienta, cuestiones reservadas al juicio humano), no-efecto (MED/MDM/ECE intactos), no-retroyección (producto histórico no recalculado).
+
+**Puerto para el #14:** las operaciones quedan como piezas estables y no vinculantes que las **capacidades (#14)** compondrán. El siguiente bloque del grafo (#17) es el **Sistema de Capacidades (#14)**, y **no** se inició aquí.
+
+**Deuda técnica / límites declarados:** el mecanismo determinístico deriva señales estructurales del ECE (afirmación↔evidencia y elementos registrados); razonamiento semántico más rico corresponde a mecanismos futuros tras el mismo puerto · timeout/cancelación se realizan con `Promise.race`/`AbortController` (suficiente para el bloque; sin daemon) · la IA simulada es un adaptador de prueba, no un proveedor real.
+
 ## ✅ BLOQUE F1-ECE-01 (Estado Cognitivo Empresarial Ejecutable) — CERRADO Y VERIFICADO (2026-07-20)
 
 Representación derivada, persistente, histórica y verificable que integra MED y MDM, realizando #12 sin redefinirlo y sin implementar operaciones intelectuales (#13).
