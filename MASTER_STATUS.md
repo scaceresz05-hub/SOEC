@@ -6,11 +6,19 @@
 
 **Modo de trabajo Fase 1:** avanzar en el mayor bloque seguro; no pedir validación cuando haya evidencia objetiva (compilar, probar, verificar conformidad #15); la implementación no modifica la arquitectura; toda decisión técnica deriva de la Biblioteca, declara su nivel A/B/C y mantiene trazabilidad. Detenerse solo por: (1) modificar la Biblioteca · (2) contradicción estructural · (3) decisión estratégica de negocio · (4) alternativas equivalentes de alto impacto · (5) riesgo a datos/producción · (6) acción externa no automatizable (credenciales, pagos, licencias…).
 
-## Trabajo en curso — Fase 1, Base Técnica
+## Trabajo en curso — Fase 1, BLOQUE F1-BT-01 (Base Técnica Ejecutable)
 
-- **ADR-0002** ✅ aceptado — *Contrato de conformidad de la Base Técnica* (Nivel A, tech-neutral): cinco contratos verificables (almacén event-sourced · atribución · historia inmutable · transporte/no-elevación del alcance · frontera de soberanía). Es la vara de aceptación de la fase.
-- **ADR-0001** 🟥 elevado — *Selección de stack tecnológico* (Nivel C): **reservado a la Autoridad Estratégica** (caso de parada #3/#4). Bloquea el código de la Base Técnica; no bloquea la especificación.
-- **Elevación abierta:** la selección de stack requiere insumos estratégicos (equipo/competencias · destino de despliegue · restricciones de datos/soberanía · presupuesto · integraciones). Ver ADR-0001.
+**Custodia versionada — repo Git activo.** Rama `main`; commit basal `cdfa754` (Fundación 19/19 + ADR). `.gitignore` y `.gitattributes` (LF) en su sitio.
+
+| Sub-fase | Estado |
+|---|---|
+| **A — Custodia y versionado** | ✅ **COMPLETA y verificada** — auditoría (árbol limpio, sin `.git` previo, sin contaminación cruzada), git init, commit basal, repo limpio |
+| **B — ADR-0001 (stack)** | ✅ **RESUELTA** — stack autorizado por el Propietario, estratificado A/B/C. Ecosistema TS/Node (B); ORM/Fastify/Next/outbox/IA (C); contratos de persistencia y transporte de contexto (A) |
+| **C–I — Scaffolding, contratos, persistencia, API/worker, IA, calidad** | ⏳ **Siguiente incremento** — construcción pesada; no se declara completa hasta superar ADR-0002 + #15 (pruebas reales, incluidas de Postgres) |
+
+**Toolchain verificado:** git 2.53 · node v24.14.1 · npm 11.11 · docker 29.4 · pnpm 9.15.4 (vía npx; corepack global bloqueado por permisos en `C:\Program Files\nodejs` — workaround documentado) · red OK. `psql` no en PATH → Postgres se levantará vía Docker.
+
+**ADR-0002** ✅ contrato de conformidad (vara de aceptación de la fase). No hay elevaciones abiertas: el stack quedó delegado y resuelto.
 
 ## Entregables de la Fase 0 — COMPLETOS
 

@@ -1,7 +1,29 @@
 # ADR-0001 — Selección de Stack Tecnológico (Nivel C)
 
-- **Estado:** 🟥 **PENDIENTE DE DECISIÓN ESTRATÉGICA.** Reservada a la Autoridad Estratégica/Propietario (caso de parada #3 y #4 de la Directiva de Fase 1; reserva de selección Nivel C del #16 §6). **No se decide por iniciativa de la implementación.**
+- **Estado:** ✅ **ACEPTADO.** El Propietario delegó la selección detallada en la implementación, dentro de los límites de la Orden de Inicio de Fase 1 (2026-07-19), que fijó el ecosistema y las restricciones. La selección concreta es **Nivel C reemplazable**; los contratos que debe satisfacer son **Nivel A** (ADR-0002).
 - **Fecha:** 2026-07-19 · **Fase:** 1 — Base Técnica.
+
+## Stack autorizado y su estratificación A/B/C
+
+**Regla:** el ecosistema y los contratos son estructura; los productos y versiones son reemplazables. Ninguna versión de producto es arquitectura.
+
+| Decisión | Elección | Nivel | Justificación / al cambiar |
+|---|---|---|---|
+| Ecosistema del núcleo | TypeScript estricto · Node.js 24 LTS · ESM | **B** | Continuidad con los productos existentes del Propietario; reduce fragmentación. Cambiarlo obliga a reescribir, pero no altera los contratos Nivel A |
+| Monorepo | pnpm workspaces (Turborepo opcional) | **C** | Gestor reemplazable tras `package.json`/workspace |
+| Backend | Fastify 5, con núcleo de dominio independiente de Fastify | **C** | El dominio no depende del framework; sustituible |
+| Frontend | Next.js (App Router) + React | **C** | Interfaz reemplazable; sin reglas de dominio |
+| Motor de persistencia | PostgreSQL (único primario) | **B** | Debe soportar los contratos de ADR-0002; cambiar de motor obliga a re-adaptar la persistencia, no el dominio |
+| Acceso a datos | *a elegir por la implementación* (Prisma / Drizzle / SQL tipado) según cuál sirva mejor a ADR-0002 | **C** | El ORM **no** define el dominio; reemplazable tras el puerto de persistencia |
+| Mensajería asincrónica | Outbox transaccional en PostgreSQL + workers tras puerto | **C** | Un broker futuro (Kafka/Rabbit) reemplaza el mecanismo sin tocar el núcleo |
+| Caché | ninguna en el primer bloque | **C** | La corrección nunca depende de caché |
+| Almacenamiento de objetos | puerto + filesystem/S3-compatible local | **C** | Proveedor real diferido |
+| Sustrato de IA | **puerto `IntelligenceProvider` neutral** + adaptador simulado determinístico | **C** | *El más reemplazable de todos* (Const. 2.5); ningún SDK se llama desde dominio/aplicación/interfaz |
+| Identidad/alcance | identidad abstracta + organización + alcance + rechazo por defecto | **A/C** | La exigencia de transportar contexto y aislar organizaciones es **Nivel A**; el proveedor de auth es Nivel C |
+| Observabilidad | logging estructurado + correlación + causación | **B** | Estructura propia; plataforma externa diferida |
+| Contenedores | Docker + Compose para dev/test; producto no acoplado a Docker | **C** | Reemplazable; no se despliega a producción aún |
+
+**Estructura Nivel A que ninguna elección puede violar:** núcleo de dominio independiente de framework, ORM, motor de BD, IA y nube; persistencia append-only con historia/atribución/proyecciones (ADR-0002); transporte obligatorio de organización/identidad/alcance con rechazo por defecto; frontera de IA neutral. **Alternativas descartadas:** Python/Java/.NET/Go en el núcleo (rompen continuidad sin necesidad técnica demostrable); Kubernetes/microservicios/broker externo/Redis/múltiples BD en el primer bloque (infraestructura prematura; la simplicidad operacional es requisito).
 
 ## Contexto
 
