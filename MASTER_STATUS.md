@@ -2,23 +2,35 @@
 
 > Estado vivo del proyecto. Es el primer archivo a leer al retomar el trabajo. Se actualiza al cerrar cada bloque.
 
-**Fase actual:** 🔨 **FASE 1 — DESARROLLO (iniciada por Directiva Operacional, 2026-07-19).** Fase 0 cerrada; Biblioteca Maestra 19/19 es la autoridad. Rol de Claude: **Arquitecto de Implementación** — bloques grandes, autónomo, se detiene solo en los 6 casos de la Directiva. **Git aún NO inicializado** (decisión explícita del Propietario, no ordenada).
+**Fase actual:** 🔨 **FASE 1 — DESARROLLO (iniciada por Directiva Operacional, 2026-07-19).** Fase 0 cerrada; Biblioteca Maestra 19/19 es la autoridad. Rol de Claude: **Arquitecto de Implementación** — bloques grandes, autónomo, se detiene solo en los 6 casos de la Directiva. **Git activo** (rama `main`; basal `cdfa754`).
 
 **Modo de trabajo Fase 1:** avanzar en el mayor bloque seguro; no pedir validación cuando haya evidencia objetiva (compilar, probar, verificar conformidad #15); la implementación no modifica la arquitectura; toda decisión técnica deriva de la Biblioteca, declara su nivel A/B/C y mantiene trazabilidad. Detenerse solo por: (1) modificar la Biblioteca · (2) contradicción estructural · (3) decisión estratégica de negocio · (4) alternativas equivalentes de alto impacto · (5) riesgo a datos/producción · (6) acción externa no automatizable (credenciales, pagos, licencias…).
 
-## Trabajo en curso — Fase 1, BLOQUE F1-BT-01 (Base Técnica Ejecutable)
+## ✅ BLOQUE F1-BT-01 (Base Técnica Ejecutable) — CERRADO Y VERIFICADO (2026-07-20)
 
-**Custodia versionada — repo Git activo.** Rama `main`; commit basal `cdfa754` (Fundación 19/19 + ADR). `.gitignore` y `.gitattributes` (LF) en su sitio.
+**Custodia versionada — repo Git activo.** Rama `main`; commit basal `cdfa754` (Fundación 19/19 + ADR). `.gitignore` y `.gitattributes` (LF) en su sitio. Árbol limpio tras el cierre.
 
 | Sub-fase | Estado |
 |---|---|
 | **A — Custodia y versionado** | ✅ **COMPLETA y verificada** — auditoría (árbol limpio, sin `.git` previo, sin contaminación cruzada), git init, commit basal, repo limpio |
 | **B — ADR-0001 (stack)** | ✅ **RESUELTA** — stack autorizado por el Propietario, estratificado A/B/C. Ecosistema TS/Node (B); ORM/Fastify/Next/outbox/IA (C); contratos de persistencia y transporte de contexto (A) |
-| **C–I — Scaffolding, contratos, persistencia, API/worker, IA, calidad** | ⏳ **Siguiente incremento** — construcción pesada; no se declara completa hasta superar ADR-0002 + #15 (pruebas reales, incluidas de Postgres) |
+| **C — Andamiaje monorepo** | ✅ pnpm workspaces + TS strict + ESLint flat + Prettier + Vitest + tsx; Postgres local aislado (`docker compose -p soec`, 5544) |
+| **D — Contracts (núcleo neutral)** | ✅ puertos/tipos que realizan ADR-0002 (errores, ids marcados, Scope, Attribution, EventStore/Outbox, IntelligenceProvider no vinculante) |
+| **E — Event store (memoria + PostgreSQL)** | ✅ ambas implementaciones realizan C-1..C-5; migración 0001 idempotente; `recorded_at timestamptz(3)` |
+| **F — API Fastify 5** | ✅ `buildApp` con inyección; errores de contrato mapeados (403/422/409); contexto exigido por cabeceras |
+| **G — Inteligencia determinista** | ✅ adaptador neutral, se abstiene, `bindingDecision:false`, `offerToHumanJudgment` (Soberanía Humana) |
+| **H — Conformance compartida** | ✅ misma suite ejecutada por memoria **y** PostgreSQL real (prueba de sustituibilidad, ADR-0001 estrato B) |
+| **I — Calidad** | ✅ typecheck 5/5 · lint limpio · **31/31 tests verdes** (11 con Postgres real) · migración desde cero verificada |
 
-**Toolchain verificado:** git 2.53 · node v24.14.1 · npm 11.11 · docker 29.4 · pnpm 9.15.4 (vía npx; corepack global bloqueado por permisos en `C:\Program Files\nodejs` — workaround documentado) · red OK. `psql` no en PATH → Postgres se levantará vía Docker.
+**Resultados exactos (2026-07-20):** `pnpm -r typecheck` 5/5 OK · `pnpm lint` limpio · `pnpm test` **31 passed (5 files)** — worker 1 · intelligence 5 · in-memory 9 · api 5 · **pg-event-store 11 (Postgres real)**. Migración desde volumen vacío: `{"migrated":["0001_init"]}`.
 
-**ADR-0002** ✅ contrato de conformidad (vara de aceptación de la fase). No hay elevaciones abiertas: el stack quedó delegado y resuelto.
+**Toolchain verificado:** git 2.53 · node v24.14.1 · npm 11.11 · docker 29.4 · pnpm 9.15.4 (vía npx; corepack global bloqueado por permisos en `C:\Program Files\nodejs` — workaround documentado) · red OK. `psql` no en PATH → Postgres vía Docker.
+
+**Aislamiento verificado:** `soec_postgres` en 5544 con volumen propio; los contenedores `ssr_*` (5433/6379/8080) intactos — sin mezcla (Directiva §9).
+
+**ADR-0002** ✅ contrato de conformidad satisfecho por evidencia objetiva. No hay elevaciones abiertas.
+
+**Deuda técnica / límites declarados:** proyección real del worker diferida a incrementos posteriores (hoy solo drena el outbox) · sin remoto Git (push no autorizado) · corepack global bloqueado (pnpm vía npx).
 
 ## Entregables de la Fase 0 — COMPLETOS
 
