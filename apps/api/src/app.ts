@@ -27,9 +27,18 @@ import {
   MecanismoNoDisponibleError,
   SolicitudInvalidaError,
 } from '@soec/operaciones';
+import {
+  CicloDetectadoError,
+  DefinicionInvalidaError,
+  DefinicionNoEncontradaError,
+  EjecucionCapacidadNoEncontradaError,
+  OperacionDesconocidaError,
+  VersionNoDisponibleError,
+} from '@soec/capacidades';
 import { registerModelRoutes } from './model-routes';
 import { registerEceRoutes } from './ece-routes';
 import { registerOperationsRoutes } from './operations-routes';
+import { registerCapabilityRoutes } from './capabilities-routes';
 
 export interface AppDeps {
   store: EventStore;
@@ -80,14 +89,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (
       err instanceof ConcurrencyError ||
       err instanceof ModelAlreadyExistsError ||
-      err instanceof ModelSeparationError
+      err instanceof ModelSeparationError ||
+      err instanceof CicloDetectadoError
     ) {
       return reply.code(409).send({ error: err.name, message: err.message });
     }
     if (
       err instanceof ModelNotFoundError ||
       err instanceof EceNotFoundError ||
-      err instanceof EjecucionNoEncontradaError
+      err instanceof EjecucionNoEncontradaError ||
+      err instanceof DefinicionNoEncontradaError ||
+      err instanceof EjecucionCapacidadNoEncontradaError
     ) {
       return reply.code(404).send({ error: err.name, message: err.message });
     }
@@ -98,7 +110,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       err instanceof ElementoInexistenteError ||
       err instanceof ComandoEceInvalidoError ||
       err instanceof SolicitudInvalidaError ||
-      err instanceof MecanismoNoDisponibleError
+      err instanceof MecanismoNoDisponibleError ||
+      err instanceof DefinicionInvalidaError ||
+      err instanceof OperacionDesconocidaError ||
+      err instanceof VersionNoDisponibleError
     ) {
       return reply.code(422).send({ error: err.name, message: err.message });
     }
@@ -112,6 +127,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerModelRoutes(app, deps.store);
   registerEceRoutes(app, deps.store);
   registerOperationsRoutes(app, deps.store);
+  registerCapabilityRoutes(app, deps.store);
 
   app.post('/events', async (req, reply) => {
     const ctx = contextFrom(req);

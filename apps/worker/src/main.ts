@@ -5,6 +5,8 @@ import { EceBuildService } from '@soec/ece';
 import { PgEceProjectionStore, procesarEventoParaEce } from '@soec/ece/pg';
 import { proyectarEventoOi } from '@soec/operaciones';
 import { PgOiProjectionStore } from '@soec/operaciones/pg';
+import { aplicarEventoAProyeccionCap } from '@soec/capacidades';
+import { PgCapDefProjectionStore, PgCapExecProjectionStore } from '@soec/capacidades/pg';
 import { drainOutbox } from './index';
 
 /**
@@ -19,12 +21,14 @@ const store = new PgEventStore(pool);
 const modelProj = new PgProjectionStore(pool);
 const eceProj = new PgEceProjectionStore(pool);
 const oiProj = new PgOiProjectionStore(pool);
+const capStores = { def: new PgCapDefProjectionStore(pool), exec: new PgCapExecProjectionStore(pool) };
 const build = new EceBuildService(store, new MedService(store), new MdmService(store));
 
 drainOutbox(outbox, async (event) => {
   await aplicarEventoAProyeccion(modelProj, event);
   await procesarEventoParaEce(event, { eceProjStore: eceProj, build });
   await proyectarEventoOi(oiProj, event);
+  await aplicarEventoAProyeccionCap(capStores, event);
 })
   .then(async (n) => {
     console.log(JSON.stringify({ procesados: n }));
