@@ -22,8 +22,14 @@ import {
   TransicionInvalidaError,
 } from '@soec/models';
 import { ComandoEceInvalidoError, EceNotFoundError, ElementoInexistenteError } from '@soec/ece';
+import {
+  EjecucionNoEncontradaError,
+  MecanismoNoDisponibleError,
+  SolicitudInvalidaError,
+} from '@soec/operaciones';
 import { registerModelRoutes } from './model-routes';
 import { registerEceRoutes } from './ece-routes';
+import { registerOperationsRoutes } from './operations-routes';
 
 export interface AppDeps {
   store: EventStore;
@@ -78,7 +84,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     ) {
       return reply.code(409).send({ error: err.name, message: err.message });
     }
-    if (err instanceof ModelNotFoundError || err instanceof EceNotFoundError) {
+    if (
+      err instanceof ModelNotFoundError ||
+      err instanceof EceNotFoundError ||
+      err instanceof EjecucionNoEncontradaError
+    ) {
       return reply.code(404).send({ error: err.name, message: err.message });
     }
     if (
@@ -86,7 +96,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       err instanceof TransicionInvalidaError ||
       err instanceof ComandoInvalidoError ||
       err instanceof ElementoInexistenteError ||
-      err instanceof ComandoEceInvalidoError
+      err instanceof ComandoEceInvalidoError ||
+      err instanceof SolicitudInvalidaError ||
+      err instanceof MecanismoNoDisponibleError
     ) {
       return reply.code(422).send({ error: err.name, message: err.message });
     }
@@ -99,6 +111,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Verticales de dominio MED y MDM (§12) y Estado Cognitivo Empresarial.
   registerModelRoutes(app, deps.store);
   registerEceRoutes(app, deps.store);
+  registerOperationsRoutes(app, deps.store);
 
   app.post('/events', async (req, reply) => {
     const ctx = contextFrom(req);

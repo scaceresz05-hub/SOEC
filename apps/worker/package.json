@@ -11,6 +11,7 @@
     "@soec/contracts": "workspace:*",
     "@soec/event-store": "workspace:*",
     "@soec/models": "workspace:*",
-    "@soec/ece": "workspace:*"
+    "@soec/ece": "workspace:*",
+    "@soec/operaciones": "workspace:*"
   }
 }
