@@ -45,8 +45,21 @@ export const migrations: ReadonlyArray<{ id: string; sql: string }> = [
   },
 ];
 
-/** Aplica las migraciones pendientes de forma transaccional e idempotente. */
-export async function runMigrations(pool: Pool): Promise<string[]> {
+export interface Migration {
+  readonly id: string;
+  readonly sql: string;
+}
+
+/**
+ * Aplica las migraciones pendientes de forma transaccional e idempotente.
+ * Acepta cualquier conjunto de migraciones (extensión general): la Base Técnica
+ * provee el mecanismo; los paquetes de dominio aportan sus propias migraciones
+ * sin introducir atajos específicos en la infraestructura común.
+ */
+export async function runMigrations(
+  pool: Pool,
+  set: ReadonlyArray<Migration> = migrations,
+): Promise<string[]> {
   const applied: string[] = [];
   await pool.query(
     `create table if not exists schema_migrations (
@@ -54,7 +67,7 @@ export async function runMigrations(pool: Pool): Promise<string[]> {
        applied_at timestamptz not null default now()
      )`,
   );
-  for (const m of migrations) {
+  for (const m of set) {
     const existing = await pool.query('select 1 from schema_migrations where id = $1', [m.id]);
     if ((existing.rowCount ?? 0) > 0) continue;
     const client = await pool.connect();
