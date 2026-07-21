@@ -1,0 +1,45 @@
+# === SOEC — .gitignore ===
+# La documentación fundacional (docs/, *.md, MASTER_STATUS, CHANGELOG) NO se ignora.
+
+# Dependencias
+node_modules/
+.pnpm-store/
+
+# Salidas de compilación
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Entorno y secretos (nunca versionar)
+.env
+.env.*
+!.env.example
+
+# Datos locales / volúmenes
+.data/
+*.local
+
+# Logs
+*.log
+logs/
+
+# Cobertura / pruebas
+coverage/
+.nyc_output/
+.vitest/
+
+# Cachés de herramientas
+.turbo/
+.cache/
+
+# Temporales (se conserva la carpeta, no su contenido)
+temp/*
+!temp/.gitkeep
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
