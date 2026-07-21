@@ -44,6 +44,9 @@ importers:
       '@soec/intelligence':
         specifier: workspace:*
         version: link:../../packages/intelligence
+      '@soec/models':
+        specifier: workspace:*
+        version: link:../../packages/models
       fastify:
         specifier: ^5.2.0
         version: 5.10.0
@@ -56,6 +59,9 @@ importers:
       '@soec/event-store':
         specifier: workspace:*
         version: link:../../packages/event-store
+      '@soec/models':
+        specifier: workspace:*
+        version: link:../../packages/models
 
   packages/contracts: {}
 
@@ -77,6 +83,22 @@ importers:
       '@soec/contracts':
         specifier: workspace:*
         version: link:../contracts
+
+  packages/models:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
 
 packages:
 

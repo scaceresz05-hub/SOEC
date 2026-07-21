@@ -6,5 +6,8 @@ export default defineConfig({
     testTimeout: 30000,
     hookTimeout: 60000,
     pool: 'forks',
+    // Los archivos de prueba con PostgreSQL real comparten la misma base;
+    // se ejecutan en serie para evitar contención entre suites (truncados cruzados).
+    fileParallelism: false,
   },
 });
