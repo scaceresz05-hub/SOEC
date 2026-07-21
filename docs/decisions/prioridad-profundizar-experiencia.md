@@ -31,6 +31,20 @@ Se registran para no perderse; su ejecución concreta es instanciación estraté
 - **Reversibilidad y carga de la prueba (#4):** quien proponga saltar a efectos/automatizaciones asume la carga; profundizar la experiencia es reversible y de menor riesgo.
 - **Soberanía (Const. 2.4):** toda evolución de la experiencia conserva `bindingDecision: false`, ausencia de acciones y decisiones reservadas a la persona.
 
+## Charter del próximo bloque — F2-UX-01 «Experiencia Cognitiva» (registrado, NO iniciado)
+
+Nombre y objetivo fijados por la Autoridad Estratégica para cuando se abra el bloque. **No es «mejorar la UI»**: es diseñar **cómo SOEC comunica conocimiento**.
+
+> **Pregunta rectora:** ¿Cómo debe conversar una persona con SOEC para comprender mejor su empresa **sin perder trazabilidad ni soberanía**?
+
+**Tres principios de diseño** (realizan invariantes congelados; no crean arquitectura):
+
+1. **Comprensión antes que información** — la pantalla ayuda a *entender*, no solo a mostrar datos (realiza anti-atrofia y explicabilidad, #13/#14 inv. · #9 inv. 7).
+2. **Progresividad** — visión simple primero; el usuario profundiza hasta la evidencia técnica cuando lo necesita (ya iniciado como trazabilidad progresiva en F1-UI-01).
+3. **Transparencia** — cada afirmación importante se rastrea hasta su origen, dejando siempre claro **qué sabe el sistema, qué no sabe y qué debe decidir la persona** (realiza atribución, procedencia y frontera de soberanía).
+
+**Consecuencia buscada:** si esta experiencia se resuelve bien, las futuras capacidades (Anticipar, Orientar, …) se incorporan **de forma natural**, sin rediseñar la interacción desde cero. **Condición:** el bloque se abre por decisión explícita de la Autoridad; su ejecución respeta la capa conceptual congelada y los pilares de soberanía.
+
 ## Trazabilidad
 
-#4 · #6 · #14 · #16 (experiencia = realización) · #17 §4-§5. Complementa `docs/decisions/prioridad-primera-interfaz.md`. Ninguna cláusula modifica la Fundación.
+#4 · #6 · #13/#14 (anti-atrofia, explicabilidad) · #16 (experiencia = realización) · #17 §4-§5. Complementa `docs/decisions/prioridad-primera-interfaz.md`. Ninguna cláusula modifica la Fundación.
