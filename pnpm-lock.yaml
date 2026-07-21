@@ -50,6 +50,9 @@ importers:
       '@soec/models':
         specifier: workspace:*
         version: link:../../packages/models
+      '@soec/operaciones':
+        specifier: workspace:*
+        version: link:../../packages/operaciones
       fastify:
         specifier: ^5.2.0
         version: 5.10.0
@@ -68,6 +71,9 @@ importers:
       '@soec/models':
         specifier: workspace:*
         version: link:../../packages/models
+      '@soec/operaciones':
+        specifier: workspace:*
+        version: link:../../packages/operaciones
 
   packages/contracts: {}
 
@@ -121,6 +127,28 @@ importers:
         specifier: ^8.13.1
         version: 8.22.0
     devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+
+  packages/operaciones:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/ece':
+        specifier: workspace:*
+        version: link:../ece
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
+    devDependencies:
+      '@soec/models':
+        specifier: workspace:*
+        version: link:../models
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0

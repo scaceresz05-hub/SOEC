@@ -1,4 +1,5 @@
-import type { Migration } from '@soec/event-store/pg';
+import { type Migration, migrations as baseMigrations } from '@soec/event-store/pg';
+import { modelMigrations } from '@soec/models/pg';
 
 /**
  * Migración propia del dominio del ECE: proyección actual.
@@ -27,4 +28,11 @@ export const eceMigrations: ReadonlyArray<Migration> = [
       create index if not exists proj_ece_mdm on proj_ece_current (organization_id, mdm_instance_id);
     `,
   },
+];
+
+/** Conjunto acumulado hasta el ECE (Base Técnica + Modelos + ECE), para componer capas superiores. */
+export const migracionesHastaEce: ReadonlyArray<Migration> = [
+  ...baseMigrations,
+  ...modelMigrations,
+  ...eceMigrations,
 ];
