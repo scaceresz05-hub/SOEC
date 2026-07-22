@@ -43,12 +43,20 @@ import {
   SolicitudOperativaInvalidaError,
 } from '@soec/operacional';
 import {
+  ActividadNoPreparableError,
   ComandoMarketingInvalidoError,
   ObjetivoNoEncontradoError,
   ObjetivoNoEvaluableError,
   PlanNoEncontradoError,
   SinAccionDisponibleError,
 } from '@soec/marketing';
+import {
+  BriefNoEncontradoError,
+  ComandoContenidoInvalidoError,
+  MarcaNoEncontradaError,
+  PaqueteNoEjecutableError,
+  PaqueteNoEncontradoError,
+} from '@soec/contenido';
 import { registerModelRoutes } from './model-routes';
 import { registerEceRoutes } from './ece-routes';
 import { registerOperationsRoutes } from './operations-routes';
@@ -56,6 +64,7 @@ import { registerCapabilityRoutes } from './capabilities-routes';
 import { registerExperienceRoutes } from './experience-routes';
 import { registerOperationalRoutes } from './operational-routes';
 import { registerMarketingRoutes } from './marketing-routes';
+import { registerContentRoutes } from './content-routes';
 
 export interface AppDeps {
   store: EventStore;
@@ -120,7 +129,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       err instanceof AccionNoEncontradaError ||
       err instanceof PoliticaNoEncontradaError ||
       err instanceof ObjetivoNoEncontradoError ||
-      err instanceof PlanNoEncontradoError
+      err instanceof PlanNoEncontradoError ||
+      err instanceof BriefNoEncontradoError ||
+      err instanceof MarcaNoEncontradaError ||
+      err instanceof PaqueteNoEncontradoError
     ) {
       return reply.code(404).send({ error: err.name, message: err.message });
     }
@@ -130,7 +142,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       err instanceof AdaptadorNoDisponibleError ||
       err instanceof ObjetivoNoEvaluableError ||
       err instanceof SinAccionDisponibleError ||
-      err instanceof ComandoMarketingInvalidoError
+      err instanceof ComandoMarketingInvalidoError ||
+      err instanceof ActividadNoPreparableError ||
+      err instanceof ComandoContenidoInvalidoError ||
+      err instanceof PaqueteNoEjecutableError
     ) {
       return reply.code(422).send({ error: err.name, message: err.message });
     }
@@ -162,6 +177,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerExperienceRoutes(app, deps.store);
   registerOperationalRoutes(app, deps.store);
   registerMarketingRoutes(app, deps.store);
+  registerContentRoutes(app, deps.store);
 
   app.post('/events', async (req, reply) => {
     const ctx = contextFrom(req);
