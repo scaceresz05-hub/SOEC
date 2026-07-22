@@ -14,7 +14,8 @@ import {
   reconstruirDecision,
 } from '../domain/decision';
 import { type Rol, puede } from '../domain/roles';
-import { DecisionNoEncontradaError, DecisionYaResueltaError, PermisoInsuficienteError } from '../domain/errors';
+import { esTipoDecisionValido } from '../domain/catalogo-base';
+import { ComandoControlInvalidoError, DecisionNoEncontradaError, DecisionYaResueltaError, PermisoInsuficienteError } from '../domain/errors';
 
 export class DecisionService {
   constructor(private readonly store: EventStore) {}
@@ -24,6 +25,7 @@ export class DecisionService {
   }
 
   async registrar(ctx: RequestContext, decId: string, contenido: ContenidoDecision, attribution: Attribution, occurredAt: string): Promise<DecisionState> {
+    if (!esTipoDecisionValido(contenido.tipo)) throw new ComandoControlInvalidoError(`Tipo de decisión inválido: '${contenido.tipo}'`);
     const previo = await this.cargar(ctx, decId);
     if (previo.existe) return previo; // idempotente
     await this.store.append(ctx, decStreamId(decId), previo.version, [{ type: EVENTOS_DEC.registrada, payload: { contenido }, attribution, occurredAt }]);

@@ -13,6 +13,8 @@ import {
   inboxStreamId,
   reconstruirInbox,
 } from '../domain/inbox';
+import { esTipoAlertaValido } from '../domain/catalogo-base';
+import { ComandoControlInvalidoError } from '../domain/errors';
 
 export class InboxService {
   constructor(private readonly store: EventStore) {}
@@ -25,6 +27,7 @@ export class InboxService {
   }
 
   async registrarAlerta(ctx: RequestContext, alerta: Omit<Alerta, 'estado' | 'en'>, attribution: Attribution, occurredAt: string): Promise<InboxState> {
+    if (!esTipoAlertaValido(alerta.tipo)) throw new ComandoControlInvalidoError(`Tipo de alerta inválido: '${alerta.tipo}'`);
     const s = await this.cargar(ctx);
     await this.store.append(ctx, this.sid(ctx), s.version, [{ type: EVENTOS_INBOX.alertaRegistrada, payload: { alerta }, attribution, occurredAt }]);
     return this.cargar(ctx);

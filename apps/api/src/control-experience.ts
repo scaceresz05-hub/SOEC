@@ -118,7 +118,7 @@ export class ControlExperience {
   async simular(escenario: Escenario): Promise<{ medidas: number; aplicadas: number; decisiones: number; alertas: number; pausado: boolean }> {
     const ctx = this.ctx();
     this.escenario = escenario;
-    if (await this.pausa.estaPausado(ctx, {})) return { medidas: 0, aplicadas: 0, decisiones: 0, alertas: 0, pausado: true };
+    if (await this.pausa.estaPausado(ctx)) return { medidas: 0, aplicadas: 0, decisiones: 0, alertas: 0, pausado: true };
     let medidas = 0;
     let aplicadas = 0;
     let decisiones = 0;
@@ -127,7 +127,8 @@ export class ControlExperience {
       const a = `act-${canal}-0`;
       const pub = await this.publicaciones.cargar(ctx, this.pubId(a, canal));
       if (!pub.existe || !pub.externalRef) continue;
-      if (await this.pausa.estaPausado(ctx, { canal, campania: `cmp-${canal}` })) continue;
+      // Cadena de ancestros del alcance (departamento global → canal → campaña).
+      if (await this.pausa.estaPausado(ctx, [{ tipo: 'canal', valor: canal }, { tipo: 'campania', valor: `cmp-${canal}` }])) continue;
       this.source.cargar(pub.externalRef, filas(pub.externalRef, escenario, 1 + (await this.med(ctx, pub.publicationId)).sincronizaciones));
       const med = await this.medicionSvc.sincronizar(ctx, { publicationId: pub.publicationId, externalRef: pub.externalRef, canal, cuenta: 'cuenta-demo', token: 't', campaniaRef: `cmp-${canal}`, objetivoRef: IDS_MKT_CONT.objetivo, criterio: CRITERIO_DEMO, gastoAutorizado: GASTO_AUTORIZADO_DEMO, muestraMinima: 500, attribution: A, occurredAt: this.now() });
       medidas += 1;

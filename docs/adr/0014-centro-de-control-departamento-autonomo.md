@@ -43,6 +43,14 @@ La experiencia distingue inequívocamente simulado/sandbox/real_desactivado/real
 - Se preservan intactos: propósito raíz, soberanía transformada, no-vinculación del conocimiento, y los guardarraíles de ningún efecto/gasto real y modo real desactivado.
 - Se habilita **F2-PILOT-01** (piloto real acotado), que requerirá una **decisión estratégica expresa** (empresa/marca/objetivo/canal/cuenta/contenido/presupuesto/modo/nivel/aprobación/pausa/duración/indicadores/criterios de éxito y suspensión). Hasta entonces, todo efecto externo real continúa **prohibido**.
 
+## Complemento — F2-CTRL-HARD-01: endurecimiento genérico previo al piloto (2026-07-21)
+
+Revisión arquitectónica previa a F2-PILOT-01: se confirmó que el núcleo de `@soec/control` (salud, pausa, decisión, buzón, roles) ya es genérico y que el acoplamiento a marketing es **superficial y concentrado** en contratos de lectura y catálogos cerrados. Se aprobó la **Opción A** (endurecimiento mínimo), rechazando tanto dejar las fricciones (B) como introducir un puerto universal con un solo consumidor (C). Regla de gobierno: *preparar los puntos de extensión evidentes, pero extraer la abstracción completa solo cuando existan dos implementaciones reales.*
+
+- **D-8. Catálogos extensibles.** `TipoDecision` y `TipoAlerta` pasan de uniones **cerradas** a catálogos **abiertos** (`string`): un departamento futuro puede registrar sus propios tipos **sin modificar `@soec/control`**. El núcleo valida **formato** (no membresía) y rechaza vacíos/malformados; los valores conocidos viven en un **catálogo base documentado** (`CATALOGO_DECISION_MARKETING`, `CATALOGO_ALERTA_MARKETING`) claramente separado de las primitivas. Los **estados** (`pendiente`/`aprobada`/…, `abierta`/`atendida`/…) permanecen como uniones **cerradas**. Sin migración de datos.
+- **D-9. Pausa por alcance genérico.** El chequeo de pausa opera sobre `Alcance {tipo, valor}` genérico, por **igualdad + precedencia** (la pausa global precede), **sin condicionales que nombren `canal`/`campania`**. El llamador aporta la cadena de ancestros (organización → departamento → módulo/capacidad → entidad). Un alcance futuro válido (p. ej. `inventario:almacen-1`) funciona sin tocar el agregado. Los eventos ya persistidos (`{tipo, valor}`) son compatibles sin migración.
+- **Diferido explícitamente:** el puerto universal «Módulo de operación» y el resumen totalmente genérico se posponen hasta un **segundo departamento real**; la abstracción se extraerá de dos consumidores, no de una proyección especulativa.
+
 ## Trazabilidad
 
 ADR-0009…0013 (las cinco verticales que el Centro de Control integra) · Const. v1.7 Art. 2.1/2.4 · #14 §6 (dos clases de capacidad) · #16 (interfaz como realización, Nivel C). El Centro de Control no revisa el propósito raíz (2.2) ni toca la capa congelada; las decisiones de interfaz no se elevan a Constitución.

@@ -14,6 +14,7 @@ export * from './domain/health';
 export * from './domain/pausa';
 export * from './domain/decision';
 export * from './domain/inbox';
+export * from './domain/catalogo-base';
 export * from './domain/roles';
 export * from './domain/summary';
 export * from './domain/errors';

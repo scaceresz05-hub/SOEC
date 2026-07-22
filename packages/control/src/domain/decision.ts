@@ -7,17 +7,14 @@
  */
 import type { RecordedEvent } from '@soec/contracts';
 
-export type TipoDecision =
-  | 'escalamiento_frecuencia'
-  | 'aumento_presupuesto'
-  | 'habilitar_canal'
-  | 'afirmacion_sensible'
-  | 'activo_no_validado'
-  | 'reanudar_tras_anomalia'
-  | 'cambio_modo'
-  | 'habilitar_cuenta'
-  | 'retiro_masivo';
+/**
+ * Catálogo EXTENSIBLE (F2-CTRL-HARD-01): un módulo/departamento nuevo puede aportar sus
+ * propios tipos sin modificar @soec/control. Valores base conocidos en
+ * `CATALOGO_DECISION_MARKETING`; validación de formato en `esTipoDecisionValido`.
+ */
+export type TipoDecision = string;
 
+/** El ESTADO permanece como unión CERRADA: no es un catálogo extensible. */
 export type EstadoDecision = 'pendiente' | 'aprobada' | 'denegada' | 'modificada' | 'pospuesta' | 'evidencia_solicitada';
 
 export interface ContenidoDecision {

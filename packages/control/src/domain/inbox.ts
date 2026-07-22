@@ -7,22 +7,15 @@
  */
 import type { RecordedEvent } from '@soec/contracts';
 
+/** Severidad y estado permanecen como uniones CERRADAS (no son catálogos extensibles). */
 export type SeveridadAlerta = 'info' | 'menor' | 'mayor' | 'critico';
 export type EstadoAlerta = 'abierta' | 'atendida' | 'resuelta';
-export type TipoAlerta =
-  | 'presupuesto'
-  | 'gasto_anomalo'
-  | 'publicacion_fallida'
-  | 'publicacion_desconocida'
-  | 'credencial'
-  | 'canal'
-  | 'activo'
-  | 'politica'
-  | 'contenido'
-  | 'metrica'
-  | 'evidencia'
-  | 'optimizacion'
-  | 'vencimiento';
+/**
+ * Catálogo EXTENSIBLE (F2-CTRL-HARD-01): un módulo nuevo puede aportar sus propios tipos
+ * sin modificar @soec/control. Valores base conocidos en `CATALOGO_ALERTA_MARKETING`;
+ * validación de formato en `esTipoAlertaValido`.
+ */
+export type TipoAlerta = string;
 
 export interface Alerta {
   readonly clave: string; // estable → deduplicación

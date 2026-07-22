@@ -7,11 +7,24 @@
  */
 import type { RecordedEvent } from '@soec/contracts';
 
-export type TipoAlcance = 'departamento' | 'canal' | 'campania' | 'tipo_accion';
+/**
+ * El TIPO de alcance es un catálogo EXTENSIBLE (departamento/canal/campania/modulo/…):
+ * el núcleo no lo conoce semánticamente. Un departamento futuro (p. ej. `inventario`)
+ * puede pausar `inventario:almacen-1` sin modificar @soec/control.
+ */
+export type TipoAlcance = string;
 
 export interface Alcance {
   readonly tipo: TipoAlcance;
-  readonly valor: string; // '*' para el departamento completo
+  readonly valor: string; // '*' para el alcance completo (global)
+}
+
+/** Alcance global del departamento/organización; su pausa tiene precedencia sobre todo. */
+export const ALCANCE_GLOBAL: Alcance = { tipo: 'departamento', valor: '*' };
+
+/** Un alcance válido tiene un tipo con formato de catálogo y un valor no vacío. */
+export function esAlcanceValido(a: Alcance): boolean {
+  return /^[a-z][a-z0-9_]{1,40}$/.test(a.tipo) && typeof a.valor === 'string' && a.valor.length > 0;
 }
 
 export interface PausaActiva {
@@ -83,12 +96,16 @@ export function reconstruirPausa(organizationId: string, events: readonly Record
   return events.reduce(aplicarPausa, estadoInicialPausa(organizationId));
 }
 
-/** ¿Está pausado un efecto en este contexto? La pausa del departamento propaga a todo. */
-export function estaPausado(state: PausaState, ctx: { canal?: string; campania?: string; tipoAccion?: string } = {}): boolean {
-  if (state.activas['departamento:*']) return true;
-  if (ctx.canal && state.activas[`canal:${ctx.canal}`]) return true;
-  if (ctx.campania && state.activas[`campania:${ctx.campania}`]) return true;
-  if (ctx.tipoAccion && state.activas[`tipo_accion:${ctx.tipoAccion}`]) return true;
+/**
+ * ¿Está pausado un efecto para alguno de estos alcances? El algoritmo trabaja por
+ * igualdad y precedencia (la pausa GLOBAL precede a todo), SIN conocer la semántica de
+ * cada departamento. El llamador aporta la cadena de ancestros del alcance a evaluar
+ * (organización → departamento → módulo/capacidad → entidad); el núcleo solo compara
+ * contra las pausas activas. Un alcance futuro válido funciona sin tocar este agregado.
+ */
+export function estaPausado(state: PausaState, alcances: readonly Alcance[] = []): boolean {
+  if (state.activas[clave(ALCANCE_GLOBAL)]) return true; // precedencia de la pausa global
+  for (const a of alcances) if (state.activas[clave(a)]) return true;
   return false;
 }
 
