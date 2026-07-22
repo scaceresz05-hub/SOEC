@@ -38,6 +38,9 @@ importers:
       '@soec/capacidades':
         specifier: workspace:*
         version: link:../../packages/capacidades
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../../packages/contenido
       '@soec/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -105,6 +108,9 @@ importers:
       '@soec/capacidades':
         specifier: workspace:*
         version: link:../../packages/capacidades
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../../packages/contenido
       '@soec/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -148,6 +154,31 @@ importers:
       '@soec/models':
         specifier: workspace:*
         version: link:../models
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+
+  packages/contenido:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      '@soec/marketing':
+        specifier: workspace:*
+        version: link:../marketing
+      '@soec/operacional':
+        specifier: workspace:*
+        version: link:../operacional
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
+    devDependencies:
+      '@soec/capacidades':
+        specifier: workspace:*
+        version: link:../capacidades
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
