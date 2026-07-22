@@ -1,22 +1,28 @@
 {
-  "name": "@soec/worker",
+  "name": "@soec/canales",
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./pg": "./src/pg/index.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "start": "tsx src/main.ts"
+    "migrate": "tsx src/pg/migrate-cli.ts"
   },
   "dependencies": {
     "@soec/contracts": "workspace:*",
     "@soec/event-store": "workspace:*",
-    "@soec/models": "workspace:*",
-    "@soec/ece": "workspace:*",
-    "@soec/operaciones": "workspace:*",
-    "@soec/capacidades": "workspace:*",
     "@soec/operacional": "workspace:*",
     "@soec/marketing": "workspace:*",
     "@soec/contenido": "workspace:*",
-    "@soec/canales": "workspace:*"
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@soec/capacidades": "workspace:*",
+    "@soec/canal-emulado": "workspace:*",
+    "@types/pg": "^8.11.10"
   }
 }

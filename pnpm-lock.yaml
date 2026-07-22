@@ -35,6 +35,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@soec/canales':
+        specifier: workspace:*
+        version: link:../../packages/canales
       '@soec/capacidades':
         specifier: workspace:*
         version: link:../../packages/capacidades
@@ -105,6 +108,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@soec/canales':
+        specifier: workspace:*
+        version: link:../../packages/canales
       '@soec/capacidades':
         specifier: workspace:*
         version: link:../../packages/capacidades
@@ -132,6 +138,43 @@ importers:
       '@soec/operaciones':
         specifier: workspace:*
         version: link:../../packages/operaciones
+
+  packages/canal-emulado:
+    dependencies:
+      fastify:
+        specifier: ^5.2.0
+        version: 5.10.0
+
+  packages/canales:
+    dependencies:
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../contenido
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      '@soec/marketing':
+        specifier: workspace:*
+        version: link:../marketing
+      '@soec/operacional':
+        specifier: workspace:*
+        version: link:../operacional
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
+    devDependencies:
+      '@soec/canal-emulado':
+        specifier: workspace:*
+        version: link:../canal-emulado
+      '@soec/capacidades':
+        specifier: workspace:*
+        version: link:../capacidades
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
 
   packages/capacidades:
     dependencies:

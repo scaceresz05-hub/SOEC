@@ -15,7 +15,8 @@
     "verify": "pnpm run typecheck && pnpm run lint && pnpm run test",
     "db:up": "docker compose -p soec -f infrastructure/docker-compose.yml up -d",
     "db:down": "docker compose -p soec -f infrastructure/docker-compose.yml down -v",
-    "migrate": "tsx packages/contenido/src/pg/migrate-cli.ts"
+    "migrate": "tsx packages/canales/src/pg/migrate-cli.ts",
+    "emulador": "tsx packages/canal-emulado/src/server.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
