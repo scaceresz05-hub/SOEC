@@ -136,6 +136,27 @@ export class PlanningService {
     return this.cargar(ctx, planId);
   }
 
+  /**
+   * Contrato público (F2-MET-01 §24): aplica una optimización YA AUTORIZADA como un
+   * cambio VERSIONADO del plan (append-only). No decide ni autoriza: eso ocurre en el
+   * módulo de medición + plano operacional. Devuelve la versión de plan resultante.
+   */
+  async aplicarOptimizacion(
+    ctx: RequestContext,
+    planId: string,
+    o: { tipo: string; actividadId: string; valorAnterior: string; valorNuevo: string; motivo: string; optRef: string; nuevoEstadoActividad: string | null },
+    attribution: Attribution,
+    occurredAt: string,
+  ): Promise<PlanState> {
+    const plan = await this.cargar(ctx, planId);
+    if (!plan.existe) throw new PlanNoEncontradoError(`El plan '${planId}' no existe`);
+    const optimizacion = { tipo: o.tipo, actividadId: o.actividadId, valorAnterior: o.valorAnterior, valorNuevo: o.valorNuevo, motivo: o.motivo, optRef: o.optRef, en: occurredAt };
+    await this.store.append(ctx, planStreamId(planId), plan.version, [
+      this.input(EVENTOS_PLAN.optimizado, { optimizacion, nuevoEstadoActividad: o.nuevoEstadoActividad }, attribution, occurredAt),
+    ]);
+    return this.cargar(ctx, planId);
+  }
+
   /** Ejecuta la próxima acción del plan a través del plano operacional (autorización + simulado). */
   async ejecutarSiguiente(ctx: RequestContext, planId: string, attribution: Attribution, occurredAt: string) {
     const plan = await this.cargar(ctx, planId);

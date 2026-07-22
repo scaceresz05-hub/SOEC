@@ -56,11 +56,54 @@ interface Config {
   relojIso: string;
 }
 
+export type EscenarioMetricas =
+  | 'alto'
+  | 'bajo'
+  | 'sin_datos'
+  | 'retrasado'
+  | 'duplicado'
+  | 'correccion'
+  | 'inconsistente'
+  | 'gasto_parcial'
+  | 'gasto_excedido'
+  | 'fuera_de_orden';
+
+export interface FilaMetrica {
+  externalId: string;
+  metrica: string;
+  valor: number;
+  unidad: string;
+  moneda: string | null;
+  periodo: string;
+  ocurridoEn: string;
+  proveedorSeq: number;
+  acumulativa: boolean;
+  estimada: boolean;
+}
+export interface ConversionEmu {
+  id: string;
+  externalId: string | null;
+  campaignRef: string | null;
+  valor: number;
+  atribuible: boolean;
+  ocurridoEn: string;
+}
+
+/** Hash determinista [0, mod) a partir de una cadena (sin azar). */
+function hnum(s: string, mod: number): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) h = (h * 131 + s.charCodeAt(i)) % 1_000_003;
+  return h % mod;
+}
+
 /** Estado en memoria del emulador; reiniciable y observable desde las pruebas. */
 export class EstadoEmulador {
   posts = new Map<string, PostEmu>();
   porIdem = new Map<string, string>(); // idempotencyKey -> externalId
   webhooks: WebhookEmu[] = [];
+  conversiones: ConversionEmu[] = [];
+  escenarioMetricas: EscenarioMetricas = 'alto';
+  private consultasMetricas = new Map<string, number>();
   private seq = 0;
   private reqCount = 0;
   config: Config = { escenario: 'success_immediate', tokensValidos: new Set([TOKEN_VALIDO_DEV]), limitePorVentana: 0, relojIso: '2026-07-21T00:00:00.000Z' };
@@ -69,12 +112,18 @@ export class EstadoEmulador {
     this.posts.clear();
     this.porIdem.clear();
     this.webhooks = [];
+    this.conversiones = [];
+    this.escenarioMetricas = 'alto';
+    this.consultasMetricas.clear();
     this.seq = 0;
     this.reqCount = 0;
     this.config = { escenario: 'success_immediate', tokensValidos: new Set([TOKEN_VALIDO_DEV]), limitePorVentana: 0, relojIso: '2026-07-21T00:00:00.000Z' };
   }
   setEscenario(e: EscenarioEmulador): void {
     this.config.escenario = e;
+  }
+  setEscenarioMetricas(e: EscenarioMetricas): void {
+    this.escenarioMetricas = e;
   }
   setLimite(n: number): void {
     this.config.limitePorVentana = n;
@@ -86,6 +135,51 @@ export class EstadoEmulador {
   contarPeticion(): number {
     this.reqCount += 1;
     return this.reqCount;
+  }
+
+  /** Métricas DETERMINISTAS por publicación y escenario. Modela retrasos, correcciones,
+   * duplicados, inconsistencias y gasto según el escenario activo. */
+  metricasDe(externalId: string): FilaMetrica[] {
+    const esc = this.escenarioMetricas;
+    if (esc === 'sin_datos') return [];
+    const n = (this.consultasMetricas.get(externalId) ?? 0) + 1;
+    this.consultasMetricas.set(externalId, n);
+    const base = hnum(externalId, 50) + 50; // 50..99 impresiones base
+    const periodo = this.config.relojIso.slice(0, 10);
+    const alto = esc === 'alto';
+    const factorConv = alto ? 0.08 : esc === 'bajo' ? 0.005 : 0.03;
+    const impresiones = esc === 'retrasado' && n === 1 ? Math.floor(base / 5) : base * 20;
+    const clics = Math.floor(impresiones * (alto ? 0.05 : 0.01));
+    let leads = Math.floor(clics * (alto ? 0.4 : 0.15));
+    const conversiones = Math.floor(clics * factorConv);
+    let gasto = esc === 'gasto_parcial' ? base : esc === 'gasto_excedido' ? base * 100 : base * 4;
+    if (esc === 'correccion' && n >= 2) {
+      leads += 3; // corrección posterior: llegan más leads
+      gasto += 10;
+    }
+    const fila = (metrica: string, valor: number, unidad: string, moneda: string | null, estimada = false, seqExtra = 0): FilaMetrica => ({
+      externalId,
+      metrica,
+      valor,
+      unidad,
+      moneda,
+      periodo,
+      ocurridoEn: this.config.relojIso,
+      proveedorSeq: n + seqExtra,
+      acumulativa: true,
+      estimada,
+    });
+    const filas: FilaMetrica[] = [
+      fila('impresiones', impresiones, 'conteo', null),
+      fila('clics', clics, 'conteo', null),
+      fila('leads', leads, 'conteo', null),
+      fila('conversiones', conversiones, 'conteo', null, esc === 'inconsistente'),
+      fila('gasto', gasto, 'monetario', 'CLP'),
+    ];
+    if (esc === 'duplicado') filas.push(fila('clics', clics, 'conteo', null)); // fila duplicada exacta
+    if (esc === 'inconsistente') filas.push(fila('conversiones', conversiones + impresiones, 'conteo', null, true)); // conversiones > impresiones (imposible)
+    if (esc === 'fuera_de_orden') filas.forEach((f, i) => (filas[i] = { ...f, proveedorSeq: filas.length - i }));
+    return filas;
   }
 }
 
@@ -229,6 +323,43 @@ export function buildEmulador(estado: EstadoEmulador = new EstadoEmulador()): { 
   app.get('/v1/webhooks/pending', async (req, reply) => {
     if (!autenticar(req, reply)) return reply;
     return reply.send({ webhooks: estado.webhooks });
+  });
+
+  // ── Métricas (F2-MET-01 §9) ──────────────────────────────────────────────
+  app.get('/v1/posts/:id/metrics', async (req, reply) => {
+    if (!autenticar(req, reply)) return reply;
+    const { id } = req.params as { id: string };
+    if (!estado.posts.has(id)) return reply.code(404).send({ error: 'not_found' });
+    return reply.send({ externalId: id, metrics: estado.metricasDe(id), escenario: estado.escenarioMetricas });
+  });
+
+  // Métricas de todas las publicaciones (soporta cursor por índice de publicación).
+  app.get('/v1/metrics', async (req, reply) => {
+    if (!autenticar(req, reply)) return reply;
+    const { cursor } = req.query as { cursor?: string };
+    const ids = [...estado.posts.keys()].filter((k) => estado.posts.get(k)!.status !== 'deleted').sort();
+    const desde = cursor ? Math.max(0, ids.indexOf(cursor) + 1) : 0;
+    const pagina = ids.slice(desde);
+    const metrics = pagina.flatMap((id) => estado.metricasDe(id));
+    const nuevoCursor = pagina.length > 0 ? pagina[pagina.length - 1] : cursor ?? null;
+    return reply.send({ metrics, cursor: nuevoCursor, conversiones: estado.conversiones });
+  });
+
+  app.post('/v1/metrics/scenario', async (req, reply) => {
+    if (!autenticar(req, reply)) return reply;
+    const { escenario } = (req.body ?? {}) as { escenario?: string };
+    if (!escenario) return reply.code(422).send({ error: 'escenario_requerido' });
+    estado.setEscenarioMetricas(escenario as never);
+    return reply.send({ ok: true, escenario });
+  });
+
+  app.post('/v1/conversions', async (req, reply) => {
+    if (!autenticar(req, reply)) return reply;
+    const b = (req.body ?? {}) as { externalId?: string; campaignRef?: string; valor?: number };
+    const atribuible = !!b.campaignRef;
+    const conv = { id: `conv-${estado.conversiones.length + 1}`, externalId: b.externalId ?? null, campaignRef: b.campaignRef ?? null, valor: b.valor ?? 1, atribuible, ocurridoEn: estado.config.relojIso };
+    estado.conversiones.push(conv);
+    return reply.code(201).send(conv);
   });
 
   return { app, estado };

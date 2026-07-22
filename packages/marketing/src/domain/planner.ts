@@ -113,6 +113,7 @@ export function planificar(
         accionExecutionId: null,
         resultado: null,
         paqueteContenidoRef: null,
+        optimizacion: null,
       });
     }
   }

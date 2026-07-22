@@ -63,6 +63,19 @@ export interface Actividad {
   readonly resultado: string | null;
   /** Referencia al paquete de contenido que desbloqueó la actividad (F2-CONT-01), si aplica. */
   readonly paqueteContenidoRef: string | null;
+  /** Última optimización aplicada a la actividad (F2-MET-01), si aplica. */
+  readonly optimizacion: string | null;
+}
+
+/** Registro append-only de una optimización aplicada al plan (F2-MET-01). */
+export interface OptimizacionAplicada {
+  readonly tipo: string;
+  readonly actividadId: string;
+  readonly valorAnterior: string;
+  readonly valorNuevo: string;
+  readonly motivo: string;
+  readonly optRef: string;
+  readonly en: string;
 }
 export interface Calendario {
   readonly zonaHoraria: string;
@@ -98,6 +111,7 @@ export const EVENTOS_PLAN = {
   actividadTransicion: 'plan.actividad_transicion',
   actividadEjecutada: 'plan.actividad_ejecutada',
   actividadPreparada: 'plan.actividad_preparada',
+  optimizado: 'plan.optimizado',
 } as const;
 
 export function planStreamId(planId: string): string {
@@ -119,6 +133,7 @@ export interface PlanState {
   readonly calendario: Calendario | null;
   readonly presupuesto: PresupuestoPlan | null;
   readonly historial: readonly { planVersion: number; motivo: string; en: string }[];
+  readonly optimizaciones: readonly OptimizacionAplicada[];
 }
 
 export function estadoInicialPlan(planId: string, organizationId: string): PlanState {
@@ -137,6 +152,7 @@ export function estadoInicialPlan(planId: string, organizationId: string): PlanS
     calendario: null,
     presupuesto: null,
     historial: [],
+    optimizaciones: [],
   };
 }
 
@@ -179,6 +195,11 @@ interface PayloadPreparada {
   actividadId: string;
   contenido: string;
   paqueteContenidoRef: string;
+}
+interface PayloadOptimizado {
+  optimizacion: OptimizacionAplicada;
+  /** Estado destino de la actividad (p. ej. 'omitida' al pausar); null si no cambia. */
+  nuevoEstadoActividad: EstadoActividad | null;
 }
 
 function cargarContenido(state: PlanState, next: PlanState, c: PlanVersionContenido, en: string): PlanState {
@@ -241,6 +262,16 @@ export function aplicarPlan(state: PlanState, event: RecordedEvent): PlanState {
           [p.actividadId]: { ...a, estado: 'autorizable', motivoBloqueo: null, contenido: p.contenido, paqueteContenidoRef: p.paqueteContenidoRef, faltantes: [] },
         },
       };
+    }
+    case EVENTOS_PLAN.optimizado: {
+      const p = event.payload as PayloadOptimizado;
+      const o = p.optimizacion;
+      const a = state.actividades[o.actividadId];
+      const optimizaciones = [...state.optimizaciones, o];
+      if (!a) return { ...next, optimizaciones };
+      // El efecto sobre la actividad es autoritativo (resultado de optimización autorizada).
+      const actualizada: Actividad = { ...a, optimizacion: `${o.tipo}: ${o.motivo}`, estado: p.nuevoEstadoActividad ?? a.estado };
+      return { ...next, optimizaciones, actividades: { ...state.actividades, [o.actividadId]: actualizada } };
     }
     default:
       return next;
