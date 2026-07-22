@@ -6,6 +6,18 @@
 
 **Modo de trabajo Fase 1:** avanzar en el mayor bloque seguro; no pedir validación cuando haya evidencia objetiva (compilar, probar, verificar conformidad #15); la implementación no modifica la arquitectura; toda decisión técnica deriva de la Biblioteca, declara su nivel A/B/C y mantiene trazabilidad. Detenerse solo por: (1) modificar la Biblioteca · (2) contradicción estructural · (3) decisión estratégica de negocio · (4) alternativas equivalentes de alto impacto · (5) riesgo a datos/producción · (6) acción externa no automatizable (credenciales, pagos, licencias…).
 
+## ✅ BLOQUE F2-PILOT-DEC-01 (Decisión del Primer Piloto Real — SmileFlow Clinic) — CERRADO Y VERIFICADO (2026-07-21)
+
+Bloque **corto**: registra la decisión estratégica **aprobada por el propietario** del primer piloto real (**SmileFlow Clinic** · marketing · **LinkedIn orgánico** · autonomía **2** con **aprobación por publicación** · **$0** de publicidad · **14 días** · prohibiciones clínicas duras) como expediente en modo `real_preparado`, reutilizando `@soec/piloto`. La aprobación autoriza **solo PREPARAR**; **no** publicar, gastar ni conectar cuentas. Complemento de ADR-0015.
+
+- **Decisión persistida** (org `smileflow-clinic`, expediente `exp-smileflow-piloto-1`) con perfil/presupuesto (`ejecutadoReal: 0`)/conexión LinkedIn **sin credencial** (`pendiente_credencial`) y política inicial conservadora.
+- **Readiness real = BLOQUEADA** (falta credencial real verificada + cuenta real). La ceremonia de activación devuelve una **denegación** (API 409) con las autorizaciones estratégicas y operativas faltantes.
+- **Frontera declarada:** conectar la cuenta real de LinkedIn, verificar credenciales reales y publicar contenido público son **acciones del propietario**; SOEC no las ejecuta. La primera publicación real requiere una **autorización de publicación explícita posterior**.
+
+**Resultados (2026-07-21):** `pnpm -r typecheck` OK (22 workspaces) · `pnpm lint` limpio · backend **426 passed (83 files)** (nueva: 1 de la decisión — registra en real_preparado; readiness real bloqueada; activación denegada; ejecutadoReal 0) · web **6 passed** · `next build` ✓. Sin cambios de esquema (reutiliza `0012`). **Validación visual real** (app viva): panel «Decisión del primer piloto real — SmileFlow Clinic» con canal/modo `linkedin (orgánico) · real_preparado`, autonomía nivel 2 / aprobación por publicación / $0, **readiness real BLOQUEADO**, **«Activación real: BLOQUEADA»**, prohibiciones duras y la nota «SOEC no conecta cuentas, no publica y no gasta: esas acciones son suyas».
+
+**Lo que el propietario debe aún proveer/autorizar** (registrado en el expediente): identidad legal de SmileFlow; cuenta empresarial real de LinkedIn; credencial real verificada (referencia, nunca token); atribución identificable (UTM + formulario con identificador de campaña); y la **autorización de publicación explícita**. Hasta entonces, todo efecto externo real permanece **bloqueado**.
+
 ## ✅ BLOQUE F2-PILOT-01 (Preparación del Piloto Operacional Controlado) — CERRADO Y VERIFICADO (2026-07-21)
 
 Séptima vertical: lleva SOEC de «sistema probado con fixtures» a «listo para recibir una configuración piloto real, verificar que es segura y solicitar una única autorización final antes de activarla». Paquete GENÉRICO `@soec/piloto` (no pertenece a marketing) + experiencia `/piloto`; ADR-0015. **No activa** el piloto: prepara la operación real y se detiene antes del primer efecto real. Sin publicación pública, sin gasto real, sin credenciales reales, sin conexión productiva.

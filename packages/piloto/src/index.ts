@@ -24,3 +24,4 @@ export * from './app/expediente-service';
 export * from './app/ensayo-service';
 export * from './projections/projection';
 export * from './fixtures';
+export * from './fixtures-decision';

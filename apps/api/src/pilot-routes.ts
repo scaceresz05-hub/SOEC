@@ -8,9 +8,20 @@ import type { FastifyInstance } from 'fastify';
 import type { EventStore } from '@soec/contracts';
 import type { EscenarioEnsayo, Entorno } from '@soec/piloto';
 import { PilotExperience } from './pilot-experience';
+import { PilotDecisionExperience } from './pilot-decision-experience';
 
 export function registerPilotRoutes(app: FastifyInstance, store: EventStore): void {
   const exp = new PilotExperience(store);
+  const decision = new PilotDecisionExperience(store);
+
+  // Decisión del primer piloto real (SmileFlow) — F2-PILOT-DEC-01. La activación real
+  // sigue bloqueada: 'activar' devuelve una denegación (409) con lo que falta.
+  app.post('/piloto/decision/preparar', async (_req, reply) => {
+    await decision.preparar();
+    return reply.code(201).send({ ok: true });
+  });
+  app.get('/piloto/decision/estado', async (_req, reply) => reply.send(await decision.estado()));
+  app.post('/piloto/decision/activar', async (_req, reply) => reply.code(409).send(await decision.intentarActivar()));
 
   app.post('/piloto/preparar', async (_req, reply) => {
     await exp.preparar();

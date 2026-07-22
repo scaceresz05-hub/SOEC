@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ensayar, estadoPiloto, intentarActivar, prepararPiloto } from '../../lib/piloto-client';
+import { ensayar, estadoDecision, estadoPiloto, intentarActivar, prepararDecision, prepararPiloto, type DecisionPiloto } from '../../lib/piloto-client';
 import type { EstadoPiloto } from '../../lib/piloto-types';
 
 const TONO_READINESS: Record<string, string> = {
@@ -20,12 +20,14 @@ export default function PilotoPage() {
   const [ocupado, setOcupado] = useState(false);
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [escenario, setEscenario] = useState('exitoso');
+  const [decision, setDecision] = useState<DecisionPiloto | null>(null);
 
   const refrescar = useCallback(async () => setEstado(await estadoPiloto()), []);
   useEffect(() => {
     (async () => {
-      await prepararPiloto();
+      await Promise.all([prepararPiloto(), prepararDecision()]);
       await refrescar();
+      setDecision(await estadoDecision());
     })();
   }, [refrescar]);
 
@@ -57,6 +59,27 @@ export default function PilotoPage() {
     <div>
       <h1>Preparación del piloto operacional</h1>
       <p className="muted">SOEC demuestra que una organización está lista para operar —o explica exactamente por qué no— antes de permitir cualquier efecto real. Toda esta preparación ocurre en un entorno sintético/emulado.</p>
+
+      {decision?.existe && (
+        <section className="card" style={{ borderColor: 'var(--danger, #b45309)' }}>
+          <h2 style={{ marginTop: 0 }}>Decisión del primer piloto real — {decision.empresa}</h2>
+          <div className="kv small">
+            <dt>Objetivo</dt><dd>{decision.decision.objetivo}</dd>
+            <dt>Canal / modo</dt><dd>{decision.decision.canal} · <span className="badge badge--warn">{decision.decision.modo}</span></dd>
+            <dt>Autonomía</dt><dd>nivel {decision.decision.nivelAutonomia} · aprobación por publicación: {decision.decision.aprobacionPorPublicacion ? 'sí' : 'no'} · {decision.decision.frecuenciaMaxima}/sem · {decision.decision.duracionDias} días · gasto publicitario ${decision.decision.gastoPublicitario}</dd>
+            <dt>Readiness real</dt><dd><span className={`badge badge--${decision.readinessReal.resultado === 'bloqueado' ? 'danger' : 'warn'}`}>{decision.readinessReal.resultado}</span> (activación real permitida: {decision.readinessReal.activacionRealPermitida ? 'sí' : 'no'})</dd>
+          </div>
+          <p className="small"><strong>Activación real: BLOQUEADA.</strong> {decision.activacion.motivo}.</p>
+          <details>
+            <summary className="small">Lo que usted (propietario) debe proveer/autorizar antes de publicar</summary>
+            <ul className="limpia small">
+              {decision.activacion.loQueFaltaOperativo.map((x, i) => <li key={`o${i}`}>• {x}</li>)}
+              {decision.activacion.loQueFaltaEstrategico.map((x, i) => <li key={`e${i}`}>• {x}</li>)}
+            </ul>
+          </details>
+          <p className="small muted">Prohibiciones duras: {decision.decision.prohibiciones.join(' · ')}. SOEC no conecta cuentas, no publica y no gasta: esas acciones son suyas.</p>
+        </section>
+      )}
 
       <section className="card">
         <div className="kv">
