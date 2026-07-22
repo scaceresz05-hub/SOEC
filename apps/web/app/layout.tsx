@@ -16,12 +16,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             SOEC
           </Link>
           <nav>
+            <Link href="/control">Centro de control</Link>
             <Link href="/">Estado de la empresa</Link>
-            <Link href="/historial">Historial de análisis</Link>
-            <Link href="/marketing">Marketing autónomo</Link>
-            <Link href="/contenido">Fábrica de contenido</Link>
-            <Link href="/canales">Publicación controlada</Link>
-            <Link href="/medicion">Medición y optimización</Link>
+            <Link href="/marketing">Marketing</Link>
+            <Link href="/contenido">Contenido</Link>
+            <Link href="/canales">Publicación</Link>
+            <Link href="/medicion">Medición</Link>
           </nav>
         </header>
         <main className="contenido">{children}</main>

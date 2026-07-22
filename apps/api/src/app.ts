@@ -71,6 +71,13 @@ import {
   OptimizacionNoEncontradaError,
   OptimizacionNoOperableError,
 } from '@soec/medicion';
+import {
+  ComandoControlInvalidoError,
+  DecisionNoEncontradaError,
+  DecisionYaResueltaError,
+  DepartamentoPausadoError,
+  PermisoInsuficienteError,
+} from '@soec/control';
 import { registerModelRoutes } from './model-routes';
 import { registerEceRoutes } from './ece-routes';
 import { registerOperationsRoutes } from './operations-routes';
@@ -81,6 +88,7 @@ import { registerMarketingRoutes } from './marketing-routes';
 import { registerContentRoutes } from './content-routes';
 import { registerChannelRoutes } from './channel-routes';
 import { registerMeasurementRoutes } from './measurement-routes';
+import { registerControlRoutes } from './control-routes';
 
 export interface AppDeps {
   store: EventStore;
@@ -151,9 +159,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       err instanceof PaqueteNoEncontradoError ||
       err instanceof PublicacionNoEncontradaError ||
       err instanceof MedicionNoEncontradaError ||
-      err instanceof OptimizacionNoEncontradaError
+      err instanceof OptimizacionNoEncontradaError ||
+      err instanceof DecisionNoEncontradaError
     ) {
       return reply.code(404).send({ error: err.name, message: err.message });
+    }
+    if (err instanceof PermisoInsuficienteError) {
+      return reply.code(403).send({ error: err.name, message: err.message });
+    }
+    if (err instanceof DecisionYaResueltaError || err instanceof DepartamentoPausadoError) {
+      return reply.code(409).send({ error: err.name, message: err.message });
     }
     if (
       err instanceof SinPoliticaVigenteError ||
@@ -171,7 +186,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       err instanceof ModoRealDesactivadoError ||
       err instanceof WebhookInvalidoError ||
       err instanceof ComandoMedicionInvalidoError ||
-      err instanceof OptimizacionNoOperableError
+      err instanceof OptimizacionNoOperableError ||
+      err instanceof ComandoControlInvalidoError
     ) {
       return reply.code(422).send({ error: err.name, message: err.message });
     }
@@ -206,6 +222,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerContentRoutes(app, deps.store);
   registerChannelRoutes(app, deps.store);
   registerMeasurementRoutes(app, deps.store);
+  registerControlRoutes(app, deps.store);
 
   app.post('/events', async (req, reply) => {
     const ctx = contextFrom(req);

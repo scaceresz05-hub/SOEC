@@ -17,6 +17,8 @@ import { aplicarEventoAProyeccionCanales } from '@soec/canales';
 import { PgPublicationProjectionStore } from '@soec/canales/pg';
 import { aplicarEventoAProyeccionMedicion } from '@soec/medicion';
 import { PgMedProjectionStore, PgOptProjectionStore } from '@soec/medicion/pg';
+import { aplicarEventoAProyeccionControl } from '@soec/control';
+import { PgPausaProjectionStore, PgDecisionProjectionStore, PgInboxProjectionStore } from '@soec/control/pg';
 import { drainOutbox } from './index';
 
 /**
@@ -37,6 +39,7 @@ const mktStores = { objetivo: new PgObjetivoProjectionStore(pool), plan: new PgP
 const contStores = { brief: new PgBriefProjectionStore(pool), paquete: new PgPaqueteProjectionStore(pool) };
 const chanStores = { publicacion: new PgPublicationProjectionStore(pool) };
 const metStores = { medicion: new PgMedProjectionStore(pool), optimizacion: new PgOptProjectionStore(pool) };
+const ctrlStores = { pausa: new PgPausaProjectionStore(pool), decision: new PgDecisionProjectionStore(pool), inbox: new PgInboxProjectionStore(pool) };
 const build = new EceBuildService(store, new MedService(store), new MdmService(store));
 
 drainOutbox(outbox, async (event) => {
@@ -49,6 +52,7 @@ drainOutbox(outbox, async (event) => {
   await aplicarEventoAProyeccionContenido(contStores, event);
   await aplicarEventoAProyeccionCanales(chanStores, event);
   await aplicarEventoAProyeccionMedicion(metStores, event);
+  await aplicarEventoAProyeccionControl(ctrlStores, event);
 })
   .then(async (n) => {
     console.log(JSON.stringify({ procesados: n }));

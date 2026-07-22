@@ -18,6 +18,7 @@
     "@soec/marketing": "workspace:*",
     "@soec/contenido": "workspace:*",
     "@soec/canales": "workspace:*",
-    "@soec/medicion": "workspace:*"
+    "@soec/medicion": "workspace:*",
+    "@soec/control": "workspace:*"
   }
 }
