@@ -21,6 +21,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <Link href="/marketing">Marketing autónomo</Link>
             <Link href="/contenido">Fábrica de contenido</Link>
             <Link href="/canales">Publicación controlada</Link>
+            <Link href="/medicion">Medición y optimización</Link>
           </nav>
         </header>
         <main className="contenido">{children}</main>

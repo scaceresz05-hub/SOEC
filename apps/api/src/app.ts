@@ -65,6 +65,12 @@ import {
   PublicacionNoOperableError,
   WebhookInvalidoError,
 } from '@soec/canales';
+import {
+  ComandoMedicionInvalidoError,
+  MedicionNoEncontradaError,
+  OptimizacionNoEncontradaError,
+  OptimizacionNoOperableError,
+} from '@soec/medicion';
 import { registerModelRoutes } from './model-routes';
 import { registerEceRoutes } from './ece-routes';
 import { registerOperationsRoutes } from './operations-routes';
@@ -74,6 +80,7 @@ import { registerOperationalRoutes } from './operational-routes';
 import { registerMarketingRoutes } from './marketing-routes';
 import { registerContentRoutes } from './content-routes';
 import { registerChannelRoutes } from './channel-routes';
+import { registerMeasurementRoutes } from './measurement-routes';
 
 export interface AppDeps {
   store: EventStore;
@@ -142,7 +149,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       err instanceof BriefNoEncontradoError ||
       err instanceof MarcaNoEncontradaError ||
       err instanceof PaqueteNoEncontradoError ||
-      err instanceof PublicacionNoEncontradaError
+      err instanceof PublicacionNoEncontradaError ||
+      err instanceof MedicionNoEncontradaError ||
+      err instanceof OptimizacionNoEncontradaError
     ) {
       return reply.code(404).send({ error: err.name, message: err.message });
     }
@@ -160,7 +169,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       err instanceof AdaptadorCanalNoDisponibleError ||
       err instanceof PublicacionNoOperableError ||
       err instanceof ModoRealDesactivadoError ||
-      err instanceof WebhookInvalidoError
+      err instanceof WebhookInvalidoError ||
+      err instanceof ComandoMedicionInvalidoError ||
+      err instanceof OptimizacionNoOperableError
     ) {
       return reply.code(422).send({ error: err.name, message: err.message });
     }
@@ -194,6 +205,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerMarketingRoutes(app, deps.store);
   registerContentRoutes(app, deps.store);
   registerChannelRoutes(app, deps.store);
+  registerMeasurementRoutes(app, deps.store);
 
   app.post('/events', async (req, reply) => {
     const ctx = contextFrom(req);
