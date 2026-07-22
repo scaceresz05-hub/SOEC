@@ -22,6 +22,7 @@
     "@soec/canales": "workspace:*",
     "@soec/medicion": "workspace:*",
     "@soec/control": "workspace:*",
+    "@soec/piloto": "workspace:*",
     "@soec/instancia-pyme": "workspace:*",
     "fastify": "^5.2.0"
   }

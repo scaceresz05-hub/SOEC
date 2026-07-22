@@ -77,6 +77,9 @@ importers:
       '@soec/operaciones':
         specifier: workspace:*
         version: link:../../packages/operaciones
+      '@soec/piloto':
+        specifier: workspace:*
+        version: link:../../packages/piloto
       fastify:
         specifier: ^5.2.0
         version: 5.10.0
@@ -150,6 +153,9 @@ importers:
       '@soec/operaciones':
         specifier: workspace:*
         version: link:../../packages/operaciones
+      '@soec/piloto':
+        specifier: workspace:*
+        version: link:../../packages/piloto
 
   packages/canal-emulado:
     dependencies:
@@ -443,6 +449,43 @@ importers:
       '@soec/models':
         specifier: workspace:*
         version: link:../models
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+
+  packages/piloto:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/control':
+        specifier: workspace:*
+        version: link:../control
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
+    devDependencies:
+      '@soec/canales':
+        specifier: workspace:*
+        version: link:../canales
+      '@soec/capacidades':
+        specifier: workspace:*
+        version: link:../capacidades
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../contenido
+      '@soec/marketing':
+        specifier: workspace:*
+        version: link:../marketing
+      '@soec/medicion':
+        specifier: workspace:*
+        version: link:../medicion
+      '@soec/operacional':
+        specifier: workspace:*
+        version: link:../operacional
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
