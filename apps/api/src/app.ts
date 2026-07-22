@@ -78,6 +78,13 @@ import {
   DepartamentoPausadoError,
   PermisoInsuficienteError,
 } from '@soec/control';
+import {
+  ActivacionRealProhibidaError,
+  ComandoPilotoInvalidoError,
+  EntornoRealBloqueadoError,
+  ExpedienteNoEncontradoError,
+  OrganizacionNoEncontradaError,
+} from '@soec/piloto';
 import { registerModelRoutes } from './model-routes';
 import { registerEceRoutes } from './ece-routes';
 import { registerOperationsRoutes } from './operations-routes';
@@ -89,6 +96,7 @@ import { registerContentRoutes } from './content-routes';
 import { registerChannelRoutes } from './channel-routes';
 import { registerMeasurementRoutes } from './measurement-routes';
 import { registerControlRoutes } from './control-routes';
+import { registerPilotRoutes } from './pilot-routes';
 
 export interface AppDeps {
   store: EventStore;
@@ -160,14 +168,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       err instanceof PublicacionNoEncontradaError ||
       err instanceof MedicionNoEncontradaError ||
       err instanceof OptimizacionNoEncontradaError ||
-      err instanceof DecisionNoEncontradaError
+      err instanceof DecisionNoEncontradaError ||
+      err instanceof OrganizacionNoEncontradaError ||
+      err instanceof ExpedienteNoEncontradoError
     ) {
       return reply.code(404).send({ error: err.name, message: err.message });
     }
     if (err instanceof PermisoInsuficienteError) {
       return reply.code(403).send({ error: err.name, message: err.message });
     }
-    if (err instanceof DecisionYaResueltaError || err instanceof DepartamentoPausadoError) {
+    if (err instanceof DecisionYaResueltaError || err instanceof DepartamentoPausadoError || err instanceof ActivacionRealProhibidaError || err instanceof EntornoRealBloqueadoError) {
       return reply.code(409).send({ error: err.name, message: err.message });
     }
     if (
@@ -187,7 +197,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       err instanceof WebhookInvalidoError ||
       err instanceof ComandoMedicionInvalidoError ||
       err instanceof OptimizacionNoOperableError ||
-      err instanceof ComandoControlInvalidoError
+      err instanceof ComandoControlInvalidoError ||
+      err instanceof ComandoPilotoInvalidoError
     ) {
       return reply.code(422).send({ error: err.name, message: err.message });
     }
@@ -223,6 +234,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerChannelRoutes(app, deps.store);
   registerMeasurementRoutes(app, deps.store);
   registerControlRoutes(app, deps.store);
+  registerPilotRoutes(app, deps.store);
 
   app.post('/events', async (req, reply) => {
     const ctx = contextFrom(req);

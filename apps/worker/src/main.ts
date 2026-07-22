@@ -19,6 +19,8 @@ import { aplicarEventoAProyeccionMedicion } from '@soec/medicion';
 import { PgMedProjectionStore, PgOptProjectionStore } from '@soec/medicion/pg';
 import { aplicarEventoAProyeccionControl } from '@soec/control';
 import { PgPausaProjectionStore, PgDecisionProjectionStore, PgInboxProjectionStore } from '@soec/control/pg';
+import { aplicarEventoAProyeccionPiloto } from '@soec/piloto';
+import { PgOrgProjectionStore, PgExpProjectionStore, PgEnsProjectionStore } from '@soec/piloto/pg';
 import { drainOutbox } from './index';
 
 /**
@@ -40,6 +42,7 @@ const contStores = { brief: new PgBriefProjectionStore(pool), paquete: new PgPaq
 const chanStores = { publicacion: new PgPublicationProjectionStore(pool) };
 const metStores = { medicion: new PgMedProjectionStore(pool), optimizacion: new PgOptProjectionStore(pool) };
 const ctrlStores = { pausa: new PgPausaProjectionStore(pool), decision: new PgDecisionProjectionStore(pool), inbox: new PgInboxProjectionStore(pool) };
+const pilotoStores = { organizacion: new PgOrgProjectionStore(pool), expediente: new PgExpProjectionStore(pool), ensayo: new PgEnsProjectionStore(pool) };
 const build = new EceBuildService(store, new MedService(store), new MdmService(store));
 
 drainOutbox(outbox, async (event) => {
@@ -53,6 +56,7 @@ drainOutbox(outbox, async (event) => {
   await aplicarEventoAProyeccionCanales(chanStores, event);
   await aplicarEventoAProyeccionMedicion(metStores, event);
   await aplicarEventoAProyeccionControl(ctrlStores, event);
+  await aplicarEventoAProyeccionPiloto(pilotoStores, event);
 })
   .then(async (n) => {
     console.log(JSON.stringify({ procesados: n }));
