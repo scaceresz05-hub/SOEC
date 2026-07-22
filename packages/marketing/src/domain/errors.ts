@@ -10,3 +10,5 @@ export class PlanNoEncontradoError extends SoecError {}
 export class SinAccionDisponibleError extends SoecError {}
 /** Dato obligatorio ausente en un comando de marketing. */
 export class ComandoMarketingInvalidoError extends SoecError {}
+/** La actividad no puede prepararse con contenido (no está bloqueada por contenido_faltante). */
+export class ActividadNoPreparableError extends SoecError {}

@@ -112,6 +112,7 @@ export function planificar(
         faltantes,
         accionExecutionId: null,
         resultado: null,
+        paqueteContenidoRef: null,
       });
     }
   }

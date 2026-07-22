@@ -10,6 +10,7 @@ import { type PlanState, EVENTOS_PLAN, planStreamId, reconstruirPlan, siguienteA
 import { planificar, type PlanificarOpts } from '../domain/planner';
 import { ObjectiveService } from './objective-service';
 import {
+  ActividadNoPreparableError,
   ComandoMarketingInvalidoError,
   ObjetivoNoEncontradoError,
   ObjetivoNoEvaluableError,
@@ -104,6 +105,35 @@ export class PlanningService {
 
   siguiente(ctx: RequestContext, planId: string) {
     return this.cargar(ctx, planId).then((p) => siguienteActividad(p));
+  }
+
+  /**
+   * Contrato público (F2-CONT-01 §16): adjunta el contenido producido por la
+   * fábrica a una actividad bloqueada por `contenido_faltante` y la transiciona a
+   * `autorizable`. No modifica tablas ni eventos internos desde afuera: es la vía
+   * pública para desbloquear. Idempotente si ya fue preparada.
+   */
+  async prepararActividad(
+    ctx: RequestContext,
+    planId: string,
+    actividadId: string,
+    contenido: string,
+    paqueteContenidoRef: string,
+    attribution: Attribution,
+    occurredAt: string,
+  ): Promise<PlanState> {
+    const plan = await this.cargar(ctx, planId);
+    if (!plan.existe) throw new PlanNoEncontradoError(`El plan '${planId}' no existe`);
+    const a = plan.actividades[actividadId];
+    if (!a) throw new ActividadNoPreparableError(`La actividad '${actividadId}' no existe en el plan`);
+    if (a.estado !== 'bloqueada' || a.motivoBloqueo !== 'contenido_faltante') {
+      if (a.paqueteContenidoRef === paqueteContenidoRef) return plan; // idempotente
+      throw new ActividadNoPreparableError(`La actividad '${actividadId}' no está bloqueada por contenido_faltante (estado: ${a.estado})`);
+    }
+    await this.store.append(ctx, planStreamId(planId), plan.version, [
+      this.input(EVENTOS_PLAN.actividadPreparada, { actividadId, contenido, paqueteContenidoRef }, attribution, occurredAt),
+    ]);
+    return this.cargar(ctx, planId);
   }
 
   /** Ejecuta la próxima acción del plan a través del plano operacional (autorización + simulado). */

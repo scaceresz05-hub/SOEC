@@ -61,6 +61,8 @@ export interface Actividad {
   readonly faltantes: readonly string[];
   readonly accionExecutionId: string | null;
   readonly resultado: string | null;
+  /** Referencia al paquete de contenido que desbloqueó la actividad (F2-CONT-01), si aplica. */
+  readonly paqueteContenidoRef: string | null;
 }
 export interface Calendario {
   readonly zonaHoraria: string;
@@ -95,6 +97,7 @@ export const EVENTOS_PLAN = {
   reanudado: 'plan.reanudado',
   actividadTransicion: 'plan.actividad_transicion',
   actividadEjecutada: 'plan.actividad_ejecutada',
+  actividadPreparada: 'plan.actividad_preparada',
 } as const;
 
 export function planStreamId(planId: string): string {
@@ -172,6 +175,11 @@ interface PayloadEjecutada {
   resultado: string;
   nuevoEstado: EstadoActividad;
 }
+interface PayloadPreparada {
+  actividadId: string;
+  contenido: string;
+  paqueteContenidoRef: string;
+}
 
 function cargarContenido(state: PlanState, next: PlanState, c: PlanVersionContenido, en: string): PlanState {
   return {
@@ -217,6 +225,20 @@ export function aplicarPlan(state: PlanState, event: RecordedEvent): PlanState {
         actividades: {
           ...state.actividades,
           [p.actividadId]: { ...a, estado: p.nuevoEstado, accionExecutionId: p.accionExecutionId, resultado: p.resultado },
+        },
+      };
+    }
+    case EVENTOS_PLAN.actividadPreparada: {
+      const p = event.payload as PayloadPreparada;
+      const a = state.actividades[p.actividadId];
+      // Solo desbloquea actividades bloqueadas por falta de contenido; conserva la máquina de estados.
+      if (!a || a.estado !== 'bloqueada' || a.motivoBloqueo !== 'contenido_faltante') return next;
+      if (!transicionValida(a.estado, 'autorizable')) return next;
+      return {
+        ...next,
+        actividades: {
+          ...state.actividades,
+          [p.actividadId]: { ...a, estado: 'autorizable', motivoBloqueo: null, contenido: p.contenido, paqueteContenidoRef: p.paqueteContenidoRef, faltantes: [] },
         },
       };
     }
