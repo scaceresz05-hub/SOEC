@@ -16,7 +16,8 @@
     "db:up": "docker compose -p soec -f infrastructure/docker-compose.yml up -d",
     "db:down": "docker compose -p soec -f infrastructure/docker-compose.yml down -v",
     "migrate": "tsx packages/piloto/src/pg/migrate-cli.ts",
-    "emulador": "tsx packages/canal-emulado/src/server.ts"
+    "emulador": "tsx packages/canal-emulado/src/server.ts",
+    "start-local": "node scripts/start-local.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
