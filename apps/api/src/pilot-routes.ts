@@ -21,7 +21,9 @@ export function registerPilotRoutes(app: FastifyInstance, store: EventStore): vo
     return reply.code(201).send({ ok: true });
   });
   app.get('/piloto/decision/estado', async (_req, reply) => reply.send(await decision.estado()));
-  app.post('/piloto/decision/activar', async (_req, reply) => reply.code(409).send(await decision.intentarActivar()));
+  app.post('/piloto/decision/activar', async (_req, reply) =>
+    reply.code(409).send(await decision.intentarActivar()),
+  );
 
   app.post('/piloto/preparar', async (_req, reply) => {
     await exp.preparar();
