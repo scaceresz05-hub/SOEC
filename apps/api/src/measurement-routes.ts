@@ -16,8 +16,12 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
   });
   app.get('/medicion/estado', async (_req, reply) => reply.send(await exp.estado()));
   app.post('/medicion/sincronizar', async (req, reply) => {
-    const { escenario } = (req.body ?? {}) as { escenario?: 'alto' | 'bajo' | 'insuficiente' | 'gasto_excedido' };
+    const { escenario } = (req.body ?? {}) as {
+      escenario?: 'alto' | 'bajo' | 'insuficiente' | 'gasto_excedido';
+    };
     return reply.code(201).send(await exp.sincronizarTodo(escenario ?? 'bajo'));
   });
-  app.post('/medicion/optimizar', async (_req, reply) => reply.code(201).send(await exp.optimizarTodo()));
+  app.post('/medicion/optimizar', async (_req, reply) =>
+    reply.code(201).send(await exp.optimizarTodo()),
+  );
 }
