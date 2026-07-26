@@ -5,8 +5,41 @@ import type {
   ListaEvaluaciones,
 } from './evaluacion-types';
 
+/** Mensajes comprensibles para códigos de error conocidos del servicio (fallback por `error`). */
+const ERRORES_CONOCIDOS: Record<string, string> = {
+  SeleccionRequerida: 'Selecciona una organización y un departamento válidos.',
+  SeleccionInvalidaError: 'La organización o el departamento seleccionados no son válidos.',
+  PreguntaFueraDelRubroError: 'La pregunta no pertenece al cuestionario del rubro.',
+  EvaluacionInvalidaError: 'La evaluación no admite este cambio (¿está cerrada o archivada?).',
+};
+const MENSAJE_GENERICO =
+  'No se pudo completar la acción. Revisa la selección e inténtalo nuevamente.';
+
+/**
+ * Deriva un mensaje comprensible del cuerpo de error del servicio.
+ * Orden: `message` del servicio → mensaje conocido por `error` → genérico seguro.
+ * Nunca expone códigos técnicos crudos ni stack traces.
+ */
+export function mensajeDeError(body: unknown): string {
+  const b = body as { error?: unknown; message?: unknown } | null;
+  if (b && typeof b.message === 'string' && b.message.trim() !== '') return b.message;
+  if (b && typeof b.error === 'string' && ERRORES_CONOCIDOS[b.error])
+    return ERRORES_CONOCIDOS[b.error]!;
+  return MENSAJE_GENERICO;
+}
+
+async function comoError(res: Response): Promise<Error> {
+  let body: unknown = null;
+  try {
+    body = await res.json();
+  } catch {
+    /* respuesta sin JSON válido (p. ej. HTML de error): se usa el fallback genérico */
+  }
+  return new Error(mensajeDeError(body));
+}
+
 async function json<T>(res: Response): Promise<T> {
-  if (!res.ok) throw new Error(`fallo de servicio (${res.status})`);
+  if (!res.ok) throw await comoError(res);
   return (await res.json()) as T;
 }
 const jbody = (body: unknown): RequestInit => ({

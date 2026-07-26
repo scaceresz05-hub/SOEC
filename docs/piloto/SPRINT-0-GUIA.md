@@ -54,6 +54,12 @@ DATABASE_URL=postgres://soec:soec@localhost:5544/soec \
 
 El script imprime, para cada caso, dos URLs listas para usar (Evaluación y Workspace).
 
+> **Nota (URLs).** `/evaluacion` **reconcilia** cualquier `org`/`departamento` de la URL contra
+> el catálogo gobernado: un enlace antiguo con una organización que ya no existe (p. ej.
+> `?org=clinica-demo`) se sustituye automáticamente por un par válido, sin dejar el selector en
+> un estado engañoso ni producir errores 400. Aun así, como higiene, si dudas abre
+> `http://localhost:3080/evaluacion` **sin parámetros**.
+
 ## 2. Reponer un escenario entre participantes (reset seguro)
 
 Vuelve a ejecutar `seed-piloto.ts`. Es **no destructivo**: **archiva** las evaluaciones

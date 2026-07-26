@@ -24,6 +24,7 @@ import type {
   PreguntaEval,
   ResumenEvaluacion,
 } from '../../lib/evaluacion-types';
+import { esParValido, reconciliar } from '../../lib/seleccion';
 
 const TONO_ESTADO_RESP: Record<string, string> = {
   RESPONDIDA: 'ok',
@@ -241,23 +242,29 @@ export default function EvaluacionPage() {
     window.history.replaceState(null, '', urlDe(o, d, ev));
   }, []);
 
-  // Carga inicial: catálogo + parámetros de la URL.
+  // Carga inicial: catálogo + reconciliación de los parámetros de la URL contra el catálogo.
   useEffect(() => {
     (async () => {
       const c = await obtenerCatalogo();
-      setCat(c);
       const p = new URLSearchParams(window.location.search);
-      const o = p.get('org') || c.organizaciones[0]?.id || '';
-      const d =
-        p.get('departamento') ||
-        c.organizaciones.find((x) => x.id === o)?.departamentos[0]?.id ||
-        '';
-      setOrg(o);
-      setDep(d);
-      setEvaluacionId(p.get('evaluacionId'));
+      const rec = reconciliar(c, p.get('org'), p.get('departamento'));
+      // Si el par de la URL era inválido/obsoleto, el evaluacionId (ligado a ese par) ya no aplica.
+      const ev = rec.reconciliado ? null : p.get('evaluacionId');
+      setCat(c);
+      setOrg(rec.org);
+      setDep(rec.dep);
+      setEvaluacionId(ev);
       setListo(true);
+      // Limpiar la URL al par gobernado (replace: sin entrada de historial), evitando que un
+      // enlace antiguo deje el <select> con un value sin opción coincidente.
+      if (rec.reconciliado || p.get('org') !== rec.org || p.get('departamento') !== rec.dep) {
+        window.history.replaceState(null, '', urlDe(rec.org, rec.dep, ev));
+      }
     })();
   }, []);
+
+  // Integridad: la acción solo procede con un par (org, departamento) del catálogo gobernado.
+  const seleccionValida = esParValido(cat, org, dep);
 
   const refrescarLista = useCallback(async (o: string, d: string) => {
     if (!o || !d) return;
@@ -287,6 +294,11 @@ export default function EvaluacionPage() {
   );
 
   const nueva = useCallback(async () => {
+    // Defensa en profundidad: nunca enviar una solicitud condenada a 400.
+    if (!seleccionValida) {
+      setAviso('Selecciona una organización y un departamento válidos.');
+      return;
+    }
     setOcupado(true);
     setAviso(null);
     try {
@@ -300,7 +312,7 @@ export default function EvaluacionPage() {
     } finally {
       setOcupado(false);
     }
-  }, [org, dep, titulo, sincronizarUrl]);
+  }, [org, dep, titulo, sincronizarUrl, seleccionValida]);
 
   const abrir = useCallback(
     (ev: string) => {
@@ -481,9 +493,14 @@ export default function EvaluacionPage() {
               onChange={(ev) => setTitulo(ev.target.value)}
               placeholder="p. ej. Evaluación de marzo"
             />{' '}
-            <button className="btn" onClick={nueva} disabled={ocupado}>
+            <button className="btn" onClick={nueva} disabled={ocupado || !seleccionValida}>
               Iniciar evaluación nueva
             </button>
+            {!seleccionValida && (
+              <p className="small muted" style={{ marginTop: 6 }}>
+                Selecciona una organización y un departamento válidos.
+              </p>
+            )}
           </section>
         </>
       ) : e ? (
