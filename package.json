@@ -15,9 +15,11 @@
     "verify": "pnpm run typecheck && pnpm run lint && pnpm run test",
     "db:up": "docker compose -p soec -f infrastructure/docker-compose.yml up -d",
     "db:down": "docker compose -p soec -f infrastructure/docker-compose.yml down -v",
-    "migrate": "tsx packages/piloto/src/pg/migrate-cli.ts",
+    "migrate": "tsx packages/decision/src/pg/migrate-cli.ts",
     "emulador": "tsx packages/canal-emulado/src/server.ts",
-    "start-local": "node scripts/start-local.mjs"
+    "start-local": "node scripts/start-local.mjs",
+    "sprint0:preflight": "tsx apps/api/scripts/preflight.ts",
+    "piloto:check": "tsx apps/api/scripts/preflight.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
