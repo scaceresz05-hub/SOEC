@@ -6,7 +6,13 @@
  * paquete → entrega (actividad autorizable) → ejecución SIMULADA → verificación.
  * Contexto sintético server-side. Ningún efecto externo real.
  */
-import { ActorId, type Attribution, type EventStore, OrganizationId, type RequestContext } from '@soec/contracts';
+import {
+  ActorId,
+  type Attribution,
+  type EventStore,
+  OrganizationId,
+  type RequestContext,
+} from '@soec/contracts';
 import { OperationalService, PolicyService, AdaptadorSimulado } from '@soec/operacional';
 import { ObjectiveService, PlanningService, type PlanState } from '@soec/marketing';
 import {
@@ -30,7 +36,9 @@ const ORG = 'pyme-cont-demo';
 const ATRIBUCION: Attribution = {
   source: 'experiencia-contenido',
   purpose: 'producir contenido de marketing autorizado por política',
-  assumptions: ['estrategia sintética; efectos simulados; proveedor generativo determinista (no IA real)'],
+  assumptions: [
+    'estrategia sintética; efectos simulados; proveedor generativo determinista (no IA real)',
+  ],
   claimType: 'observational',
   regime: 'institutional',
   uncertainty: 'baja',
@@ -42,7 +50,15 @@ export interface PaqueteResumen {
   canal: string;
   estado: string;
   resultado: string | null;
-  adaptaciones: { canal: string; formato: string; estado: string; titulo: string; cuerpo: string; hashtags: readonly string[]; llamadaAccion: string }[];
+  adaptaciones: {
+    canal: string;
+    formato: string;
+    estado: string;
+    titulo: string;
+    cuerpo: string;
+    hashtags: readonly string[];
+    llamadaAccion: string;
+  }[];
   activos: { tipo: string; descripcion: string }[];
   hallazgos: { codigo: string; severidad: string; descripcion: string; bloqueante: boolean }[];
   revisiones: { ronda: number; motivo: string; accion: string }[];
@@ -84,7 +100,12 @@ export class ContentExperience {
 
   private ctx(): RequestContext {
     const organizationId = OrganizationId(ORG);
-    return { organizationId, actor: ActorId('soec'), scope: { organizationId, permissions: ['events:append', 'events:read'] }, correlationId: `exp-cont-${ORG}` };
+    return {
+      organizationId,
+      actor: ActorId('soec'),
+      scope: { organizationId, permissions: ['events:append', 'events:read'] },
+      correlationId: `exp-cont-${ORG}`,
+    };
   }
   private now(): string {
     return new Date().toISOString();
@@ -95,15 +116,45 @@ export class ContentExperience {
     const plan = await this.planning.cargar(ctx, IDS_MKT_CONT.plan);
     if (plan.existe) return;
     // Marca y prompts versionados.
-    const rm = await this.marcas.registrarVersion(ctx, IDS_CONT.marca, marcaDemo, ATRIBUCION, this.now());
+    const rm = await this.marcas.registrarVersion(
+      ctx,
+      IDS_CONT.marca,
+      marcaDemo,
+      ATRIBUCION,
+      this.now(),
+    );
     await this.marcas.publicar(ctx, IDS_CONT.marca, rm.version, ATRIBUCION, this.now());
-    const rp1 = await this.prompts.registrarVersion(ctx, IDS_CONT.promptPieza, promptPiezaDemo, ATRIBUCION, this.now());
+    const rp1 = await this.prompts.registrarVersion(
+      ctx,
+      IDS_CONT.promptPieza,
+      promptPiezaDemo,
+      ATRIBUCION,
+      this.now(),
+    );
     await this.prompts.publicar(ctx, IDS_CONT.promptPieza, rp1.version, ATRIBUCION, this.now());
-    const rp2 = await this.prompts.registrarVersion(ctx, IDS_CONT.promptAdapt, promptAdaptDemo, ATRIBUCION, this.now());
+    const rp2 = await this.prompts.registrarVersion(
+      ctx,
+      IDS_CONT.promptAdapt,
+      promptAdaptDemo,
+      ATRIBUCION,
+      this.now(),
+    );
     await this.prompts.publicar(ctx, IDS_CONT.promptAdapt, rp2.version, ATRIBUCION, this.now());
     // Estrategia de marketing con campañas sin contenido (todas bloqueadas por contenido_faltante).
-    await this.objetivos.registrar(ctx, IDS_MKT_CONT.objetivo, objetivoContenidoDemo, ATRIBUCION, this.now());
-    const rpol = await this.policies.registrarVersion(ctx, IDS_MKT_CONT.politica, politicaContenidoDemo, ATRIBUCION, this.now());
+    await this.objetivos.registrar(
+      ctx,
+      IDS_MKT_CONT.objetivo,
+      objetivoContenidoDemo,
+      ATRIBUCION,
+      this.now(),
+    );
+    const rpol = await this.policies.registrarVersion(
+      ctx,
+      IDS_MKT_CONT.politica,
+      politicaContenidoDemo,
+      ATRIBUCION,
+      this.now(),
+    );
     await this.policies.publicar(ctx, IDS_MKT_CONT.politica, rpol.version, ATRIBUCION, this.now());
     await this.planning.generarPlan(ctx, {
       planId: IDS_MKT_CONT.plan,
@@ -123,11 +174,28 @@ export class ContentExperience {
       canal: p.canal,
       estado: p.estado,
       resultado: p.resultadoProduccion,
-      adaptaciones: p.adaptaciones.map((a) => ({ canal: a.canal, formato: a.formato, estado: a.estado, titulo: a.titulo, cuerpo: a.cuerpo, hashtags: a.hashtags, llamadaAccion: a.llamadaAccion })),
+      adaptaciones: p.adaptaciones.map((a) => ({
+        canal: a.canal,
+        formato: a.formato,
+        estado: a.estado,
+        titulo: a.titulo,
+        cuerpo: a.cuerpo,
+        hashtags: a.hashtags,
+        llamadaAccion: a.llamadaAccion,
+      })),
       activos: p.activos.map((a) => ({ tipo: a.tipo, descripcion: a.descripcion })),
-      hallazgos: p.hallazgos.map((h) => ({ codigo: h.codigo, severidad: h.severidad, descripcion: h.descripcion, bloqueante: h.bloqueante })),
+      hallazgos: p.hallazgos.map((h) => ({
+        codigo: h.codigo,
+        severidad: h.severidad,
+        descripcion: h.descripcion,
+        bloqueante: h.bloqueante,
+      })),
       revisiones: p.revisiones.map((r) => ({ ronda: r.ronda, motivo: r.motivo, accion: r.accion })),
-      afirmaciones: (p.pieza?.afirmaciones ?? []).map((af) => ({ texto: af.texto, tipo: af.tipo, fuente: af.fuente })),
+      afirmaciones: (p.pieza?.afirmaciones ?? []).map((af) => ({
+        texto: af.texto,
+        tipo: af.tipo,
+        fuente: af.fuente,
+      })),
       ejecucion: p.resultadoEjecucion,
     };
   }
@@ -135,11 +203,19 @@ export class ContentExperience {
   async estado(): Promise<EstadoContenido> {
     const ctx = this.ctx();
     const plan = await this.planning.cargar(ctx, IDS_MKT_CONT.plan);
-    const actividades = Object.values(plan.actividades).sort((a, b) => a.canal.localeCompare(b.canal));
+    const actividades = Object.values(plan.actividades).sort((a, b) =>
+      a.canal.localeCompare(b.canal),
+    );
     const salida: EstadoContenido['actividades'] = [];
     for (const a of actividades) {
       const paquete = await this.content.cargarPaquete(ctx, `${IDS_MKT_CONT.plan}--${a.id}`);
-      salida.push({ id: a.id, canal: a.canal, estado: a.estado, motivoBloqueo: a.motivoBloqueo, paquete: paquete.existe ? this.resumen(paquete) : null });
+      salida.push({
+        id: a.id,
+        canal: a.canal,
+        estado: a.estado,
+        motivoBloqueo: a.motivoBloqueo,
+        paquete: paquete.existe ? this.resumen(paquete) : null,
+      });
     }
     return {
       existe: plan.existe,
@@ -150,7 +226,9 @@ export class ContentExperience {
     };
   }
 
-  async prepararActividad(actividadId: string): Promise<{ actividadDesbloqueada: boolean; motivo: string; paquete: PaqueteResumen }> {
+  async prepararActividad(
+    actividadId: string,
+  ): Promise<{ actividadDesbloqueada: boolean; motivo: string; paquete: PaqueteResumen }> {
     const r = await this.content.prepararContenidoParaActividad(this.ctx(), {
       planId: IDS_MKT_CONT.plan,
       actividadId,
@@ -161,7 +239,11 @@ export class ContentExperience {
       attribution: ATRIBUCION,
       occurredAt: this.now(),
     });
-    return { actividadDesbloqueada: r.actividadDesbloqueada, motivo: r.motivo, paquete: this.resumen(r.paquete) };
+    return {
+      actividadDesbloqueada: r.actividadDesbloqueada,
+      motivo: r.motivo,
+      paquete: this.resumen(r.paquete),
+    };
   }
 
   /** Prepara todas las actividades bloqueadas por contenido_faltante (Caso A/B/E). */
@@ -180,15 +262,26 @@ export class ContentExperience {
     return { preparadas, desbloqueadas };
   }
 
-  async ejecutarSiguiente(): Promise<{ actividad: string | null; permitida: boolean; resultado: string }> {
+  async ejecutarSiguiente(): Promise<{
+    actividad: string | null;
+    permitida: boolean;
+    resultado: string;
+  }> {
     const ctx = this.ctx();
     const plan = await this.planning.cargar(ctx, IDS_MKT_CONT.plan);
-    if (!hayAutorizable(plan)) return { actividad: null, permitida: false, resultado: 'no hay acciones autorizables' };
+    if (!hayAutorizable(plan))
+      return { actividad: null, permitida: false, resultado: 'no hay acciones autorizables' };
     const r = await this.planning.ejecutarSiguiente(ctx, IDS_MKT_CONT.plan, ATRIBUCION, this.now());
     const paqueteId = `${IDS_MKT_CONT.plan}--${r.actividad}`;
     const existe = await this.content.cargarPaquete(ctx, paqueteId);
     if (existe.existe) {
-      await this.content.registrarEjecucion(ctx, paqueteId, { permitida: r.permitida, resultado: r.resultado, executionRef: `${IDS_MKT_CONT.plan}:${r.actividad}`, attribution: ATRIBUCION, occurredAt: this.now() });
+      await this.content.registrarEjecucion(ctx, paqueteId, {
+        permitida: r.permitida,
+        resultado: r.resultado,
+        executionRef: `${IDS_MKT_CONT.plan}:${r.actividad}`,
+        attribution: ATRIBUCION,
+        occurredAt: this.now(),
+      });
     }
     return { actividad: r.actividad, permitida: r.permitida, resultado: r.resultado };
   }

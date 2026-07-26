@@ -16,10 +16,14 @@ export function registerContentRoutes(app: FastifyInstance, store: EventStore): 
     return reply.code(201).send({ ok: true });
   });
   app.get('/contenido/estado', async (_req, reply) => reply.send(await exp.estado()));
-  app.post('/contenido/preparar-todo', async (_req, reply) => reply.code(201).send(await exp.prepararTodo()));
+  app.post('/contenido/preparar-todo', async (_req, reply) =>
+    reply.code(201).send(await exp.prepararTodo()),
+  );
   app.post('/contenido/actividades/:id/preparar-contenido', async (req, reply) => {
     const { id } = req.params as { id: string };
     return reply.code(201).send(await exp.prepararActividad(id));
   });
-  app.post('/contenido/ejecutar-siguiente', async (_req, reply) => reply.code(201).send(await exp.ejecutarSiguiente()));
+  app.post('/contenido/ejecutar-siguiente', async (_req, reply) =>
+    reply.code(201).send(await exp.ejecutarSiguiente()),
+  );
 }

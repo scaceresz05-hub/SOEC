@@ -15,7 +15,9 @@ export function registerMarketingRoutes(app: FastifyInstance, store: EventStore)
     return reply.code(201).send({ ok: true });
   });
   app.get('/marketing/estado', async (_req, reply) => reply.send(await exp.estado()));
-  app.post('/marketing/ejecutar-siguiente', async (_req, reply) => reply.code(201).send(await exp.ejecutarSiguiente()));
+  app.post('/marketing/ejecutar-siguiente', async (_req, reply) =>
+    reply.code(201).send(await exp.ejecutarSiguiente()),
+  );
   app.post('/marketing/replanificar', async (req, reply) => {
     const { motivo } = (req.body ?? {}) as { motivo?: string };
     return reply.code(201).send(await exp.replanificar(motivo ?? 'replanificación manual'));
