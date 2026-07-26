@@ -2,6 +2,8 @@
 
 > Contexto maestro del proyecto. Responde: qué es SOEC, para quién, por qué existe y bajo qué principios se construye. Fuente de verdad de alto nivel; el detalle vive en `docs/`.
 
+> **Modelo operativo del producto** — la definición oficial de _por qué existe SOEC, qué es, para quién, cómo trabaja para una empresa y el recorrido Diagnóstico → Estrategia → Preparación → Operación_ vive en [`docs/producto/MODELO-OPERATIVO-SOEC.md`](docs/producto/MODELO-OPERATIVO-SOEC.md) (documento oficial de producto, subordinado a la Constitución y al Objetivo Supremo; remite a las fuentes declarantes en toda materia normativa).
+
 ## Qué es SOEC
 
 _(Pendiente de definir con el Propietario del Producto — completar en Fase 0.)_

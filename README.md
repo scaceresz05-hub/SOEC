@@ -20,7 +20,8 @@ C:\proyectos\SOEC
 │   ├── standards\        Naming, testing, logging, observabilidad, seguridad
 │   ├── ai\               Estrategia y contratos de IA
 │   ├── domain\           Modelo del Dominio: MED, MDM, entidades, relaciones, contratos
-│   └── decisions\        Bitácora de decisiones no-arquitectónicas
+│   ├── decisions\        Bitácora de decisiones no-arquitectónicas
+│   └── producto\         Documentos oficiales de producto (subordinados al corpus)
 │
 ├── backend\              (Fase 1+) código de backend
 ├── frontend\             (Fase 1+) código de frontend
