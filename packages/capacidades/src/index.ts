@@ -18,3 +18,4 @@ export * from './app/registry';
 export * from './app/orchestrator';
 export * from './app/query-service';
 export * from './projections/projection';
+export * from './catalogo/comprender-el-estado';

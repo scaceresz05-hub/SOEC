@@ -1,0 +1,24 @@
+{
+  "name": "@soec/diagnostico",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@soec/capacidades": "workspace:*",
+    "@soec/contracts": "workspace:*",
+    "@soec/ece": "workspace:*",
+    "@soec/models": "workspace:*",
+    "@soec/operaciones": "workspace:*",
+    "@soec/rubros": "workspace:*"
+  },
+  "devDependencies": {
+    "@soec/event-store": "workspace:*"
+  }
+}

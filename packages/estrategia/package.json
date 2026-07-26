@@ -1,0 +1,17 @@
+{
+  "name": "@soec/estrategia",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@soec/diagnostico": "workspace:*",
+    "@soec/rubros": "workspace:*"
+  }
+}

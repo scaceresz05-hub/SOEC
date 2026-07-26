@@ -50,9 +50,21 @@ importers:
       '@soec/control':
         specifier: workspace:*
         version: link:../../packages/control
+      '@soec/decision':
+        specifier: workspace:*
+        version: link:../../packages/decision
+      '@soec/diagnostico':
+        specifier: workspace:*
+        version: link:../../packages/diagnostico
       '@soec/ece':
         specifier: workspace:*
         version: link:../../packages/ece
+      '@soec/estrategia':
+        specifier: workspace:*
+        version: link:../../packages/estrategia
+      '@soec/evaluacion':
+        specifier: workspace:*
+        version: link:../../packages/evaluacion
       '@soec/event-store':
         specifier: workspace:*
         version: link:../../packages/event-store
@@ -80,6 +92,9 @@ importers:
       '@soec/piloto':
         specifier: workspace:*
         version: link:../../packages/piloto
+      '@soec/rubros':
+        specifier: workspace:*
+        version: link:../../packages/rubros
       fastify:
         specifier: ^5.2.0
         version: 5.10.0
@@ -280,6 +295,80 @@ importers:
         specifier: ^8.11.10
         version: 8.20.0
 
+  packages/decision:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/diagnostico':
+        specifier: workspace:*
+        version: link:../diagnostico
+      '@soec/estrategia':
+        specifier: workspace:*
+        version: link:../estrategia
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
+    devDependencies:
+      '@soec/canales':
+        specifier: workspace:*
+        version: link:../canales
+      '@soec/capacidades':
+        specifier: workspace:*
+        version: link:../capacidades
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../contenido
+      '@soec/control':
+        specifier: workspace:*
+        version: link:../control
+      '@soec/marketing':
+        specifier: workspace:*
+        version: link:../marketing
+      '@soec/medicion':
+        specifier: workspace:*
+        version: link:../medicion
+      '@soec/operacional':
+        specifier: workspace:*
+        version: link:../operacional
+      '@soec/piloto':
+        specifier: workspace:*
+        version: link:../piloto
+      '@soec/rubros':
+        specifier: workspace:*
+        version: link:../rubros
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+
+  packages/diagnostico:
+    dependencies:
+      '@soec/capacidades':
+        specifier: workspace:*
+        version: link:../capacidades
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/ece':
+        specifier: workspace:*
+        version: link:../ece
+      '@soec/models':
+        specifier: workspace:*
+        version: link:../models
+      '@soec/operaciones':
+        specifier: workspace:*
+        version: link:../operaciones
+      '@soec/rubros':
+        specifier: workspace:*
+        version: link:../rubros
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
   packages/ece:
     dependencies:
       '@soec/contracts':
@@ -298,6 +387,28 @@ importers:
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
+
+  packages/estrategia:
+    dependencies:
+      '@soec/diagnostico':
+        specifier: workspace:*
+        version: link:../diagnostico
+      '@soec/rubros':
+        specifier: workspace:*
+        version: link:../rubros
+
+  packages/evaluacion:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/diagnostico':
+        specifier: workspace:*
+        version: link:../diagnostico
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
 
   packages/event-store:
     dependencies:
@@ -489,6 +600,8 @@ importers:
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
+
+  packages/rubros: {}
 
 packages:
 

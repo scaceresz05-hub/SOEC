@@ -49,7 +49,7 @@ async function main() {
   console.log(ok ? ' lista' : ' (sin respuesta; continúo)');
 
   console.log('  › Aplicando migraciones…');
-  must('npx', ['tsx', 'packages/piloto/src/pg/migrate-cli.ts'], { env: { ...process.env, DATABASE_URL: DB_URL } });
+  must('npx', ['tsx', 'packages/decision/src/pg/migrate-cli.ts'], { env: { ...process.env, DATABASE_URL: DB_URL } });
 
   console.log(`  › Iniciando backend (API) → ${API_URL}`);
   const api = spawn('npx', ['tsx', 'apps/api/src/server.ts'], { stdio: 'inherit', shell: true, env: { ...process.env, DATABASE_URL: DB_URL, PORT: API_PORT } });

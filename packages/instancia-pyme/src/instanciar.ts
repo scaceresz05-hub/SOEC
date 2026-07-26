@@ -8,8 +8,8 @@ import type { Attribution, RequestContext } from '@soec/contracts';
 import type { MedService, MdmService } from '@soec/models';
 import type { EceBuildService } from '@soec/ece';
 import type { CapabilitiesOrchestrator, CapabilityRegistry, CapResultado } from '@soec/capacidades';
+import { definicionComprenderEstado } from '@soec/capacidades';
 import { IDS, type SeedOpts, sembrarDominio } from './dominio';
-import { capacidadComprenderEstado } from './capacidad';
 
 export interface InstanciarDeps {
   readonly med: MedService;
@@ -23,7 +23,7 @@ export async function instanciarPyme(ctx: RequestContext, deps: InstanciarDeps, 
   const c = { attribution: o.attribution, occurredAt: o.occurredAt };
   await sembrarDominio(ctx, { med: deps.med, mdm: deps.mdm }, o);
   await deps.eceBuild.construir(ctx, { eceId: IDS.ece, medInstanceId: IDS.med, mdmInstanceId: IDS.mdm, ...c });
-  await deps.registry.registrarVersion(ctx, IDS.capacidad, capacidadComprenderEstado(o.attribution));
+  await deps.registry.registrarVersion(ctx, IDS.capacidad, definicionComprenderEstado(o.attribution));
   await deps.registry.publicar(ctx, IDS.capacidad, 1);
   return IDS;
 }

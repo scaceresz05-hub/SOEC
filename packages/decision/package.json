@@ -1,0 +1,34 @@
+{
+  "name": "@soec/decision",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./pg": "./src/pg/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "migrate": "tsx src/pg/migrate-cli.ts"
+  },
+  "dependencies": {
+    "@soec/contracts": "workspace:*",
+    "@soec/diagnostico": "workspace:*",
+    "@soec/estrategia": "workspace:*",
+    "@soec/event-store": "workspace:*",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@soec/canales": "workspace:*",
+    "@soec/capacidades": "workspace:*",
+    "@soec/contenido": "workspace:*",
+    "@soec/control": "workspace:*",
+    "@soec/marketing": "workspace:*",
+    "@soec/medicion": "workspace:*",
+    "@soec/operacional": "workspace:*",
+    "@soec/piloto": "workspace:*",
+    "@soec/rubros": "workspace:*",
+    "@types/pg": "^8.11.10"
+  }
+}
