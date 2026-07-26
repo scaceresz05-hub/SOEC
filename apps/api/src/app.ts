@@ -97,10 +97,19 @@ import { registerChannelRoutes } from './channel-routes';
 import { registerMeasurementRoutes } from './measurement-routes';
 import { registerControlRoutes } from './control-routes';
 import { registerPilotRoutes } from './pilot-routes';
+import { registerDirectorWorkspaceRoutes } from './director-workspace-routes';
+import { registerEvaluacionRoutes } from './evaluacion-routes';
+import { PreguntaFueraDelRubroError } from './evaluacion-experience';
+import { SeleccionInvalidaError } from './catalogo';
+import { AutorizacionDenegadaError, DecisionInvalidaError } from '@soec/decision';
+import { EvaluacionInvalidaError, EsquemaEvaluacionDesconocidoError } from '@soec/evaluacion';
+import { type Clock, systemClock } from '@soec/event-store';
 
 export interface AppDeps {
   store: EventStore;
   intelligence: IntelligenceProvider;
+  /** Reloj inyectable: real en producción, fijo en tests (tiempos de ocurrencia reales). */
+  clock?: Clock;
 }
 
 function header(req: FastifyRequest, name: string): string | undefined {
@@ -136,6 +145,7 @@ interface AppendBody {
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const app = Fastify({ logger: false });
+  const clock = deps.clock ?? systemClock;
 
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ScopeRequiredError || err instanceof ScopeMismatchError) {
@@ -174,10 +184,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     ) {
       return reply.code(404).send({ error: err.name, message: err.message });
     }
-    if (err instanceof PermisoInsuficienteError) {
+    if (err instanceof PermisoInsuficienteError || err instanceof AutorizacionDenegadaError) {
       return reply.code(403).send({ error: err.name, message: err.message });
     }
-    if (err instanceof DecisionYaResueltaError || err instanceof DepartamentoPausadoError || err instanceof ActivacionRealProhibidaError || err instanceof EntornoRealBloqueadoError) {
+    if (
+      err instanceof DecisionInvalidaError ||
+      err instanceof EvaluacionInvalidaError ||
+      err instanceof EsquemaEvaluacionDesconocidoError
+    ) {
+      return reply.code(422).send({ error: err.name, message: err.message });
+    }
+    if (err instanceof PreguntaFueraDelRubroError || err instanceof SeleccionInvalidaError) {
+      return reply.code(400).send({ error: err.name, message: err.message });
+    }
+    if (
+      err instanceof DecisionYaResueltaError ||
+      err instanceof DepartamentoPausadoError ||
+      err instanceof ActivacionRealProhibidaError ||
+      err instanceof EntornoRealBloqueadoError
+    ) {
       return reply.code(409).send({ error: err.name, message: err.message });
     }
     if (
@@ -235,6 +260,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerMeasurementRoutes(app, deps.store);
   registerControlRoutes(app, deps.store);
   registerPilotRoutes(app, deps.store);
+  registerDirectorWorkspaceRoutes(app, deps.store, clock);
+  registerEvaluacionRoutes(app, deps.store, clock);
 
   app.post('/events', async (req, reply) => {
     const ctx = contextFrom(req);

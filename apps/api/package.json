@@ -6,12 +6,18 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts"
+    "start": "tsx src/server.ts",
+    "seed:piloto": "tsx scripts/seed-piloto.ts"
   },
   "dependencies": {
     "@soec/contracts": "workspace:*",
     "@soec/event-store": "workspace:*",
     "@soec/intelligence": "workspace:*",
+    "@soec/rubros": "workspace:*",
+    "@soec/evaluacion": "workspace:*",
+    "@soec/diagnostico": "workspace:*",
+    "@soec/estrategia": "workspace:*",
+    "@soec/decision": "workspace:*",
     "@soec/models": "workspace:*",
     "@soec/ece": "workspace:*",
     "@soec/operaciones": "workspace:*",
