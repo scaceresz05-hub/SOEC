@@ -45,19 +45,31 @@ export function registerEceRoutes(app: FastifyInstance, store: EventStore): void
   const id = (req: FastifyRequest): string => (req.params as { id: string }).id;
 
   app.post('/ece/:id/construir', async (req, reply) => {
-    const r = await build.construir(contextFrom(req), { eceId: id(req), ...(req.body as object) } as never);
+    const r = await build.construir(contextFrom(req), {
+      eceId: id(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.post('/ece/:id/elementos', async (req, reply) => {
-    const r = await build.registrarElemento(contextFrom(req), { eceId: id(req), ...(req.body as object) } as never);
+    const r = await build.registrarElemento(contextFrom(req), {
+      eceId: id(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.post('/ece/:id/revision', async (req, reply) => {
-    const r = await build.revisarElemento(contextFrom(req), { eceId: id(req), ...(req.body as object) } as never);
+    const r = await build.revisarElemento(contextFrom(req), {
+      eceId: id(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.post('/ece/:id/invalidar', async (req, reply) => {
-    const r = await build.invalidar(contextFrom(req), { eceId: id(req), ...(req.body as object) } as never);
+    const r = await build.invalidar(contextFrom(req), {
+      eceId: id(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
 

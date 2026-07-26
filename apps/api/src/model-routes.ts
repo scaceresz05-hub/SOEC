@@ -55,22 +55,34 @@ export function registerModelRoutes(app: FastifyInstance, store: EventStore): vo
   });
   app.post('/med/:id/entidades', async (req, reply) => {
     const ctx = contextFrom(req);
-    const r = await med.registrarEntidad(ctx, { instanceId: paramsId(req), ...(req.body as object) } as never);
+    const r = await med.registrarEntidad(ctx, {
+      instanceId: paramsId(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.post('/med/:id/afirmaciones', async (req, reply) => {
     const ctx = contextFrom(req);
-    const r = await med.emitirAfirmacion(ctx, { instanceId: paramsId(req), ...(req.body as object) } as never);
+    const r = await med.emitirAfirmacion(ctx, {
+      instanceId: paramsId(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.post('/med/:id/evidencias', async (req, reply) => {
     const ctx = contextFrom(req);
-    const r = await med.incorporarEvidencia(ctx, { instanceId: paramsId(req), ...(req.body as object) } as never);
+    const r = await med.incorporarEvidencia(ctx, {
+      instanceId: paramsId(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.post('/med/:id/revision', async (req, reply) => {
     const ctx = contextFrom(req);
-    const r = await med.revisarAfirmacion(ctx, { instanceId: paramsId(req), ...(req.body as object) } as never);
+    const r = await med.revisarAfirmacion(ctx, {
+      instanceId: paramsId(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.get('/med/:id', async (req, reply) => {
@@ -92,32 +104,50 @@ export function registerModelRoutes(app: FastifyInstance, store: EventStore): vo
   });
   app.post('/mdm/:id/entidades', async (req, reply) => {
     const ctx = contextFrom(req);
-    const r = await mdm.registrarEntidad(ctx, { instanceId: paramsId(req), ...(req.body as object) } as never);
+    const r = await mdm.registrarEntidad(ctx, {
+      instanceId: paramsId(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.post('/mdm/:id/observaciones', async (req, reply) => {
     const ctx = contextFrom(req);
-    const r = await mdm.registrarObservacion(ctx, { instanceId: paramsId(req), ...(req.body as object) } as never);
+    const r = await mdm.registrarObservacion(ctx, {
+      instanceId: paramsId(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.post('/mdm/:id/cambios', async (req, reply) => {
     const ctx = contextFrom(req);
-    const r = await mdm.registrarCambioExterno(ctx, { instanceId: paramsId(req), ...(req.body as object) } as never);
+    const r = await mdm.registrarCambioExterno(ctx, {
+      instanceId: paramsId(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.post('/mdm/:id/afirmaciones', async (req, reply) => {
     const ctx = contextFrom(req);
-    const r = await mdm.emitirAfirmacion(ctx, { instanceId: paramsId(req), ...(req.body as object) } as never);
+    const r = await mdm.emitirAfirmacion(ctx, {
+      instanceId: paramsId(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.post('/mdm/:id/evidencias', async (req, reply) => {
     const ctx = contextFrom(req);
-    const r = await mdm.incorporarEvidencia(ctx, { instanceId: paramsId(req), ...(req.body as object) } as never);
+    const r = await mdm.incorporarEvidencia(ctx, {
+      instanceId: paramsId(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.post('/mdm/:id/revision', async (req, reply) => {
     const ctx = contextFrom(req);
-    const r = await mdm.revisarAfirmacion(ctx, { instanceId: paramsId(req), ...(req.body as object) } as never);
+    const r = await mdm.revisarAfirmacion(ctx, {
+      instanceId: paramsId(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.get('/mdm/:id', async (req, reply) => {
@@ -134,7 +164,10 @@ export function registerModelRoutes(app: FastifyInstance, store: EventStore): vo
   // ── Enlaces MED↔MDM ────────────────────────────────────────────────────────
   app.post('/links/:id', async (req, reply) => {
     const ctx = contextFrom(req);
-    const r = await links.registrar(ctx, { linkId: paramsId(req), ...(req.body as object) } as never);
+    const r = await links.registrar(ctx, {
+      linkId: paramsId(req),
+      ...(req.body as object),
+    } as never);
     return reply.code(201).send({ version: r.version });
   });
   app.get('/links/:id', async (req, reply) => {

@@ -6,10 +6,21 @@
  * exponer terminología interna. Contexto sintético server-side (sin auth). No
  * ejecuta efectos externos; el producto se ofrece al juicio de la persona.
  */
-import { ActorId, type Attribution, type EventStore, OrganizationId, type RequestContext } from '@soec/contracts';
+import {
+  ActorId,
+  type Attribution,
+  type EventStore,
+  OrganizationId,
+  type RequestContext,
+} from '@soec/contracts';
 import { MedService, MdmService } from '@soec/models';
 import { EceBuildService } from '@soec/ece';
-import { OperacionesService, MecanismoDeterministico, MecanismoSimuladoIA, type ProductoIntelectual } from '@soec/operaciones';
+import {
+  OperacionesService,
+  MecanismoDeterministico,
+  MecanismoSimuladoIA,
+  type ProductoIntelectual,
+} from '@soec/operaciones';
 import {
   CapabilitiesOrchestrator,
   CapabilityQueryService,
@@ -79,7 +90,10 @@ export class ExperienciaComprenderEstado {
     this.mdm = new MdmService(store);
     this.eceBuild = new EceBuildService(store, this.med, this.mdm);
     this.eceQuery = new EceQueryService(store, this.med, this.mdm);
-    this.operaciones = new OperacionesService(store, this.eceQuery, [new MecanismoDeterministico(), new MecanismoSimuladoIA()]);
+    this.operaciones = new OperacionesService(store, this.eceQuery, [
+      new MecanismoDeterministico(),
+      new MecanismoSimuladoIA(),
+    ]);
     this.registry = new CapabilityRegistry(store);
     this.orchestrator = new CapabilitiesOrchestrator(store, this.registry, this.operaciones);
     this.capQuery = new CapabilityQueryService(store);
@@ -103,11 +117,18 @@ export class ExperienciaComprenderEstado {
   async prepararInstancia(): Promise<void> {
     const med = await this.med.estadoActual(this.ctx(), IDS.med);
     if (!med.existe) {
-      await instanciarPyme(this.ctx(), { med: this.med, mdm: this.mdm, eceBuild: this.eceBuild, registry: this.registry }, this.opts());
+      await instanciarPyme(
+        this.ctx(),
+        { med: this.med, mdm: this.mdm, eceBuild: this.eceBuild, registry: this.registry },
+        this.opts(),
+      );
     }
   }
 
-  private async intermedios(ctx: RequestContext, producto: ProductoCapacidad | null): Promise<ProductoOperacionDTO[]> {
+  private async intermedios(
+    ctx: RequestContext,
+    producto: ProductoCapacidad | null,
+  ): Promise<ProductoOperacionDTO[]> {
     if (!producto) return [];
     const salida: ProductoOperacionDTO[] = [];
     for (const paso of producto.operacionesEjecutadas) {
@@ -138,7 +159,11 @@ export class ExperienciaComprenderEstado {
       existe: ejec.existe,
       estado: ejec.existe ? (ejec.estado as 'compuesta' | 'abstenida') : 'inexistente',
       empresa: 'Pyme de servicios (instancia sintética)',
-      capacidad: { id: IDS.capacidad, nombre: producto?.nombre ?? 'Comprender el estado', version: ejec.definicionVersion },
+      capacidad: {
+        id: IDS.capacidad,
+        nombre: producto?.nombre ?? 'Comprender el estado',
+        version: ejec.definicionVersion,
+      },
       eceCorte: null,
       construidoEn: ejec.terminadoEn,
       producto,
@@ -151,7 +176,10 @@ export class ExperienciaComprenderEstado {
     await this.prepararInstancia();
     const ctx = this.ctx();
     const nuevo = !(await this.capQuery.ejecucion(ctx, executionId)).existe;
-    await ejecutarComprenderEstado(ctx, this.orchestrator, executionId, { ...this.opts(), idempotencyKey: executionId });
+    await ejecutarComprenderEstado(ctx, this.orchestrator, executionId, {
+      ...this.opts(),
+      idempotencyKey: executionId,
+    });
     if (nuevo) await this.registrarEnHistorial(ctx, executionId);
     return this.ensamblar(ctx, executionId);
   }
@@ -186,7 +214,12 @@ export class ExperienciaComprenderEstado {
   private async registrarEnHistorial(ctx: RequestContext, executionId: string): Promise<void> {
     const events = await this.store.readStream(ctx, INDEX_STREAM);
     await this.store.append(ctx, INDEX_STREAM, events.length, [
-      { type: 'exp.analisis_registrado', payload: { executionId }, attribution: ATRIBUCION, occurredAt: new Date().toISOString() },
+      {
+        type: 'exp.analisis_registrado',
+        payload: { executionId },
+        attribution: ATRIBUCION,
+        occurredAt: new Date().toISOString(),
+      },
     ]);
   }
 }
