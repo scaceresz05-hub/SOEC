@@ -523,6 +523,16 @@ importers:
         specifier: ^8.11.10
         version: 8.20.0
 
+  packages/negocio:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
   packages/operacional:
     dependencies:
       '@soec/contracts':
