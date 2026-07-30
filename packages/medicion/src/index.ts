@@ -14,6 +14,7 @@ export * from './domain/metrics';
 export * from './domain/quality';
 export * from './domain/indicator';
 export * from './domain/attribution';
+export * from './domain/resultado-campania';
 export * from './domain/evaluation';
 export * from './domain/anomaly';
 export * from './domain/med';
