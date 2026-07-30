@@ -433,6 +433,16 @@ importers:
         specifier: ^8.11.10
         version: 8.20.0
 
+  packages/ejecucion-simulada:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
   packages/estrategia:
     dependencies:
       '@soec/diagnostico':
