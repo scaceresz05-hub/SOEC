@@ -437,6 +437,30 @@ importers:
         specifier: workspace:*
         version: link:../event-store
 
+  packages/director-workspace:
+    dependencies:
+      '@soec/aprendizaje':
+        specifier: workspace:*
+        version: link:../aprendizaje
+      '@soec/autonomia':
+        specifier: workspace:*
+        version: link:../autonomia
+      '@soec/campanias':
+        specifier: workspace:*
+        version: link:../campanias
+      '@soec/contenido-gobernado':
+        specifier: workspace:*
+        version: link:../contenido-gobernado
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/ejecucion-simulada':
+        specifier: workspace:*
+        version: link:../ejecucion-simulada
+      '@soec/medicion':
+        specifier: workspace:*
+        version: link:../medicion
+
   packages/ece:
     dependencies:
       '@soec/contracts':
