@@ -344,6 +344,19 @@ importers:
         specifier: ^8.11.10
         version: 8.20.0
 
+  packages/decisiones-mkt:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/negocio':
+        specifier: workspace:*
+        version: link:../negocio
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
   packages/diagnostico:
     dependencies:
       '@soec/capacidades':
