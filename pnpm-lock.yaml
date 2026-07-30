@@ -713,6 +713,39 @@ importers:
         specifier: ^8.11.10
         version: 8.20.0
 
+  packages/piloto-director-v1:
+    dependencies:
+      '@soec/aprendizaje':
+        specifier: workspace:*
+        version: link:../aprendizaje
+      '@soec/autonomia':
+        specifier: workspace:*
+        version: link:../autonomia
+      '@soec/campanias':
+        specifier: workspace:*
+        version: link:../campanias
+      '@soec/contenido-gobernado':
+        specifier: workspace:*
+        version: link:../contenido-gobernado
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/decisiones-mkt':
+        specifier: workspace:*
+        version: link:../decisiones-mkt
+      '@soec/director-workspace':
+        specifier: workspace:*
+        version: link:../director-workspace
+      '@soec/ejecucion-simulada':
+        specifier: workspace:*
+        version: link:../ejecucion-simulada
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      '@soec/medicion':
+        specifier: workspace:*
+        version: link:../medicion
+
   packages/rubros: {}
 
 packages:

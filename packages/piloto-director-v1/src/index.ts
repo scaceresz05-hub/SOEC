@@ -1,0 +1,9 @@
+/**
+ * @soec/piloto-director-v1 — Piloto SmileFlow completo y adversarial (Bloque J del Director de
+ * Marketing Autónomo V1). Orquesta los Bloques C–I sobre un único event-store, gobernado por
+ * autonomía, y valida el ciclo end-to-end con trazabilidad hacia atrás hasta la evidencia
+ * inicial, más ocho escenarios adversariales. Comando reproducible: `pnpm -C
+ * packages/piloto-director-v1 piloto`.
+ */
+export * from './fixture';
+export * from './piloto';
