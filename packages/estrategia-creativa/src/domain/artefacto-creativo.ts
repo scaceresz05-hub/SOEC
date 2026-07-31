@@ -92,6 +92,22 @@ export interface ContenidoArtefacto {
   readonly politicaVersion: string;
 }
 
+/** Claves de CONTENIDO del artefacto (excluye metadata: id/org/version/naturaleza/timestamps). */
+const CLAVES_CONTENIDO: readonly (keyof ContenidoArtefacto)[] = [
+  'programaId', 'objetivoId', 'segmentoId', 'hipotesisId', 'briefId', 'concepto', 'angulo', 'gancho',
+  'mensajesClave', 'tono', 'cta', 'objeciones', 'respuestaObjeciones', 'pruebaSocialPermitida',
+  'afirmacionesPermitidas', 'restricciones', 'evidencias', 'confianza', 'faltantes', 'politicaVersion',
+];
+
+/**
+ * Serialización CANÓNICA del contenido del artefacto: proyecta sólo las claves de contenido, en orden
+ * fijo, con arrays serializados por su contenido. Estable frente a orden de inserción y a la metadata
+ * (version/timestamps/naturaleza) — de modo que re-derivar un contenido idéntico compara igual (B-1).
+ */
+export function contenidoArtefactoCanonico(x: ContenidoArtefacto | ArtefactoEstrategiaCreativa): string {
+  return JSON.stringify(CLAVES_CONTENIDO.map((k) => (x as Record<string, unknown>)[k] ?? null));
+}
+
 /**
  * Deriva el CONTENIDO del artefacto desde el conocimiento + brief + estrategia + una hipótesis. Solo
  * incorpora afirmaciones con procedencia; nunca inventa prueba social/testimonios (pruebaSocialPermitida

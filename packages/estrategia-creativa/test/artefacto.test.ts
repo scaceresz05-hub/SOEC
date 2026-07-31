@@ -77,6 +77,24 @@ describe('@soec/estrategia-creativa · Tramo D · artefacto de estrategia creati
     expect(v2prog2.afirmacionesPermitidas.some((x) => x.includes('mejorado'))).toBe(true);
   });
 
+  it('B-1: establecer el MISMO contenido N veces sobre el mismo stream NO versiona (idempotente)', async () => {
+    const store = new InMemoryEventStore();
+    const svc = new EstrategiaCreativaArtefactoService(store);
+    const contenido = {
+      programaId: 'p', objetivoId: 'obj', segmentoId: 's', hipotesisId: 'h', briefId: 'b', concepto: 'c',
+      angulo: 'a', gancho: 'g', mensajesClave: ['m1', 'm2'], tono: 't', cta: 'cta', objeciones: ['o1'],
+      respuestaObjeciones: ['r1'], pruebaSocialPermitida: false, afirmacionesPermitidas: ['x'],
+      restricciones: ['no médico'], evidencias: ['e'], confianza: 'MEDIA' as const, faltantes: [], politicaVersion: 'v1',
+    };
+    const v1 = await svc.establecer(ctx(), 'est1', contenido, attr, O);
+    const v2 = await svc.establecer(ctx(), 'est1', { ...contenido }, attr, O); // idéntico (otra referencia)
+    const v3 = await svc.establecer(ctx(), 'est1', { ...contenido }, attr, O);
+    expect([v1.artefacto?.version, v2.artefacto?.version, v3.artefacto?.version]).toEqual([1, 1, 1]);
+    // Un cambio REAL sí versiona.
+    const v4 = await svc.establecer(ctx(), 'est1', { ...contenido, gancho: 'gancho nuevo' }, attr, O);
+    expect(v4.artefacto?.version).toBe(2);
+  });
+
   it('aislamiento multiempresa del artefacto', async () => {
     const store = new InMemoryEventStore();
     const con = new ConocimientoComercialService(store);
