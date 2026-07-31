@@ -90,6 +90,14 @@ describe('Director Autónomo · cableado al runtime', () => {
     expect(otra.json().objetivo.naturaleza).toBe('DESCONOCIDO');
   });
 
+  it('ejecutar el ciclo en una organización en PAUSA → respuesta gobernada (422), no 500', async () => {
+    const app = makeApp();
+    await app.inject({ method: 'POST', url: '/experience/director-autonomo/pausar', headers: H, payload: { org: ORG, motivo: 'test' } });
+    const res = await app.inject({ method: 'POST', url: '/experience/director-autonomo/ejecutar-ciclo', headers: H, payload: { org: ORG } });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error).toBe('AutonomiaInvalidaError');
+  });
+
   it('falta la organización → 400', async () => {
     const app = makeApp();
     const res = await app.inject({ method: 'GET', url: '/experience/director-autonomo/estado' });

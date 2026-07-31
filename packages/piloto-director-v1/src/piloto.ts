@@ -16,7 +16,7 @@ import { ContenidoGobernadoService } from '@soec/contenido-gobernado';
 import { AdaptadorSimuladoDeterminista, EjecucionService, type EscenarioEjecucion } from '@soec/ejecucion-simulada';
 import { evaluarExperimento, evaluarResultadoCampania, type Experimento, type ResultadoCampania } from '@soec/medicion';
 import { AprendizajeService, observadoDesdeExperimento } from '@soec/aprendizaje';
-import { AutonomiaService } from '@soec/autonomia';
+import { AutonomiaService, AutonomiaInvalidaError } from '@soec/autonomia';
 import { componerVistaDirector, type VistaCicloDirector } from '@soec/director-workspace';
 import { AHORA, ATRIBUCION, FUTURO, OBJETIVO_ID, ORG_SMILEFLOW, T0, campaniaSmileFlow, contenidoSmileFlow, decisionSmileFlow } from './fixture';
 
@@ -66,6 +66,12 @@ export async function ejecutarPiloto(store: EventStore, escenarioEjecucion: Esce
     return reconstruirTraza(store, org);
   }
 
+  // MODO SEGURO: si la organización está en PAUSA, el ciclo no se ejecuta (respuesta gobernada,
+  // no un fallo). Se rechaza ANTES de escribir nada para no dejar un ciclo a medias.
+  if ((await autonomia.cargar(c)).pausado) {
+    throw new AutonomiaInvalidaError('en modo seguro (PAUSA): el ciclo no puede ejecutarse; reanude primero');
+  }
+
   // Política de autonomía: el humano fija el nivel (SOEC no puede subirlo).
   await autonomia.establecerPolitica(c, 2, ATRIBUCION, T0);
 
@@ -90,7 +96,7 @@ export async function ejecutarPiloto(store: EventStore, escenarioEjecucion: Esce
   await autonomia.otorgarAutorizacion(c, { accion: 'PUBLICAR_SIMULADO', entidadRef: contentId, actorHumano: 'director-humano', otorgadaEn: T0, expiraEn: FUTURO }, ATRIBUCION, T0);
 
   const trasProgramar = await autonomia.puedeEjecutar(c, 'PROGRAMAR', contentId, AHORA);
-  if (!trasProgramar.permitida) throw new Error(`el piloto no pudo programar: ${trasProgramar.motivo}`);
+  if (!trasProgramar.permitida) throw new AutonomiaInvalidaError(`no se pudo programar: ${trasProgramar.motivo}`);
   await contenidos.transicionar(c, contentId, 'PROGRAMADO', ATRIBUCION, T0);
 
   // 5) Ejecución SIMULADA, gobernada por autonomía (iniciar → ejecutar → finalizar).
