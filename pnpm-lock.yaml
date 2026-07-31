@@ -537,6 +537,22 @@ importers:
         specifier: workspace:*
         version: link:../rubros
 
+  packages/estrategia-creativa:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/crm-comercial':
+        specifier: workspace:*
+        version: link:../crm-comercial
+      '@soec/negocio':
+        specifier: workspace:*
+        version: link:../negocio
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
   packages/evaluacion:
     dependencies:
       '@soec/contracts':
