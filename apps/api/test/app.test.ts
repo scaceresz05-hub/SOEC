@@ -6,7 +6,7 @@ import { buildApp } from '../src/app';
 function makeApp() {
   return buildApp({
     store: new InMemoryEventStore(),
-    intelligence: new DeterministicIntelligenceProvider(),
+    intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true,
   });
 }
 

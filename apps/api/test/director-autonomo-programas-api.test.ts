@@ -16,7 +16,7 @@ const BASE = `/experience/director-autonomo/organizaciones`;
 const PROG = 'captacion-smileflow-v1';
 
 function makeApp() {
-  return buildApp({ store: new InMemoryEventStore(), intelligence: new DeterministicIntelligenceProvider(), clock: new FixedClock(new Date('2026-08-01T12:00:00.000Z')) });
+  return buildApp({ store: new InMemoryEventStore(), intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true, clock: new FixedClock(new Date('2026-08-01T12:00:00.000Z')) });
 }
 type App = ReturnType<typeof makeApp>;
 

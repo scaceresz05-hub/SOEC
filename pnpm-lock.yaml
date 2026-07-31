@@ -71,6 +71,9 @@ importers:
       '@soec/event-store':
         specifier: workspace:*
         version: link:../../packages/event-store
+      '@soec/identity':
+        specifier: workspace:*
+        version: link:../../packages/identity
       '@soec/instancia-pyme':
         specifier: workspace:*
         version: link:../../packages/instancia-pyme
@@ -107,6 +110,13 @@ importers:
       fastify:
         specifier: ^5.2.0
         version: 5.10.0
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
 
   apps/web:
     dependencies:

@@ -4,7 +4,7 @@ import { DeterministicIntelligenceProvider } from '@soec/intelligence';
 import { buildApp } from '../src/app';
 
 function makeApp() {
-  return buildApp({ store: new InMemoryEventStore(), intelligence: new DeterministicIntelligenceProvider() });
+  return buildApp({ store: new InMemoryEventStore(), intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true });
 }
 
 describe('API — Fábrica Autónoma de Contenido (F2-CONT-01)', () => {

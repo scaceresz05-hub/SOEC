@@ -132,12 +132,26 @@ import { SeleccionInvalidaError } from './catalogo';
 import { AutorizacionDenegadaError, DecisionInvalidaError } from '@soec/decision';
 import { EvaluacionInvalidaError, EsquemaEvaluacionDesconocidoError } from '@soec/evaluacion';
 import { type Clock, systemClock } from '@soec/event-store';
+import type { Pool } from 'pg';
+import { IdentityError, IdentityService } from '@soec/identity';
+import { registerAuthRoutes } from './auth-routes';
+import { registerOrganizationsRoutes } from './organizations-routes';
 
 export interface AppDeps {
   store: EventStore;
   intelligence: IntelligenceProvider;
   /** Reloj inyectable: real en producción, fijo en tests (tiempos de ocurrencia reales). */
   clock?: Clock;
+  /** Pool PostgreSQL para el plano de identidad. Sin él, no se registran /auth ni /organizations. */
+  pool?: Pool;
+  /**
+   * Acceso demo LEGACY (rutas /experience/* y verticales sin autenticación). DEFAULT false.
+   * Prohibido en producción (el arranque lo bloquea). La ausencia de sesión NUNCA es autorización;
+   * este flag solo re-registra la superficie de demostración histórica en test/dev.
+   */
+  legacyDemoAccess?: boolean;
+  /** Cookies `Secure` (producción). */
+  secureCookies?: boolean;
 }
 
 function header(req: FastifyRequest, name: string): string | undefined {
@@ -176,6 +190,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const clock = deps.clock ?? systemClock;
 
   app.setErrorHandler((err, _req, reply) => {
+    // Errores de identidad: llevan su propio código HTTP (401/403/404/409/400).
+    if (err instanceof IdentityError) {
+      return reply.code(err.httpStatus).send({ error: err.code, message: err.message });
+    }
     if (err instanceof ScopeRequiredError || err instanceof ScopeMismatchError) {
       return reply.code(403).send({ error: err.name, message: err.message });
     }
@@ -309,54 +327,66 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   app.get('/health', async () => ({ status: 'ok' }));
 
-  // Verticales de dominio MED y MDM (§12) y Estado Cognitivo Empresarial.
-  registerModelRoutes(app, deps.store);
-  registerEceRoutes(app, deps.store);
-  registerOperationsRoutes(app, deps.store);
-  registerCapabilityRoutes(app, deps.store);
-  registerExperienceRoutes(app, deps.store);
-  registerOperationalRoutes(app, deps.store);
-  registerMarketingRoutes(app, deps.store);
-  registerContentRoutes(app, deps.store);
-  registerChannelRoutes(app, deps.store);
-  registerMeasurementRoutes(app, deps.store);
-  registerControlRoutes(app, deps.store);
-  registerPilotRoutes(app, deps.store);
-  registerDirectorWorkspaceRoutes(app, deps.store, clock);
-  registerDirectorAutonomoRoutes(app, deps.store, clock);
-  registerDirectorAutonomoProgramasRoutes(app, deps.store, clock);
-  registerEvaluacionRoutes(app, deps.store, clock);
+  // ── Plano PRODUCTIVO: autenticación y organizaciones (siempre; exige sesión) ──────────────────
+  if (deps.pool) {
+    const identity = new IdentityService(deps.pool);
+    const secure = deps.secureCookies ?? false;
+    registerAuthRoutes(app, identity, secure);
+    registerOrganizationsRoutes(app, identity, !secure); // devToken de invitación solo fuera de prod
+  }
 
-  app.post('/events', async (req, reply) => {
-    const ctx = contextFrom(req);
-    const body = req.body as AppendBody;
-    const result = await deps.store.append(ctx, body.streamId, body.expectedVersion, body.events);
-    return reply.code(201).send({ version: result.version, events: result.events });
-  });
+  // ── Superficie DEMO LEGACY (sin autenticación): SOLO si está explícitamente habilitada ────────
+  // La ausencia de sesión NUNCA autoriza; estas rutas existen únicamente para test/dev/demo cuando
+  // `legacyDemoAccess` es true. En producción NO se registran.
+  if (deps.legacyDemoAccess === true) {
+    registerModelRoutes(app, deps.store);
+    registerEceRoutes(app, deps.store);
+    registerOperationsRoutes(app, deps.store);
+    registerCapabilityRoutes(app, deps.store);
+    registerExperienceRoutes(app, deps.store);
+    registerOperationalRoutes(app, deps.store);
+    registerMarketingRoutes(app, deps.store);
+    registerContentRoutes(app, deps.store);
+    registerChannelRoutes(app, deps.store);
+    registerMeasurementRoutes(app, deps.store);
+    registerControlRoutes(app, deps.store);
+    registerPilotRoutes(app, deps.store);
+    registerDirectorWorkspaceRoutes(app, deps.store, clock);
+    registerDirectorAutonomoRoutes(app, deps.store, clock);
+    registerDirectorAutonomoProgramasRoutes(app, deps.store, clock);
+    registerEvaluacionRoutes(app, deps.store, clock);
 
-  app.get('/streams/:id', async (req, reply) => {
-    const ctx = contextFrom(req);
-    const { id } = req.params as { id: string };
-    const events = await deps.store.readStream(ctx, id);
-    return reply.send({ streamId: id, version: events.length, events });
-  });
+    app.post('/events', async (req, reply) => {
+      const ctx = contextFrom(req);
+      const body = req.body as AppendBody;
+      const result = await deps.store.append(ctx, body.streamId, body.expectedVersion, body.events);
+      return reply.code(201).send({ version: result.version, events: result.events });
+    });
 
-  app.get('/streams/:id/at', async (req, reply) => {
-    const ctx = contextFrom(req);
-    const { id } = req.params as { id: string };
-    const { asOf } = req.query as { asOf?: string };
-    if (!asOf) return reply.code(400).send({ error: 'MissingAsOf' });
-    const events = await deps.store.reconstructAt(ctx, id, asOf);
-    return reply.send({ streamId: id, asOf, events });
-  });
+    app.get('/streams/:id', async (req, reply) => {
+      const ctx = contextFrom(req);
+      const { id } = req.params as { id: string };
+      const events = await deps.store.readStream(ctx, id);
+      return reply.send({ streamId: id, version: events.length, events });
+    });
 
-  app.post('/intelligence', async (req, reply) => {
-    const ctx = contextFrom(req);
-    const request = req.body as IntelligenceRequest;
-    const product = await deps.intelligence.operate(ctx, request);
-    // Un producto se ofrece al juicio humano; nunca es una decisión ejecutada.
-    return reply.send({ product, awaitingHumanJudgment: true });
-  });
+    app.get('/streams/:id/at', async (req, reply) => {
+      const ctx = contextFrom(req);
+      const { id } = req.params as { id: string };
+      const { asOf } = req.query as { asOf?: string };
+      if (!asOf) return reply.code(400).send({ error: 'MissingAsOf' });
+      const events = await deps.store.reconstructAt(ctx, id, asOf);
+      return reply.send({ streamId: id, asOf, events });
+    });
+
+    app.post('/intelligence', async (req, reply) => {
+      const ctx = contextFrom(req);
+      const request = req.body as IntelligenceRequest;
+      const product = await deps.intelligence.operate(ctx, request);
+      // Un producto se ofrece al juicio humano; nunca es una decisión ejecutada.
+      return reply.send({ product, awaitingHumanJudgment: true });
+    });
+  }
 
   return app;
 }
