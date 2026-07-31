@@ -8,7 +8,7 @@ import * as repo from '../pg/repositories';
 import type { AuditEvent, Membership, Organization, Session, User } from '../domain/entities';
 import { generarTokenSesion, hashToken, normalizarEmail, slugValido } from '../domain/entities';
 import { hashPassword, verifyPassword } from '../domain/password';
-import { type Permission, type Role, esRol, permisosDeRol, rolTienePermiso } from '../domain/roles';
+import { type Permission, esRol, permisosDeRol, rolTienePermiso } from '../domain/roles';
 import { esModo, modoActivable } from '../domain/modo';
 import { ConflictoError, EntradaInvalidaError, NoAutenticadoError, NoEncontradoError, PoliticaError, SinPermisoError } from '../domain/errors';
 
