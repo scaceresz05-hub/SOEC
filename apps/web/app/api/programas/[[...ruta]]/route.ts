@@ -1,15 +1,17 @@
 import { API_BASE } from '../../../../lib/config';
 
 /**
- * Proxy catch-all hacia la configuración de programas del runtime:
- *   /api/programas/<ruta...>  →  {API_BASE}/experience/director-autonomo/organizaciones/<ruta...>
+ * Proxy catch-all OPCIONAL hacia la configuración de programas del runtime:
+ *   /api/programas            → …/organizaciones            (listado global)
+ *   /api/programas/<ruta...>  → …/organizaciones/<ruta...>
  * Sin credenciales: el contexto es sintético server-side.
  */
 function destino(ruta: string[], search: string): string {
-  return `${API_BASE}/experience/director-autonomo/organizaciones/${ruta.map(encodeURIComponent).join('/')}${search}`;
+  const cola = ruta.length ? `/${ruta.map(encodeURIComponent).join('/')}` : '';
+  return `${API_BASE}/experience/director-autonomo/organizaciones${cola}${search}`;
 }
 
-export async function GET(req: Request, ctx: { params: Promise<{ ruta: string[] }> }): Promise<Response> {
+export async function GET(req: Request, ctx: { params: Promise<{ ruta?: string[] }> }): Promise<Response> {
   const { ruta } = await ctx.params;
   const search = new URL(req.url).search;
   try {
@@ -20,7 +22,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ ruta: string[] 
   }
 }
 
-export async function POST(req: Request, ctx: { params: Promise<{ ruta: string[] }> }): Promise<Response> {
+export async function POST(req: Request, ctx: { params: Promise<{ ruta?: string[] }> }): Promise<Response> {
   const { ruta } = await ctx.params;
   const body = await req.json().catch(() => ({}));
   try {

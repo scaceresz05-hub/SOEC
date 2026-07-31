@@ -3,7 +3,7 @@
  * organización piloto y la inscribe en el registro de organizaciones (`orgindice`) para el
  * selector dinámico. `modoEjecucion` siempre PILOT. Event-sourced.
  */
-import type { Attribution, EventInput, EventStore, RequestContext } from '@soec/contracts';
+import { ActorId, type Attribution, type EventInput, type EventStore, OrganizationId, type RequestContext } from '@soec/contracts';
 import {
   type Negocio,
   type PerfilComercial,
@@ -30,14 +30,26 @@ export class NegocioConfigService {
     return String(ctx.organizationId);
   }
 
+  /**
+   * Contexto de SISTEMA para el registro global de organizaciones. El PgEventStore aísla toda
+   * lectura por `organization_id`; el registro (lista de ids+nombres, como el catálogo) se
+   * escribe y lee siempre bajo esta org reservada. Los DATOS de cada organización permanecen
+   * en sus propios streams, estrictamente aislados.
+   */
+  private ctxRegistro(): RequestContext {
+    const o = OrganizationId('_registro');
+    return { organizationId: o, actor: ActorId('sistema'), scope: { organizationId: o, permissions: ['events:append', 'events:read'] }, correlationId: 'registro-organizaciones' };
+  }
+
   cargar(ctx: RequestContext): Promise<Negocio> {
     const org = this.org(ctx);
     return this.store.readStream(ctx, negocioStreamId(org)).then((e) => reconstruirNegocio(org, e));
   }
 
-  /** Lista las organizaciones piloto registradas (registro global). */
-  async listarOrganizaciones(ctx: RequestContext): Promise<OrgIndice> {
-    return reconstruirOrgIndice(await this.store.readStream(ctx, orgIndiceStreamId()));
+  /** Lista las organizaciones piloto registradas (registro global, contexto de sistema). */
+  async listarOrganizaciones(_ctx?: RequestContext): Promise<OrgIndice> {
+    const reg = this.ctxRegistro();
+    return reconstruirOrgIndice(await this.store.readStream(reg, orgIndiceStreamId()));
   }
 
   /** Registra el negocio (idempotente) y lo inscribe en el registro de organizaciones. */
@@ -54,8 +66,10 @@ export class NegocioConfigService {
         idempotencyKey: `registrar:${negocioStreamId(org)}`,
       };
       await this.store.append(ctx, negocioStreamId(org), existente.version, [input]);
-      await this.registrarEnIndice(ctx, org, entrada.nombre, a, o);
     }
+    // La inscripción en el registro es SIEMPRE idempotente: garantiza que el negocio aparezca en
+    // el índice aunque ya existiera (evita quedar fuera del selector por un registro previo).
+    await this.registrarEnIndice(ctx, org, entrada.nombre, a, o);
     return this.cargar(ctx);
   }
 
@@ -68,11 +82,13 @@ export class NegocioConfigService {
     return this.cargar(ctx);
   }
 
-  private async registrarEnIndice(ctx: RequestContext, org: string, nombre: string, a: Attribution, o: string): Promise<void> {
-    const idx = reconstruirOrgIndice(await this.store.readStream(ctx, orgIndiceStreamId()));
+  private async registrarEnIndice(_ctx: RequestContext, org: string, nombre: string, a: Attribution, o: string): Promise<void> {
+    // El registro global vive bajo el contexto de sistema (el store aísla lecturas por org).
+    const reg = this.ctxRegistro();
+    const idx = reconstruirOrgIndice(await this.store.readStream(reg, orgIndiceStreamId()));
     if (idx.organizaciones.some((x) => x.org === org)) return;
     const entrada: EntradaOrg = { org, nombre };
     const input: EventInput = { type: EVENTOS_ORGINDICE.registrada, payload: entrada, attribution: a, occurredAt: o };
-    await this.store.append(ctx, orgIndiceStreamId(), idx.version, [input]);
+    await this.store.append(reg, orgIndiceStreamId(), idx.version, [input]);
   }
 }
