@@ -54,8 +54,10 @@ describe('@soec/piloto-director-v1 · ciclo completo con trazabilidad hacia atr�
     expect(ejec.publicacionesSimuladas).toBe(1);
 
     expect(t.resultado.campaignRef).toBe(t.campaignId); // medición → campaña
-    expect(t.resultado.concluyente).toBe(true);
-    expect(t.resultado.roiReal).not.toBeNull();
+    // COHERENCIA: la campaña se ejecutó de forma simulada ⇒ su ROI es SIMULADO, nunca REAL.
+    expect(t.resultado.clasificacion).toBe('SIMULADO');
+    expect(t.resultado.concluyente).toBe(false);
+    expect(t.resultado.roiReal).toBeNull();
 
     const aprendizajes = await import('@soec/aprendizaje');
     const aprendizaje = await new aprendizajes.AprendizajeService(store).cargar(ctx(), t.learningId);
@@ -64,10 +66,10 @@ describe('@soec/piloto-director-v1 · ciclo completo con trazabilidad hacia atr�
     const next = await new DecisionMktService(store).cargar(ctx(), t.nextDecisionId);
     expect(next.aprendizajeQueLaCambio).toBe(t.learningId); // siguiente decisión → aprendizaje (cierre del lazo)
 
-    // La vista del Director declara el ROI como REAL y no está en modo seguro.
-    expect(t.vista.resultado.naturaleza).toBe('REAL');
+    // La vista del Director declara el ROI como SIMULADO (no REAL) y no está en modo seguro.
+    expect(t.vista.resultado.naturaleza).toBe('SIMULADO');
     expect(t.vista.modoSeguro).toBe(false);
-    expect(t.vista.proximaRecomendacion).toContain('concluyente');
+    expect(t.vista.proximaRecomendacion).toContain('no es concluyente');
   });
 });
 

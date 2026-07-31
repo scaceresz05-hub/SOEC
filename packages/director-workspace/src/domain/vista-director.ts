@@ -65,19 +65,24 @@ export interface VistaCicloDirector {
   readonly proximaRecomendacion: string;
 }
 
-/** Naturaleza del resultado (ROI) según la procedencia de los ingresos y su concluyencia. */
+/**
+ * Naturaleza del resultado (ROI) tomada DIRECTAMENTE de la clasificación autoritativa del
+ * módulo de medición (una sola fuente de verdad): REAL sólo si todos los componentes lo son.
+ */
 function naturalezaResultado(r: ResultadoCampania | null): Dato<number> {
   if (!r) return { valor: null, naturaleza: 'DESCONOCIDO', nota: 'aún no hay resultado medido' };
-  if (r.concluyente && r.roiReal !== null) {
-    return { valor: r.roiReal, naturaleza: 'REAL', nota: r.motivo };
+  switch (r.clasificacion) {
+    case 'REAL':
+      return { valor: r.roiReal, naturaleza: 'REAL', nota: r.motivo };
+    case 'SIMULADO':
+      return { valor: r.roiEstimado, naturaleza: 'SIMULADO', nota: r.motivo };
+    case 'ESTIMADO':
+      return { valor: r.roiEstimado, naturaleza: 'ESTIMADO', nota: r.motivo };
+    case 'NO_CONCLUYENTE':
+    case 'NO_EVALUABLE':
+    default:
+      return { valor: null, naturaleza: 'DESCONOCIDO', nota: `${r.clasificacion}: ${r.motivo}` };
   }
-  if (r.ingresos.procedencia === 'SIMULADA') {
-    return { valor: r.roiEstimado, naturaleza: 'SIMULADO', nota: r.motivo };
-  }
-  if (r.roiEstimado !== null) {
-    return { valor: r.roiEstimado, naturaleza: 'ESTIMADO', nota: r.motivo };
-  }
-  return { valor: null, naturaleza: 'DESCONOCIDO', nota: r.motivo };
 }
 
 /** Compone la vista del ciclo. Función pura y determinista. */

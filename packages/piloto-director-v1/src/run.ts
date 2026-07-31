@@ -23,7 +23,9 @@ async function main(): Promise<void> {
   for (const [etapa, id] of cadena) {
     console.log(`  ${etapa.padEnd(22)} → ${id}`);
   }
-  console.log(`  ROI (${traza.vista.resultado.naturaleza}): ${traza.resultado.roiReal ?? traza.resultado.roiEstimado ?? 'n/d'}`);
+  const roiIlustrativo = traza.resultado.roiEstimado;
+  console.log(`  Clasificación ROI: ${traza.resultado.clasificacion} (ROI real: ${traza.resultado.roiReal ?? 'N/D — no hay campaña productiva'})`);
+  if (roiIlustrativo !== null) console.log(`  ROI ilustrativo (NO real): ${roiIlustrativo}`);
   console.log(`  Próxima recomendación: ${traza.vista.proximaRecomendacion}`);
 }
 

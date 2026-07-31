@@ -90,14 +90,16 @@ export async function ejecutarPiloto(store: EventStore, escenarioEjecucion: Esce
   }
   const approval = (await autonomia.cargar(c)).autorizaciones.find((a) => a.accion === 'PUBLICAR_SIMULADO')!;
 
-  // 6) Medición: ingresos observados y atribuidos → resultado concluyente.
+  // 6) Medición: la campaña se ejecutó de forma SIMULADA (Bloque E), por lo que su gasto y sus
+  // ingresos son SIMULADOS. Coherencia con Bloque F: el ROI se clasifica SIMULADO, jamás REAL.
+  // Una campaña productiva con ingresos observados y atribuidos sería otro camino (ver tests F/I).
   const measurementId = `med:${campaignId}`;
   const resultado = evaluarResultadoCampania({
     organizacionId: org,
     campaignRef: campaignId,
     ventana: '2026-08',
-    gasto: { valor: 100000, procedencia: 'OBSERVADA' },
-    ingresos: { valor: 260000, procedencia: 'OBSERVADA' },
+    gasto: { valor: 100000, procedencia: 'SIMULADA' },
+    ingresos: { valor: 260000, procedencia: 'SIMULADA' },
     conversiones: [{ id: 'v1', externalRef: null, campaignRef: campaignId, valor: 260000, ocurridoEn: '2026-08-15T00:00:00.000Z' }],
     periodoCompleto: true,
   });
