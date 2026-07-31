@@ -81,4 +81,33 @@ describe('@soec/estrategia-creativa · paquete de conexión', () => {
     expect(res.tipo).toBe('ABSTENCION');
     if (res.tipo === 'ABSTENCION') expect(res.faltantes.length).toBeGreaterThan(0);
   });
+
+  it('poblarPrograma crea un Programa real (segmentos + hipótesis) listo para el ciclo; idempotente', async () => {
+    const store = new InMemoryEventStore();
+    const con = new ConocimientoComercialService(store);
+    const hip = new HipotesisComercialService(store);
+    await sembrar(con, hip);
+    const s = new EstrategiaCreativaService(store, con, hip);
+    const res = await s.poblarPrograma(ctx(), 'prog1', PARAMS, attr, O);
+    expect(res.tipo).toBe('PROPUESTA');
+    if (res.tipo === 'PROPUESTA') {
+      expect(res.programa.existe).toBe(true);
+      expect(res.programa.segmentos).toHaveLength(1);
+      expect(res.programa.hipotesis).toHaveLength(1);
+      expect(res.programa.presupuestoTotalSimulado).toBe(100000);
+    }
+    // idempotente: re-poblar no duplica el programa.
+    await s.poblarPrograma(ctx(), 'prog1', PARAMS, attr, O);
+    const prog = new (await import('@soec/programas')).ProgramaService(store);
+    expect((await prog.listar(ctx())).programas).toHaveLength(1);
+  });
+
+  it('sin conocimiento → poblarPrograma ABSTIENE sin crear ningún programa', async () => {
+    const store = new InMemoryEventStore();
+    const s = new EstrategiaCreativaService(store);
+    const res = await s.poblarPrograma(ctx('org-vacia'), 'prog1', PARAMS, attr, O);
+    expect(res.tipo).toBe('ABSTENCION');
+    const prog = new (await import('@soec/programas')).ProgramaService(store);
+    expect((await prog.listar(ctx('org-vacia'))).programas).toHaveLength(0);
+  });
 });
