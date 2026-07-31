@@ -4,7 +4,7 @@ import { DeterministicIntelligenceProvider } from '@soec/intelligence';
 import { buildApp } from '../src/app';
 
 function makeApp() {
-  return buildApp({ store: new InMemoryEventStore(), intelligence: new DeterministicIntelligenceProvider() });
+  return buildApp({ store: new InMemoryEventStore(), intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true });
 }
 
 describe('API — Medición, Atribución y Optimización (F2-MET-01)', () => {

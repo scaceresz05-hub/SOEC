@@ -4,7 +4,7 @@ import { DeterministicIntelligenceProvider } from '@soec/intelligence';
 import { buildApp } from '../src/app';
 
 function makeApp() {
-  return buildApp({ store: new InMemoryEventStore(), intelligence: new DeterministicIntelligenceProvider() });
+  return buildApp({ store: new InMemoryEventStore(), intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true });
 }
 const headers = { 'x-organization-id': 'orgA', 'x-actor-id': 'soec', 'x-scope': 'events:append,events:read', 'content-type': 'application/json' };
 

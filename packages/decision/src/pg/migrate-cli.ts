@@ -7,6 +7,7 @@ import { canalesMigrations } from '@soec/canales/pg';
 import { medicionMigrations } from '@soec/medicion/pg';
 import { controlMigrations } from '@soec/control/pg';
 import { pilotoMigrations } from '@soec/piloto/pg';
+import { identityMigrations } from '@soec/identity/pg';
 import { decisionMigrations } from './migrations';
 
 /** Migra toda la cadena (… → Piloto → Decisión). */
@@ -20,6 +21,7 @@ runMigrations(pool, [
   ...medicionMigrations,
   ...controlMigrations,
   ...pilotoMigrations,
+  ...identityMigrations,
   ...decisionMigrations,
 ])
   .then(async (applied) => {

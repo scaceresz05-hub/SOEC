@@ -13,7 +13,7 @@ const DEP = 'marketing';
 function makeApp() {
   return buildApp({
     store: new InMemoryEventStore(),
-    intelligence: new DeterministicIntelligenceProvider(),
+    intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true,
     clock: new FixedClock(new Date('2026-07-24T12:00:00.000Z')),
   });
 }
@@ -22,7 +22,7 @@ function makeAppConStore() {
   return {
     app: buildApp({
       store,
-      intelligence: new DeterministicIntelligenceProvider(),
+      intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true,
       clock: new FixedClock(new Date('2026-07-24T12:00:00.000Z')),
     }),
     store,

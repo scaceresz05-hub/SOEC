@@ -28,6 +28,7 @@
     "@soec/medicion": "workspace:*",
     "@soec/operacional": "workspace:*",
     "@soec/piloto": "workspace:*",
+    "@soec/identity": "workspace:*",
     "@soec/rubros": "workspace:*",
     "@types/pg": "^8.11.10"
   }

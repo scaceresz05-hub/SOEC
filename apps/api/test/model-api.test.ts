@@ -6,7 +6,7 @@ import { buildApp } from '../src/app';
 function makeApp(clock?: FixedClock) {
   return buildApp({
     store: new InMemoryEventStore(clock),
-    intelligence: new DeterministicIntelligenceProvider(),
+    intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true,
   });
 }
 

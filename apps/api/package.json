@@ -33,6 +33,11 @@
     "@soec/autonomia": "workspace:*",
     "@soec/piloto-director-v1": "workspace:*",
     "@soec/programas": "workspace:*",
+    "@soec/identity": "workspace:*",
+    "pg": "^8.13.1",
     "fastify": "^5.2.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10"
   }
 }
