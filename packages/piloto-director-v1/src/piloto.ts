@@ -40,9 +40,15 @@ function ctx(org: string): RequestContext {
   return { organizationId: o, actor: ActorId('soec-director'), scope: { organizationId: o, permissions: ['events:append', 'events:read', 'decisiones:decidir'] }, correlationId: `piloto-${org}` };
 }
 
-/** Ejecuta el ciclo completo y devuelve la traza. `escenarioEjecucion` permite forzar fallos. */
-export async function ejecutarPiloto(store: EventStore, escenarioEjecucion: EscenarioEjecucion = 'SUCCESS'): Promise<TrazaPiloto> {
-  const org = ORG_SMILEFLOW;
+/** Identificadores deterministas del ciclo, únicos por organización (streams por org). */
+export const IDS_CICLO = { decisionId: 'd1', campaignId: 'camp1', contentId: 'cont1', experimentId: 'exp1', learningId: 'apr1', nextDecisionId: 'd2' } as const;
+
+/**
+ * Ejecuta el ciclo completo y devuelve la traza. `escenarioEjecucion` permite forzar fallos;
+ * `org` permite ejecutarlo para cualquier organización del catálogo (streams por org). Es
+ * idempotente: los servicios reutilizan streams existentes, de modo que re-ejecutar no duplica.
+ */
+export async function ejecutarPiloto(store: EventStore, escenarioEjecucion: EscenarioEjecucion = 'SUCCESS', org: string = ORG_SMILEFLOW): Promise<TrazaPiloto> {
   const c = ctx(org);
 
   const decisiones = new DecisionMktService(store);
@@ -136,24 +142,9 @@ export async function ejecutarPiloto(store: EventStore, escenarioEjecucion: Esce
   const nextDecisionId = 'd2';
   await decisiones.crear(c, nextDecisionId, decisionSmileFlow(org, { objetivo: `${OBJETIVO_ID}: consolidar prueba social`, aprendizajeQueLaCambio: learningId }), ATRIBUCION, AHORA);
 
-  // Vista del ciclo (Bloque I) con la evidencia real del piloto.
-  const estadoAutonomia = await autonomia.cargar(c);
-  const ejecucionEstado = await ejecuciones.cargar(c, contentId);
-  const contenidoEstado = await contenidos.cargar(c, contentId);
-  const aprendizajeEstado = await aprendizajes.cargar(c, learningId);
-  const vista = componerVistaDirector({
-    organizacionActiva: org,
-    autonomia: estadoAutonomia,
-    objetivo: { texto: `${OBJETIVO_ID}: generar solicitudes de demostración`, decisionId },
-    justificacion: 'la señal activa es POCAS_SOLICITUDES',
-    evaluable: true,
-    faltantes: [],
-    campanias: [campania],
-    contenidos: [contenidoEstado],
-    ejecuciones: [ejecucionEstado],
-    resultado,
-    aprendizajes: [aprendizajeEstado],
-  });
+  // Vista del ciclo (Bloque I) recompuesta de forma READ-ONLY desde el store: exactamente lo
+  // mismo que verá la lectura del runtime. Una sola fuente de composición.
+  const { vista } = await reconstruirVistaDirector(store, org);
 
   return {
     objetivoId: OBJETIVO_ID,
@@ -169,4 +160,55 @@ export async function ejecutarPiloto(store: EventStore, escenarioEjecucion: Esce
     resultado,
     vista,
   };
+}
+
+export interface VistaReconstruida {
+  readonly vista: VistaCicloDirector;
+  readonly resultado: ResultadoCampania | null;
+}
+
+/**
+ * Recompone la vista del ciclo (Bloque I) para una organización SIN escribir eventos:
+ * reconstruye cada agregado desde el store por sus ids deterministas y compone la vista. Es la
+ * lectura que usa el runtime; si el ciclo aún no se ejecutó, devuelve una vista honestamente
+ * "vacía" (objetivo DESCONOCIDO, recomendación de registrar la decisión).
+ */
+export async function reconstruirVistaDirector(store: EventStore, org: string): Promise<VistaReconstruida> {
+  const c = ctx(org);
+  const decision = await new DecisionMktService(store).cargar(c, IDS_CICLO.decisionId);
+  const campania = await new CampaniaService(store).cargar(c, IDS_CICLO.campaignId);
+  const contenido = await new ContenidoGobernadoService(store).cargar(c, IDS_CICLO.contentId);
+  const ejecucion = await new EjecucionService(store, new AdaptadorSimuladoDeterminista()).cargar(c, IDS_CICLO.contentId);
+  const aprendizaje = await new AprendizajeService(store).cargar(c, IDS_CICLO.learningId);
+  const autonomiaEstado = await new AutonomiaService(store).cargar(c);
+
+  // El ROI es una medición SIMULADA (coherente con la ejecución simulada): sólo existe si la
+  // campaña se ejecutó. NUNCA es real (ver Bloque F).
+  const resultado: ResultadoCampania | null =
+    campania.existe && ejecucion.publicacionesSimuladas > 0
+      ? evaluarResultadoCampania({
+          organizacionId: org,
+          campaignRef: IDS_CICLO.campaignId,
+          ventana: '2026-08',
+          gasto: { valor: 100000, procedencia: 'SIMULADA' },
+          ingresos: { valor: 260000, procedencia: 'SIMULADA' },
+          conversiones: [{ id: 'v1', externalRef: null, campaignRef: IDS_CICLO.campaignId, valor: 260000, ocurridoEn: '2026-08-15T00:00:00.000Z' }],
+          periodoCompleto: true,
+        })
+      : null;
+
+  const vista = componerVistaDirector({
+    organizacionActiva: org,
+    autonomia: autonomiaEstado,
+    objetivo: decision.existe ? { texto: decision.objetivo, decisionId: IDS_CICLO.decisionId } : null,
+    justificacion: decision.existe ? decision.justificacion : null,
+    evaluable: decision.existe && decision.estado !== 'NO_EVALUABLE',
+    faltantes: decision.faltantesObligatorios,
+    campanias: campania.existe ? [campania] : [],
+    contenidos: contenido.existe ? [contenido] : [],
+    ejecuciones: [ejecucion],
+    resultado,
+    aprendizajes: aprendizaje.existe ? [aprendizaje] : [],
+  });
+  return { vista, resultado };
 }

@@ -7,3 +7,6 @@
  */
 export * from './fixture';
 export * from './piloto';
+// Re-exporta el tipo de la vista para que los consumidores (runtime) tengan un único punto de
+// entrada de integración sin depender directamente de @soec/director-workspace.
+export type { VistaCicloDirector, Naturaleza, Dato, EjecucionSimuladaVista } from '@soec/director-workspace';

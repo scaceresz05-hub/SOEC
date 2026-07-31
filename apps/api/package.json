@@ -30,6 +30,8 @@
     "@soec/control": "workspace:*",
     "@soec/piloto": "workspace:*",
     "@soec/instancia-pyme": "workspace:*",
+    "@soec/autonomia": "workspace:*",
+    "@soec/piloto-director-v1": "workspace:*",
     "fastify": "^5.2.0"
   }
 }

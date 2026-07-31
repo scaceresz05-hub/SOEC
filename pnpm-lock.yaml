@@ -35,6 +35,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@soec/autonomia':
+        specifier: workspace:*
+        version: link:../../packages/autonomia
       '@soec/canales':
         specifier: workspace:*
         version: link:../../packages/canales
@@ -92,6 +95,9 @@ importers:
       '@soec/piloto':
         specifier: workspace:*
         version: link:../../packages/piloto
+      '@soec/piloto-director-v1':
+        specifier: workspace:*
+        version: link:../../packages/piloto-director-v1
       '@soec/rubros':
         specifier: workspace:*
         version: link:../../packages/rubros
