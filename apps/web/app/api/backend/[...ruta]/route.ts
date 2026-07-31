@@ -9,7 +9,12 @@ async function proxy(req: Request, ruta: string[], method: 'GET' | 'POST' | 'PAT
   const cookie = req.headers.get('cookie') ?? '';
   const search = new URL(req.url).search;
   const url = `${API_BASE}/${ruta.map(encodeURIComponent).join('/')}${search}`;
-  const init: RequestInit = { method, headers: { 'content-type': 'application/json', cookie }, cache: 'no-store' };
+  // La organización activa viaja en cabecera (nunca en la URL ni el cuerpo). El gateway la valida
+  // contra la membresía de la sesión: la cabecera por sí sola no autoriza.
+  const orgSlug = req.headers.get('x-organization-slug') ?? '';
+  const headers: Record<string, string> = { 'content-type': 'application/json', cookie };
+  if (orgSlug) headers['x-organization-slug'] = orgSlug;
+  const init: RequestInit = { method, headers, cache: 'no-store' };
   if (method === 'POST' || method === 'PATCH') init.body = await req.text();
   try {
     const res = await fetch(url, init);
