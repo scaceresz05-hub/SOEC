@@ -6,4 +6,5 @@
  * multi-tenant y sin efectos: produce insumos/borradores, nunca publica ni gasta.
  */
 export * from './domain/estrategia-creativa';
+export * from './domain/conexion';
 export * from './app/estrategia-creativa-service';

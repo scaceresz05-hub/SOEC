@@ -545,9 +545,15 @@ importers:
       '@soec/crm-comercial':
         specifier: workspace:*
         version: link:../crm-comercial
+      '@soec/marketing':
+        specifier: workspace:*
+        version: link:../marketing
       '@soec/negocio':
         specifier: workspace:*
         version: link:../negocio
+      '@soec/programas':
+        specifier: workspace:*
+        version: link:../programas
     devDependencies:
       '@soec/event-store':
         specifier: workspace:*

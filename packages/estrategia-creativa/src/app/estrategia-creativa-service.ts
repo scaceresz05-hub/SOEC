@@ -5,7 +5,7 @@
  * efectos externos (sin publicación, sin gasto); una ABSTENCIÓN nunca se persiste como si fuera un plan.
  */
 import type { Attribution, EventInput, EventStore, RequestContext } from '@soec/contracts';
-import { ConocimientoComercialService } from '@soec/crm-comercial';
+import { ConocimientoComercialService, HipotesisComercialService } from '@soec/crm-comercial';
 import {
   type DerivacionCreativa,
   EVENTOS_ESTCREATIVA,
@@ -14,11 +14,26 @@ import {
   estrategiaCreativaStreamId,
   reconstruirEstrategiaCreativa,
 } from '../domain/estrategia-creativa';
+import { type ParametrosCampania, type ResultadoConexion, derivarConexion } from '../domain/conexion';
 
 export class EstrategiaCreativaService {
   private readonly conocimiento: ConocimientoComercialService;
-  constructor(private readonly store: EventStore, conocimiento?: ConocimientoComercialService) {
+  private readonly hipotesis: HipotesisComercialService;
+  constructor(private readonly store: EventStore, conocimiento?: ConocimientoComercialService, hipotesis?: HipotesisComercialService) {
     this.conocimiento = conocimiento ?? new ConocimientoComercialService(store);
+    this.hipotesis = hipotesis ?? new HipotesisComercialService(store);
+  }
+
+  /**
+   * Compone el PAQUETE DE CONEXIÓN completo (brief, estrategia, segmentos, hipótesis de programa,
+   * objetivo) desde el conocimiento comercial + hipótesis comerciales + los parámetros de dirección.
+   * Es la entrada real (no fixtures) para poblar `@soec/programas` y el pipeline. ABSTIENE si falta info.
+   */
+  async derivarConexion(ctx: RequestContext, params: ParametrosCampania): Promise<ResultadoConexion> {
+    const state = await this.conocimiento.cargar(ctx);
+    const idx = await this.hipotesis.listar(ctx);
+    const hips = await Promise.all(idx.hipotesis.map((h) => this.hipotesis.cargar(ctx, h.hipotesisId)));
+    return derivarConexion(state, hips, params);
   }
 
   private org(ctx: RequestContext): string {
