@@ -12,6 +12,8 @@ export * from './domain/contacto';
 export * from './domain/indices';
 export * from './domain/puntaje';
 export * from './domain/perfiles';
+export * from './domain/hipotesis';
 export * from './domain/errors';
 export * from './app/crm-service';
 export * from './app/conocimiento-service';
+export * from './app/hipotesis-service';

@@ -35,3 +35,33 @@ export function reconstruirCrmIndice(events: readonly RecordedEvent[]): CrmIndic
     { contactos: [], version: 0 },
   );
 }
+
+// ── Índice de hipótesis comerciales por organización ─────────────────────────────────────────
+export const EVENTOS_HIPINDICE = { registrada: 'hipindice.registrada' } as const;
+
+export function hipIndiceStreamId(organizacionId: string): string {
+  return `hipindice:${organizacionId}`;
+}
+
+export interface EntradaHipotesis {
+  readonly hipotesisId: string;
+  readonly enunciado: string;
+}
+
+export interface HipIndice {
+  readonly hipotesis: readonly EntradaHipotesis[];
+  readonly version: number;
+}
+
+export function reconstruirHipIndice(events: readonly RecordedEvent[]): HipIndice {
+  return events.reduce<HipIndice>(
+    (s, e) => {
+      const next = { ...s, version: s.version + 1 };
+      if (e.type !== EVENTOS_HIPINDICE.registrada) return next;
+      const p = e.payload as EntradaHipotesis;
+      if (s.hipotesis.some((h) => h.hipotesisId === p.hipotesisId)) return next;
+      return { ...next, hipotesis: [...s.hipotesis, p] };
+    },
+    { hipotesis: [], version: 0 },
+  );
+}
