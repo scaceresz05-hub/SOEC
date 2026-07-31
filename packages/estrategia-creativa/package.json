@@ -15,7 +15,8 @@
     "@soec/crm-comercial": "workspace:*",
     "@soec/negocio": "workspace:*",
     "@soec/programas": "workspace:*",
-    "@soec/marketing": "workspace:*"
+    "@soec/marketing": "workspace:*",
+    "@soec/contenido": "workspace:*"
   },
   "devDependencies": {
     "@soec/event-store": "workspace:*"

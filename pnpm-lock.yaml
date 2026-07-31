@@ -539,6 +539,9 @@ importers:
 
   packages/estrategia-creativa:
     dependencies:
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../contenido
       '@soec/contracts':
         specifier: workspace:*
         version: link:../contracts

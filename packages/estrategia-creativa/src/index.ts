@@ -13,3 +13,4 @@ export * from './domain/errors';
 export * from './app/estrategia-creativa-service';
 export * from './app/variantes-ab-service';
 export * from './app/calendario-service';
+export * from './app/orquestador-generativo';
