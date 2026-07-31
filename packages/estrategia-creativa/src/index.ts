@@ -7,4 +7,9 @@
  */
 export * from './domain/estrategia-creativa';
 export * from './domain/conexion';
+export * from './domain/variantes-ab';
+export * from './domain/calendario';
+export * from './domain/errors';
 export * from './app/estrategia-creativa-service';
+export * from './app/variantes-ab-service';
+export * from './app/calendario-service';
