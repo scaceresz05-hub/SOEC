@@ -14,14 +14,24 @@ import { EstrategiaCreativaService } from './estrategia-creativa-service';
 import { EstrategiaCreativaArtefactoService } from './artefacto-creativo-service';
 import { VariantesABService } from './variantes-ab-service';
 import { CalendarioEditorialService } from './calendario-service';
+import { AprobacionService } from './aprobacion-service';
 import { derivarContenidoArtefacto, estrategiaCreativaId } from '../domain/artefacto-creativo';
 import type { ParametrosCampania } from '../domain/conexion';
 import type { BriefComercial, EstrategiaCreativa } from '../domain/estrategia-creativa';
+import type { Programa } from '@soec/programas';
 
 const DIA_MS = 86_400_000;
 
+/** Versión de las piezas creadas por el orquestador: se emiten una vez (contenido inmutable en este flujo). */
+const VERSION_PIEZA = 1;
+
 export type ResultadoOrquestacion =
   | { readonly tipo: 'PROPUESTA'; readonly vista: VistaPrograma }
+  | { readonly tipo: 'PENDIENTE_APROBACION'; readonly faltantes: readonly string[] }
+  | { readonly tipo: 'ABSTENCION'; readonly faltantes: readonly string[] };
+
+export type ResultadoPreparacion =
+  | { readonly tipo: 'PREPARADO'; readonly piezas: readonly string[]; readonly yaEjecutado: boolean }
   | { readonly tipo: 'ABSTENCION'; readonly faltantes: readonly string[] };
 
 export class OrquestadorProgramaGenerativo {
@@ -32,6 +42,7 @@ export class OrquestadorProgramaGenerativo {
   private readonly artefactos: EstrategiaCreativaArtefactoService;
   private readonly ab: VariantesABService;
   private readonly calendario: CalendarioEditorialService;
+  private readonly aprobacion: AprobacionService;
   constructor(store: EventStore, opts?: { proveedor?: ProveedorGenerativo; estrategia?: EstrategiaCreativaService }) {
     this.estrategia = opts?.estrategia ?? new EstrategiaCreativaService(store);
     this.programas = new ProgramaService(store);
@@ -40,18 +51,34 @@ export class OrquestadorProgramaGenerativo {
     this.artefactos = new EstrategiaCreativaArtefactoService(store);
     this.ab = new VariantesABService(store);
     this.calendario = new CalendarioEditorialService(store);
+    this.aprobacion = new AprobacionService(store);
+  }
+
+  private piezasDe(prog: Programa): readonly string[] {
+    return prog.campanias.flatMap((c) => c.contenidoIds);
   }
 
   /**
-   * Corre el flujo completo desde el conocimiento comercial hasta el aprendizaje, sobre datos reales.
-   * ABSTIENE (sin ejecutar nada) si el conocimiento no es evaluable. Idempotente: re-ejecutar no
-   * duplica campañas/contenidos y reconstruye la vista si el ciclo ya corrió.
+   * ATAJO de piloto (todo-en-uno): prepara el programa, lo aprueba con un actor humano SIMULADO y ejecuta
+   * el ciclo. La aprobación de piloto está claramente separada (`aprobarComoPilotoHumano`) y registra al
+   * actor del contexto; NUNCA ocurre dentro de `ejecutarSimulado`. Idempotente. ABSTIENE si no es evaluable.
    */
   async generarPrograma(ctx: RequestContext, programaId: string, params: ParametrosCampania, a: Attribution, o: string): Promise<ResultadoOrquestacion> {
-    // Idempotencia: si el ciclo ya corrió, reconstruir la vista sin re-escribir.
+    const prep = await this.prepararPrograma(ctx, programaId, params, a, o);
+    if (prep.tipo === 'ABSTENCION') return prep;
+    await this.aprobarComoPilotoHumano(ctx, prep.piezas, a, o);
+    return this.ejecutarSimulado(ctx, programaId, a, o);
+  }
+
+  /**
+   * ETAPA 1 (Tramo H) — PREPARA todo lo generable sin ejecutar ni publicar: puebla el programa, deriva la
+   * estrategia creativa (artefactos versionados), campañas, contenido generado por el puerto neutral,
+   * variantes A/B y calendario. Deja las piezas EN ESPERA de aprobación humana. Idempotente y reconstruible.
+   */
+  async prepararPrograma(ctx: RequestContext, programaId: string, params: ParametrosCampania, a: Attribution, o: string): Promise<ResultadoPreparacion> {
     const prog0 = await this.programas.cargar(ctx, programaId);
     if (prog0.existe && (prog0.estado === 'EN_EJECUCION' || prog0.estado === 'EVALUADO')) {
-      return { tipo: 'PROPUESTA', vista: await this.ciclo.ejecutarCiclo(ctx, programaId, a, o) };
+      return { tipo: 'PREPARADO', piezas: this.piezasDe(prog0), yaEjecutado: true };
     }
 
     const pob = await this.estrategia.poblarPrograma(ctx, programaId, params, a, o);
@@ -126,8 +153,38 @@ export class OrquestadorProgramaGenerativo {
       }
     }
 
-    const vista = await this.ciclo.ejecutarCiclo(ctx, programaId, a, o);
-    return { tipo: 'PROPUESTA', vista };
+    const progFin = await this.programas.cargar(ctx, programaId);
+    return { tipo: 'PREPARADO', piezas: this.piezasDe(progFin), yaEjecutado: false };
+  }
+
+  /**
+   * ETAPA 2 (Tramo H) — EJECUTA el ciclo simulado (aprobación gobernada → ejecución simulada → medición →
+   * aprendizaje) SOLO si cada pieza tiene aprobación humana vigente para su versión. Si falta alguna,
+   * NO ejecuta y devuelve `PENDIENTE_APROBACION` con las piezas pendientes. Nunca se autoaprueba aquí.
+   */
+  async ejecutarSimulado(ctx: RequestContext, programaId: string, a: Attribution, o: string): Promise<ResultadoOrquestacion> {
+    const prog = await this.programas.cargar(ctx, programaId);
+    if (!prog.existe) return { tipo: 'ABSTENCION', faltantes: ['el programa no existe; prepararlo primero'] };
+    if (prog.estado === 'EN_EJECUCION' || prog.estado === 'EVALUADO') {
+      return { tipo: 'PROPUESTA', vista: await this.ciclo.ejecutarCiclo(ctx, programaId, a, o) };
+    }
+    const piezas = this.piezasDe(prog);
+    if (piezas.length === 0) return { tipo: 'ABSTENCION', faltantes: ['no hay piezas generadas para ejecutar'] };
+    const pendientes: string[] = [];
+    for (const p of piezas) if (!(await this.aprobacion.estaAprobada(ctx, 'PIEZA', p, VERSION_PIEZA))) pendientes.push(p);
+    if (pendientes.length > 0) return { tipo: 'PENDIENTE_APROBACION', faltantes: pendientes.map((p) => `pieza sin aprobación humana vigente: ${p}`) };
+    return { tipo: 'PROPUESTA', vista: await this.ciclo.ejecutarCiclo(ctx, programaId, a, o) };
+  }
+
+  /**
+   * PILOTO: firma como un director humano (actor tomado del contexto autenticado) todas las piezas dadas.
+   * Está deliberadamente separado del flujo automático y jamás se llama desde `ejecutarSimulado`: existe
+   * solo para el atajo `generarPrograma`. Cada decisión queda registrada y auditable con su actor.
+   */
+  private async aprobarComoPilotoHumano(ctx: RequestContext, piezas: readonly string[], a: Attribution, o: string): Promise<void> {
+    for (const p of piezas) {
+      await this.aprobacion.decidir(ctx, { resourceType: 'PIEZA', resourceId: p, resourceVersion: VERSION_PIEZA, decision: 'APROBADA', comment: 'aprobación de piloto (director humano simulado)', scope: 'PIEZA' }, a, o);
+    }
   }
 
   /** Tramo C: genera el cuerpo por el puerto neutral y lo VALIDA; devuelve null si es inválido. */

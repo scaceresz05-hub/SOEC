@@ -15,4 +15,6 @@ export * from './app/variantes-ab-service';
 export * from './app/calendario-service';
 export * from './domain/artefacto-creativo';
 export * from './app/artefacto-creativo-service';
+export * from './domain/aprobacion';
+export * from './app/aprobacion-service';
 export * from './app/orquestador-generativo';
