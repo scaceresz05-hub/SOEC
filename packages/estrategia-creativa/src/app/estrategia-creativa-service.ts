@@ -6,6 +6,7 @@
  */
 import type { Attribution, EventInput, EventStore, RequestContext } from '@soec/contracts';
 import { ConocimientoComercialService, HipotesisComercialService } from '@soec/crm-comercial';
+import type { ConocimientoComercialState, HipotesisState } from '@soec/crm-comercial';
 import { ProgramaService, type Programa } from '@soec/programas';
 import {
   type DerivacionCreativa,
@@ -33,10 +34,16 @@ export class EstrategiaCreativaService {
    * Es la entrada real (no fixtures) para poblar `@soec/programas` y el pipeline. ABSTIENE si falta info.
    */
   async derivarConexion(ctx: RequestContext, params: ParametrosCampania): Promise<ResultadoConexion> {
+    const { state, hips } = await this.contextoComercial(ctx);
+    return derivarConexion(state, hips, params);
+  }
+
+  /** Contexto comercial crudo (conocimiento + hipótesis comerciales) para derivar artefactos. */
+  async contextoComercial(ctx: RequestContext): Promise<{ state: ConocimientoComercialState; hips: HipotesisState[] }> {
     const state = await this.conocimiento.cargar(ctx);
     const idx = await this.hipotesis.listar(ctx);
     const hips = await Promise.all(idx.hipotesis.map((h) => this.hipotesis.cargar(ctx, h.hipotesisId)));
-    return derivarConexion(state, hips, params);
+    return { state, hips };
   }
 
   /**

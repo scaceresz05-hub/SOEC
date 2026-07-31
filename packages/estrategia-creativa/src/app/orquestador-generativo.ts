@@ -11,6 +11,8 @@ import { CicloProgramaService, ProgramaService } from '@soec/programas';
 import type { VistaPrograma } from '@soec/programas';
 import { ProveedorGenerativoDeterminista, type ProveedorGenerativo, type SolicitudGenerativa, validarRespuesta } from '@soec/contenido';
 import { EstrategiaCreativaService } from './estrategia-creativa-service';
+import { EstrategiaCreativaArtefactoService } from './artefacto-creativo-service';
+import { derivarContenidoArtefacto, estrategiaCreativaId } from '../domain/artefacto-creativo';
 import type { ParametrosCampania } from '../domain/conexion';
 import type { BriefComercial, EstrategiaCreativa } from '../domain/estrategia-creativa';
 
@@ -23,11 +25,13 @@ export class OrquestadorProgramaGenerativo {
   private readonly programas: ProgramaService;
   private readonly ciclo: CicloProgramaService;
   private readonly proveedor: ProveedorGenerativo;
+  private readonly artefactos: EstrategiaCreativaArtefactoService;
   constructor(store: EventStore, opts?: { proveedor?: ProveedorGenerativo; estrategia?: EstrategiaCreativaService }) {
     this.estrategia = opts?.estrategia ?? new EstrategiaCreativaService(store);
     this.programas = new ProgramaService(store);
     this.ciclo = new CicloProgramaService(store);
     this.proveedor = opts?.proveedor ?? new ProveedorGenerativoDeterminista();
+    this.artefactos = new EstrategiaCreativaArtefactoService(store);
   }
 
   /**
@@ -49,6 +53,21 @@ export class OrquestadorProgramaGenerativo {
     const { brief, estrategia, hipotesis } = con.paquete;
     const canal = params.canales[0] ?? 'correo';
     const presupuestoPorCampania = Math.max(1, Math.floor(params.presupuestoTotal / Math.max(1, hipotesis.length)));
+    const objetivoId = `obj-${programaId}`;
+    const briefId = `brief-${programaId}`;
+
+    // Tramo D: persistir un artefacto de estrategia creativa de 1.ª clase por hipótesis (versionado,
+    // con afirmaciones ligadas a evidencia). El contenido registrará qué versión de estrategia usó.
+    const { state, hips } = await this.estrategia.contextoComercial(ctx);
+    const versionPorHipotesis = new Map<string, { id: string; version: number }>();
+    for (const h of hipotesis) {
+      const hipState = hips.find((x) => x.hipotesisId === h.id);
+      if (!hipState) continue;
+      const contenido = derivarContenidoArtefacto(state, brief, estrategia, hipState, { programaId, objetivoId, segmentoId: h.segmentoId, briefId, politicaVersion: 'creativa-v1' });
+      const estId = estrategiaCreativaId(programaId, h.id);
+      const art = await this.artefactos.establecer(ctx, estId, contenido, a, o);
+      versionPorHipotesis.set(h.id, { id: estId, version: art.artefacto?.version ?? 1 });
+    }
 
     for (const h of hipotesis) {
       const prog = await this.programas.cargar(ctx, programaId);
@@ -71,7 +90,9 @@ export class OrquestadorProgramaGenerativo {
         o,
       );
       const campaignId = conCampania.campanias[conCampania.campanias.length - 1]!.campaignId;
-      const cuerpo = await this.generarCuerpo(ctx, brief, estrategia, params.idioma);
+      const ref = versionPorHipotesis.get(h.id);
+      const estrategiaRef = ref ? `${ref.id}@v${ref.version}` : `estrategia:${programaId}`;
+      const cuerpo = await this.generarCuerpo(ctx, brief, estrategia, params.idioma, estrategiaRef);
       if (cuerpo === null) return { tipo: 'ABSTENCION', faltantes: ['la generación de contenido no produjo una salida válida (rechazada por validación)'] };
       await this.programas.vincularContenido(
         ctx,
@@ -88,7 +109,7 @@ export class OrquestadorProgramaGenerativo {
   }
 
   /** Tramo C: genera el cuerpo por el puerto neutral y lo VALIDA; devuelve null si es inválido. */
-  private async generarCuerpo(ctx: RequestContext, brief: BriefComercial, estrategia: EstrategiaCreativa, idioma: string): Promise<string | null> {
+  private async generarCuerpo(ctx: RequestContext, brief: BriefComercial, estrategia: EstrategiaCreativa, idioma: string, estrategiaRef: string): Promise<string | null> {
     const solicitud: SolicitudGenerativa = {
       tarea: 'pieza_fuente',
       contexto: {
@@ -104,7 +125,7 @@ export class OrquestadorProgramaGenerativo {
       limiteCaracteres: 0,
       evitar: [],
       promptRef: 'prompt:pieza-comercial@v1',
-      trazabilidad: `brief:${brief.empresa}:${brief.producto}`,
+      trazabilidad: `${estrategiaRef}|brief:${brief.empresa}:${brief.producto}`,
     };
     const r = await this.proveedor.generar(ctx, solicitud);
     const val = validarRespuesta(r, ['cuerpo'], 0);
