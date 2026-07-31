@@ -98,7 +98,28 @@ import { registerMeasurementRoutes } from './measurement-routes';
 import { registerControlRoutes } from './control-routes';
 import { registerPilotRoutes } from './pilot-routes';
 import { registerDirectorWorkspaceRoutes } from './director-workspace-routes';
+import { registerDirectorAutonomoRoutes } from './director-autonomo-routes';
 import { registerEvaluacionRoutes } from './evaluacion-routes';
+import {
+  AutonomiaInvalidaError,
+  AutonomiaNoAutoElevableError,
+  ReanudacionSinActorHumanoError,
+} from '@soec/autonomia';
+import {
+  DecisionMktInvalidaError,
+  TransicionInvalidaError as TransicionDecMktInvalidaError,
+  CampaniaInvalidaError,
+  SeparacionCampaniaVioladaError,
+  TransicionCampaniaInvalidaError,
+  ContenidoGobernadoInvalidoError,
+  SeparacionContenidoVioladaError,
+  TransicionContenidoInvalidaError,
+  EjecucionInvalidaError,
+  SeparacionEjecucionVioladaError,
+  AprendizajeInvalidoError,
+  AplicacionSinDecisionHumanaError,
+} from '@soec/piloto-director-v1';
+import { MetricaCruzadaError } from '@soec/medicion';
 import { PreguntaFueraDelRubroError } from './evaluacion-experience';
 import { SeleccionInvalidaError } from './catalogo';
 import { AutorizacionDenegadaError, DecisionInvalidaError } from '@soec/decision';
@@ -184,8 +205,38 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     ) {
       return reply.code(404).send({ error: err.name, message: err.message });
     }
-    if (err instanceof PermisoInsuficienteError || err instanceof AutorizacionDenegadaError) {
+    if (
+      err instanceof PermisoInsuficienteError ||
+      err instanceof AutorizacionDenegadaError ||
+      err instanceof AutonomiaNoAutoElevableError
+    ) {
       return reply.code(403).send({ error: err.name, message: err.message });
+    }
+    if (err instanceof AutonomiaInvalidaError || err instanceof ReanudacionSinActorHumanoError) {
+      return reply.code(422).send({ error: err.name, message: err.message });
+    }
+    // Ciclo del Director Autónomo: separación de organización → 403; el resto (entrada/estado
+    // inválidos, transición no permitida, cruce de aprendizaje sin decisión humana) → 422.
+    if (
+      err instanceof SeparacionCampaniaVioladaError ||
+      err instanceof SeparacionContenidoVioladaError ||
+      err instanceof SeparacionEjecucionVioladaError
+    ) {
+      return reply.code(403).send({ error: err.name, message: err.message });
+    }
+    if (
+      err instanceof DecisionMktInvalidaError ||
+      err instanceof TransicionDecMktInvalidaError ||
+      err instanceof CampaniaInvalidaError ||
+      err instanceof TransicionCampaniaInvalidaError ||
+      err instanceof ContenidoGobernadoInvalidoError ||
+      err instanceof TransicionContenidoInvalidaError ||
+      err instanceof EjecucionInvalidaError ||
+      err instanceof AprendizajeInvalidoError ||
+      err instanceof AplicacionSinDecisionHumanaError ||
+      err instanceof MetricaCruzadaError
+    ) {
+      return reply.code(422).send({ error: err.name, message: err.message });
     }
     if (
       err instanceof DecisionInvalidaError ||
@@ -261,6 +312,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerControlRoutes(app, deps.store);
   registerPilotRoutes(app, deps.store);
   registerDirectorWorkspaceRoutes(app, deps.store, clock);
+  registerDirectorAutonomoRoutes(app, deps.store, clock);
   registerEvaluacionRoutes(app, deps.store, clock);
 
   app.post('/events', async (req, reply) => {

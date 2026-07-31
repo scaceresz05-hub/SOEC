@@ -35,6 +35,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@soec/autonomia':
+        specifier: workspace:*
+        version: link:../../packages/autonomia
       '@soec/canales':
         specifier: workspace:*
         version: link:../../packages/canales
@@ -92,6 +95,9 @@ importers:
       '@soec/piloto':
         specifier: workspace:*
         version: link:../../packages/piloto
+      '@soec/piloto-director-v1':
+        specifier: workspace:*
+        version: link:../../packages/piloto-director-v1
       '@soec/rubros':
         specifier: workspace:*
         version: link:../../packages/rubros
@@ -171,6 +177,42 @@ importers:
       '@soec/piloto':
         specifier: workspace:*
         version: link:../../packages/piloto
+
+  packages/aprendizaje:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/medicion':
+        specifier: workspace:*
+        version: link:../medicion
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
+  packages/autonomia:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
+  packages/campanias:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/decisiones-mkt':
+        specifier: workspace:*
+        version: link:../decisiones-mkt
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
 
   packages/canal-emulado:
     dependencies:
@@ -259,6 +301,25 @@ importers:
         specifier: ^8.11.10
         version: 8.20.0
 
+  packages/contenido-gobernado:
+    dependencies:
+      '@soec/campanias':
+        specifier: workspace:*
+        version: link:../campanias
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../contenido
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@soec/decisiones-mkt':
+        specifier: workspace:*
+        version: link:../decisiones-mkt
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
   packages/contracts: {}
 
   packages/control:
@@ -344,6 +405,19 @@ importers:
         specifier: ^8.11.10
         version: 8.20.0
 
+  packages/decisiones-mkt:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/negocio':
+        specifier: workspace:*
+        version: link:../negocio
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
   packages/diagnostico:
     dependencies:
       '@soec/capacidades':
@@ -369,6 +443,30 @@ importers:
         specifier: workspace:*
         version: link:../event-store
 
+  packages/director-workspace:
+    dependencies:
+      '@soec/aprendizaje':
+        specifier: workspace:*
+        version: link:../aprendizaje
+      '@soec/autonomia':
+        specifier: workspace:*
+        version: link:../autonomia
+      '@soec/campanias':
+        specifier: workspace:*
+        version: link:../campanias
+      '@soec/contenido-gobernado':
+        specifier: workspace:*
+        version: link:../contenido-gobernado
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/ejecucion-simulada':
+        specifier: workspace:*
+        version: link:../ejecucion-simulada
+      '@soec/medicion':
+        specifier: workspace:*
+        version: link:../medicion
+
   packages/ece:
     dependencies:
       '@soec/contracts':
@@ -387,6 +485,16 @@ importers:
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
+
+  packages/ejecucion-simulada:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
 
   packages/estrategia:
     dependencies:
@@ -523,6 +631,16 @@ importers:
         specifier: ^8.11.10
         version: 8.20.0
 
+  packages/negocio:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
   packages/operacional:
     dependencies:
       '@soec/contracts':
@@ -600,6 +718,39 @@ importers:
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
+
+  packages/piloto-director-v1:
+    dependencies:
+      '@soec/aprendizaje':
+        specifier: workspace:*
+        version: link:../aprendizaje
+      '@soec/autonomia':
+        specifier: workspace:*
+        version: link:../autonomia
+      '@soec/campanias':
+        specifier: workspace:*
+        version: link:../campanias
+      '@soec/contenido-gobernado':
+        specifier: workspace:*
+        version: link:../contenido-gobernado
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/decisiones-mkt':
+        specifier: workspace:*
+        version: link:../decisiones-mkt
+      '@soec/director-workspace':
+        specifier: workspace:*
+        version: link:../director-workspace
+      '@soec/ejecucion-simulada':
+        specifier: workspace:*
+        version: link:../ejecucion-simulada
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      '@soec/medicion':
+        specifier: workspace:*
+        version: link:../medicion
 
   packages/rubros: {}
 
