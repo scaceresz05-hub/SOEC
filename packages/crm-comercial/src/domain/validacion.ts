@@ -14,6 +14,10 @@ export const LIMITES = {
   texto: 2000, // detalle de actividad, descripción de evidencia, fuente, valor de campo…
   claveAtributo: 60,
   valorAtributo: 2000,
+  enunciadoHipotesis: 500,
+  contextoHipotesis: 2000,
+  descripcionResultado: 2000,
+  porQueAprendizaje: 4000,
   maxMonto: 1_000_000_000_000, // 1e12; cota razonable y documentada
   maxActividades: 5000,
   maxEvidencias: 500,

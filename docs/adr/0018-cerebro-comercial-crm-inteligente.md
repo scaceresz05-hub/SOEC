@@ -122,9 +122,16 @@ eventos de compensación/anulación, ni eliminación física de eventos. Las ope
   la contradicción lleva a INCONCLUSA. No se fabrica confianza.
 - **H-2:** el APRENDIZAJE vive en su dominio canónico `@soec/aprendizaje`; la hipótesis solo guarda
   `aprendizajeId`. Sin agregado de aprendizaje embebido.
-- **H-4:** el scoring usa una **política gobernada y versionada** (`PoliticaScoringComercial`,
-  `POLITICA_SCORING_V1`), inyectable; la **confianza deriva de la evidencia** (origen, cobertura,
-  contradicción), no del conteo. La salida es HEURÍSTICA y lo declara (`naturaleza`, `politicaVersion`).
+- **H-4 (+N-1):** el scoring usa una **política gobernada y versionada** (`PoliticaScoringComercial`,
+  `POLITICA_SCORING_V1`), **totalmente inyectable**: ninguna función interna lee la política por
+  defecto (solo la frontera pública la selecciona) y **todos** los parámetros decisorios (pesos,
+  umbrales, ventanas, reglas de recomendación y de confianza) viven en ella; se **valida** antes de
+  usarse (`validarPolitica`). La **confianza deriva de la evidencia** (origen, cobertura,
+  contradicción), no del conteo. Salida HEURÍSTICA declarada (`naturaleza`, `politicaVersion`). Los
+  únicos literales fuera de la política son umbrales de ETIQUETA (SUBE/NEUTRO en los factores), que
+  no alteran el valor ni la banda.
+- **N-2:** límites de longitud en `enunciado` (500), `contexto`/`transferible` (2000), `descripción
+  de resultado` (2000) y `porqué del aprendizaje` (4000), validados antes del append.
 - **H-5:** validación antes de persistir (montos ≥0/finitos, sin fechas futuras en actividades,
   límites de texto/colecciones, campos fuera de esquema rechazados).
 - **H-6:** inscripción en índices idempotente y autorreparable (nunca deja estado parcial irreparable).

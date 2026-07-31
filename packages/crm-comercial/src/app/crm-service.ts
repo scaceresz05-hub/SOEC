@@ -19,6 +19,7 @@ import { ComandoCrmInvalidoError, ContactoNoEncontradoError } from '../domain/er
 import { EVENTOS_CRMINDICE, type CrmIndice, crmIndiceStreamId, reconstruirCrmIndice } from '../domain/indices';
 import { LIMITES, exigirBajoLimite, normalizarOpcional, validarFechaActividad, validarMonto, validarTexto } from '../domain/validacion';
 import { type OpcionesPuntaje, type PuntajeContacto, puntuarContacto, recomendarSiguientePaso } from '../domain/puntaje';
+import { POLITICA_SCORING_V1 } from '../domain/politica-scoring';
 import type { RecomendacionExplicada } from '../domain/explicabilidad';
 
 export interface EntradaContactoNuevo {
@@ -111,7 +112,7 @@ export class CrmComercialService {
     const estado = await this.cargarContacto(ctx, contactoIdArg);
     if (!estado.existe) throw new ContactoNoEncontradoError(`contacto ${contactoIdArg} no encontrado`);
     const p = puntuarContacto(estado, asOf, opciones);
-    return recomendarSiguientePaso(estado, p);
+    return recomendarSiguientePaso(estado, p, opciones.politica ?? POLITICA_SCORING_V1);
   }
 
   /** H-6: inscribe en el índice de forma idempotente; reparable aunque el agregado ya exista. */

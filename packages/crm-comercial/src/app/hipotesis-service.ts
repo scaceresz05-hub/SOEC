@@ -64,6 +64,8 @@ export class HipotesisComercialService {
     const st = await this.cargar(ctx, hipotesisId);
     if (!st.existe) {
       if (!enunciado?.trim()) throw new ComandoCrmInvalidoError('enunciado es obligatorio');
+      validarTexto(enunciado.trim(), LIMITES.enunciadoHipotesis, 'enunciado');
+      validarTexto(contexto ?? '', LIMITES.contextoHipotesis, 'contexto'); // N-2
       await this.append(ctx, hipotesisId, st.version, EVENTOS_HIPOTESIS.registrada, { enunciado: enunciado.trim(), contexto }, a, o);
     }
     await this.asegurarEnIndice(ctx, hipotesisId, (enunciado || st.enunciado).trim(), a, o);
@@ -86,6 +88,8 @@ export class HipotesisComercialService {
   /** Registra el resultado y veredicto. H-1: exige evidencia coherente para CONFIRMAR/REFUTAR. */
   async registrarResultado(ctx: RequestContext, hipotesisId: string, descripcion: string, veredicto: Veredicto, valor: number | null, a: Attribution, o: string): Promise<void> {
     const st = await this.exigir(ctx, hipotesisId);
+    if (!descripcion?.trim()) throw new ComandoCrmInvalidoError('la descripción del resultado es obligatoria'); // N-2
+    validarTexto(descripcion.trim(), LIMITES.descripcionResultado, 'descripción de resultado');
     if (!transicionValida(st.estado, veredicto)) throw new ComandoCrmInvalidoError(`no se puede registrar resultado desde ${st.estado} (requiere EN_PRUEBA)`);
     const adm = veredictoAdmisible(st, veredicto);
     if (!adm.ok) throw new ComandoCrmInvalidoError(adm.motivo);
@@ -99,6 +103,8 @@ export class HipotesisComercialService {
   async registrarAprendizaje(ctx: RequestContext, hipotesisId: string, porQue: string, transferible: string | null, a: Attribution, o: string): Promise<string> {
     const st = await this.exigir(ctx, hipotesisId);
     if (!porQue?.trim()) throw new ComandoCrmInvalidoError('el aprendizaje exige explicar el porqué');
+    validarTexto(porQue.trim(), LIMITES.porQueAprendizaje, 'porqué del aprendizaje'); // N-2
+    if (transferible != null) validarTexto(transferible, LIMITES.contextoHipotesis, 'transferible');
     if (!st.resultado) throw new ComandoCrmInvalidoError('no hay resultado observado sobre el cual aprender');
     const ev = evaluarHipotesis(st);
     const aprendizajeId = `hip-${hipotesisId}`;
