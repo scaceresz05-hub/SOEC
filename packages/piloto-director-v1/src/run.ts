@@ -19,20 +19,15 @@ async function main(): Promise<void> {
     ['aprendizaje', traza.learningId],
     ['siguiente decisión', traza.nextDecisionId],
   ];
-  // eslint-disable-next-line no-console
   console.log('=== Piloto Director de Marketing Autónomo V1 — SmileFlow ===');
   for (const [etapa, id] of cadena) {
-    // eslint-disable-next-line no-console
     console.log(`  ${etapa.padEnd(22)} → ${id}`);
   }
-  // eslint-disable-next-line no-console
   console.log(`  ROI (${traza.vista.resultado.naturaleza}): ${traza.resultado.roiReal ?? traza.resultado.roiEstimado ?? 'n/d'}`);
-  // eslint-disable-next-line no-console
   console.log(`  Próxima recomendación: ${traza.vista.proximaRecomendacion}`);
 }
 
 main().catch((e) => {
-  // eslint-disable-next-line no-console
   console.error('El piloto falló:', e);
   process.exitCode = 1;
 });
