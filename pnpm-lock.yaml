@@ -389,6 +389,9 @@ importers:
       '@soec/control':
         specifier: workspace:*
         version: link:../control
+      '@soec/identity':
+        specifier: workspace:*
+        version: link:../identity
       '@soec/marketing':
         specifier: workspace:*
         version: link:../marketing
@@ -530,6 +533,19 @@ importers:
         specifier: ^8.13.1
         version: 8.22.0
     devDependencies:
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+
+  packages/identity:
+    dependencies:
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
