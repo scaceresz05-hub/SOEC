@@ -109,39 +109,48 @@ export class OrquestadorProgramaGenerativo {
     for (const h of hipotesis) {
       const idxH = hipotesis.indexOf(h);
       const prog = await this.programas.cargar(ctx, programaId);
-      if (prog.campanias.some((c) => c.hipotesisId === h.id)) continue; // idempotente: ya vinculada
-      const conCampania = await this.programas.vincularCampania(
-        ctx,
-        programaId,
-        {
-          nombre: `Campaña ${h.segmentoId}`,
-          segmentoId: h.segmentoId,
-          hipotesisId: h.id,
-          publico: brief.audiencia,
-          propuesta: estrategia.gancho,
-          mensaje: brief.mensajePrincipal,
-          canal,
-          presupuestoSimulado: presupuestoPorCampania,
-          duracionHipotetica: `${params.horizonteDias} días`,
-        },
-        a,
-        o,
-      );
-      const campaignId = conCampania.campanias[conCampania.campanias.length - 1]!.campaignId;
-      const ref = versionPorHipotesis.get(h.id);
-      const estrategiaRef = ref ? `${ref.id}@v${ref.version}` : `estrategia:${programaId}`;
-      const cuerpo = await this.generarCuerpo(ctx, brief, estrategia, params.idioma, estrategiaRef);
-      if (cuerpo === null) return { tipo: 'ABSTENCION', faltantes: ['la generación de contenido no produjo una salida válida (rechazada por validación)'] };
-      const conContenido = await this.programas.vincularContenido(
-        ctx,
-        programaId,
-        campaignId,
-        { canal, cuerpo, marcaId: `marca-${brief.empresa}`, productoServicio: brief.producto, llamadaAccion: estrategia.mensajesClave[0] ?? 'Solicita más información', idioma: params.idioma },
-        a,
-        o,
-      );
-      const refCamp = conContenido.campanias.find((c) => c.campaignId === campaignId);
-      const piezaBaseId = refCamp?.contenidoIds[refCamp.contenidoIds.length - 1];
+      // Idempotencia de grano fino (Tramo I): reusar la campaña si ya existe (no volver a vincular), pero
+      // NUNCA saltar las sub-etapas — un fallo parcial pudo dejar la campaña sin contenido/variantes/agenda.
+      let campania = prog.campanias.find((c) => c.hipotesisId === h.id);
+      if (!campania) {
+        const conCampania = await this.programas.vincularCampania(
+          ctx,
+          programaId,
+          {
+            nombre: `Campaña ${h.segmentoId}`,
+            segmentoId: h.segmentoId,
+            hipotesisId: h.id,
+            publico: brief.audiencia,
+            propuesta: estrategia.gancho,
+            mensaje: brief.mensajePrincipal,
+            canal,
+            presupuestoSimulado: presupuestoPorCampania,
+            duracionHipotetica: `${params.horizonteDias} días`,
+          },
+          a,
+          o,
+        );
+        campania = conCampania.campanias[conCampania.campanias.length - 1]!;
+      }
+      const campaignId = campania.campaignId;
+      // Reusar la pieza si la campaña ya tiene contenido; si no, generarla por el puerto neutral.
+      let piezaBaseId = campania.contenidoIds[campania.contenidoIds.length - 1];
+      if (!piezaBaseId) {
+        const ref = versionPorHipotesis.get(h.id);
+        const estrategiaRef = ref ? `${ref.id}@v${ref.version}` : `estrategia:${programaId}`;
+        const cuerpo = await this.generarCuerpo(ctx, brief, estrategia, params.idioma, estrategiaRef);
+        if (cuerpo === null) return { tipo: 'ABSTENCION', faltantes: ['la generación de contenido no produjo una salida válida (rechazada por validación)'] };
+        const conContenido = await this.programas.vincularContenido(
+          ctx,
+          programaId,
+          campaignId,
+          { canal, cuerpo, marcaId: `marca-${brief.empresa}`, productoServicio: brief.producto, llamadaAccion: estrategia.mensajesClave[0] ?? 'Solicita más información', idioma: params.idioma },
+          a,
+          o,
+        );
+        const refCamp = conContenido.campanias.find((c) => c.campaignId === campaignId);
+        piezaBaseId = refCamp?.contenidoIds[refCamp.contenidoIds.length - 1];
+      }
       if (piezaBaseId) {
         // Tramo E: dos variantes A/B que cambian UNA sola variable (gancho), constantes compartidas.
         const constantes = ['cta', 'oferta', 'audiencia'];
