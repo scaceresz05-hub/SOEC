@@ -72,6 +72,17 @@ describe('Director Autónomo · cableado al runtime', () => {
     expect(conActor.json().modoSeguro).toBe(false);
   });
 
+  it('ejecutar el ciclo dos veces es idempotente: no falla ni duplica', async () => {
+    const app = makeApp();
+    const uno = await app.inject({ method: 'POST', url: '/experience/director-autonomo/ejecutar-ciclo', headers: H, payload: { org: ORG } });
+    expect(uno.statusCode).toBe(201);
+    const dos = await app.inject({ method: 'POST', url: '/experience/director-autonomo/ejecutar-ciclo', headers: H, payload: { org: ORG } });
+    expect(dos.statusCode).toBe(201); // no 500 al re-ejecutar
+    expect(dos.json().decisionId).toBe(uno.json().decisionId);
+    const estado = await app.inject({ method: 'GET', url: `/experience/director-autonomo/estado?org=${ORG}` });
+    expect(estado.json().ejecucionesSimuladas.length).toBe(1); // sigue habiendo UNA ejecución
+  });
+
   it('aislamiento: el ciclo de una organización no aparece en otra', async () => {
     const app = makeApp();
     await app.inject({ method: 'POST', url: '/experience/director-autonomo/ejecutar-ciclo', headers: H, payload: { org: ORG } });

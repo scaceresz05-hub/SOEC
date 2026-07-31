@@ -108,6 +108,12 @@ export default function DirectorAutonomoPage() {
             Reanudar
           </button>
         </div>
+        <p className="muted small" style={{ marginTop: 8 }}>
+          <strong>V1 controlada · escenario de demostración.</strong> «Ejecutar ciclo» corre un
+          caso <em>sintético</em> (datos de demostración, ids deterministas por organización) para
+          mostrar el gobierno del ciclo; no es una campaña real de esta organización. La ejecución
+          es simulada y no produce efectos externos.
+        </p>
       </div>
 
       {error && <div className="aviso aviso--danger" style={{ marginBottom: 12 }}>{error}</div>}

@@ -10,7 +10,7 @@
  * No hay efectos externos reales: la ejecución es simulada y toda acción pasa por autorización.
  */
 import { type EventStore, type RequestContext, ActorId, OrganizationId } from '@soec/contracts';
-import { DecisionMktService } from '@soec/decisiones-mkt';
+import { DecisionMktService, esEjecutable } from '@soec/decisiones-mkt';
 import { CampaniaService, POLITICA_CAMPANIA_CONSERVADORA } from '@soec/campanias';
 import { ContenidoGobernadoService } from '@soec/contenido-gobernado';
 import { AdaptadorSimuladoDeterminista, EjecucionService, type EscenarioEjecucion } from '@soec/ejecucion-simulada';
@@ -58,6 +58,14 @@ export async function ejecutarPiloto(store: EventStore, escenarioEjecucion: Esce
   const ejecuciones = new EjecucionService(store, new AdaptadorSimuladoDeterminista('adaptador-piloto', escenarioEjecucion));
   const aprendizajes = new AprendizajeService(store);
 
+  // IDEMPOTENCIA: si el ciclo ya corrió para esta organización (la decisión ya está APROBADA),
+  // no se repiten las transiciones (que no son idempotentes): se reconstruye la traza persistida.
+  // Así, ejecutar el ciclo dos veces no falla ni duplica campañas/contenidos/ejecuciones.
+  const decisionPrevia = await decisiones.cargar(c, IDS_CICLO.decisionId);
+  if (decisionPrevia.existe && esEjecutable(decisionPrevia.estado)) {
+    return reconstruirTraza(store, org);
+  }
+
   // Política de autonomía: el humano fija el nivel (SOEC no puede subirlo).
   await autonomia.establecerPolitica(c, 2, ATRIBUCION, T0);
 
@@ -100,15 +108,7 @@ export async function ejecutarPiloto(store: EventStore, escenarioEjecucion: Esce
   // ingresos son SIMULADOS. Coherencia con Bloque F: el ROI se clasifica SIMULADO, jamás REAL.
   // Una campaña productiva con ingresos observados y atribuidos sería otro camino (ver tests F/I).
   const measurementId = `med:${campaignId}`;
-  const resultado = evaluarResultadoCampania({
-    organizacionId: org,
-    campaignRef: campaignId,
-    ventana: '2026-08',
-    gasto: { valor: 100000, procedencia: 'SIMULADA' },
-    ingresos: { valor: 260000, procedencia: 'SIMULADA' },
-    conversiones: [{ id: 'v1', externalRef: null, campaignRef: campaignId, valor: 260000, ocurridoEn: '2026-08-15T00:00:00.000Z' }],
-    periodoCompleto: true,
-  });
+  const resultado = medirResultadoSimulado(org, campaignId);
 
   // 7) Experimento A/B: la variante con prueba social gana con evidencia suficiente.
   const experimentId = 'exp1';
@@ -167,6 +167,43 @@ export interface VistaReconstruida {
   readonly resultado: ResultadoCampania | null;
 }
 
+/** Mide el resultado (SIMULADO) de una campaña ya ejecutada; una sola definición. */
+function medirResultadoSimulado(org: string, campaignId: string): ResultadoCampania {
+  return evaluarResultadoCampania({
+    organizacionId: org,
+    campaignRef: campaignId,
+    ventana: '2026-08',
+    gasto: { valor: 100000, procedencia: 'SIMULADA' },
+    ingresos: { valor: 260000, procedencia: 'SIMULADA' },
+    conversiones: [{ id: 'v1', externalRef: null, campaignRef: campaignId, valor: 260000, ocurridoEn: '2026-08-15T00:00:00.000Z' }],
+    periodoCompleto: true,
+  });
+}
+
+/** Reconstruye la traza completa desde el store, sin escribir (para la ruta idempotente). */
+export async function reconstruirTraza(store: EventStore, org: string): Promise<TrazaPiloto> {
+  const c = ctx(org);
+  const { vista } = await reconstruirVistaDirector(store, org);
+  const autonomiaEstado = await new AutonomiaService(store).cargar(c);
+  const approval = autonomiaEstado.autorizaciones.find((a) => a.accion === 'PUBLICAR_SIMULADO');
+  const ejec = await new EjecucionService(store, new AdaptadorSimuladoDeterminista()).cargar(c, IDS_CICLO.contentId);
+  const pub = ejec.registros.find((r) => r.resultado === 'PUBLICADA_SIMULADA');
+  return {
+    objetivoId: OBJETIVO_ID,
+    decisionId: IDS_CICLO.decisionId,
+    campaignId: IDS_CICLO.campaignId,
+    contentId: IDS_CICLO.contentId,
+    approvalId: approval?.id ?? '',
+    executionId: pub?.requestId ?? '',
+    measurementId: `med:${IDS_CICLO.campaignId}`,
+    experimentId: IDS_CICLO.experimentId,
+    learningId: IDS_CICLO.learningId,
+    nextDecisionId: IDS_CICLO.nextDecisionId,
+    resultado: medirResultadoSimulado(org, IDS_CICLO.campaignId),
+    vista,
+  };
+}
+
 /**
  * Recompone la vista del ciclo (Bloque I) para una organización SIN escribir eventos:
  * reconstruye cada agregado desde el store por sus ids deterministas y compone la vista. Es la
@@ -185,17 +222,7 @@ export async function reconstruirVistaDirector(store: EventStore, org: string): 
   // El ROI es una medición SIMULADA (coherente con la ejecución simulada): sólo existe si la
   // campaña se ejecutó. NUNCA es real (ver Bloque F).
   const resultado: ResultadoCampania | null =
-    campania.existe && ejecucion.publicacionesSimuladas > 0
-      ? evaluarResultadoCampania({
-          organizacionId: org,
-          campaignRef: IDS_CICLO.campaignId,
-          ventana: '2026-08',
-          gasto: { valor: 100000, procedencia: 'SIMULADA' },
-          ingresos: { valor: 260000, procedencia: 'SIMULADA' },
-          conversiones: [{ id: 'v1', externalRef: null, campaignRef: IDS_CICLO.campaignId, valor: 260000, ocurridoEn: '2026-08-15T00:00:00.000Z' }],
-          periodoCompleto: true,
-        })
-      : null;
+    campania.existe && ejecucion.publicacionesSimuladas > 0 ? medirResultadoSimulado(org, IDS_CICLO.campaignId) : null;
 
   const vista = componerVistaDirector({
     organizacionActiva: org,
