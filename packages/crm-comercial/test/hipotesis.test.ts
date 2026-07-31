@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { ActorId, OrganizationId, type Attribution, type RequestContext } from '@soec/contracts';
 import { InMemoryEventStore } from '@soec/event-store';
-import { ComandoCrmInvalidoError, ContactoNoEncontradoError, HipotesisComercialService } from '../src/index';
+import { ComandoCrmInvalidoError, HipotesisComercialService, HipotesisNoEncontradaError } from '../src/index';
 
 const attr: Attribution = { source: 'crm', purpose: 'test', assumptions: ['test'], claimType: 'observational', regime: 'empirical', uncertainty: 'media' };
 function ctx(org = 'org-a'): RequestContext {
@@ -24,11 +24,12 @@ describe('@soec/crm-comercial · hipótesis comerciales', () => {
     await s.agregarEvidencia(ctx(), 'h1', 'e1', 'público objetivo joven activo en IG', 'DATO_IMPORTADO', true, attr, O);
     await s.iniciarPrueba(ctx(), 'h1', attr, O);
     await s.registrarResultado(ctx(), 'h1', 'IG duplicó el CTR simulado', 'CONFIRMADA', 2.1, attr, O);
-    await s.registrarAprendizaje(ctx(), 'h1', 'el segmento joven responde mejor al formato visual', 'preferir IG en segmentos <35', attr, O);
+    const apId = await s.registrarAprendizaje(ctx(), 'h1', 'el segmento joven responde mejor al formato visual', 'preferir IG en segmentos <35', attr, O);
     const st = await s.cargar(ctx(), 'h1');
     expect(st.estado).toBe('CONFIRMADA');
     expect(st.resultado?.veredicto).toBe('CONFIRMADA');
-    expect(st.aprendizaje?.porQue).toContain('segmento joven');
+    expect(st.aprendizajeId).toBe(apId); // H-2: solo referencia al aprendizaje canónico
+    expect(apId).toBe('hip-h1');
     expect((await s.listar(ctx())).hipotesis).toHaveLength(1);
   });
 
@@ -60,16 +61,17 @@ describe('@soec/crm-comercial · hipótesis comerciales', () => {
   it('el aprendizaje exige explicar el porqué y que exista un resultado', async () => {
     const s = svc();
     await s.registrar(ctx(), 'h1', 'X', 'test', attr, O);
+    await s.agregarEvidencia(ctx(), 'h1', 'e1', 'no llega al público', 'HECHO_VERIFICADO', false, attr, O); // H-1: evidencia en contra
     await s.iniciarPrueba(ctx(), 'h1', attr, O);
     await expect(s.registrarAprendizaje(ctx(), 'h1', '   ', null, attr, O)).rejects.toBeInstanceOf(ComandoCrmInvalidoError);
     await s.registrarResultado(ctx(), 'h1', 'r', 'REFUTADA', null, attr, O);
-    await expect(s.registrarAprendizaje(ctx(), 'h1', 'porque el canal no llega al público', null, attr, O)).resolves.toBeUndefined();
+    await expect(s.registrarAprendizaje(ctx(), 'h1', 'porque el canal no llega al público', null, attr, O)).resolves.toBe('hip-h1');
   });
 
   it('aislamiento multiempresa: una hipótesis de org-a no existe en org-b', async () => {
     const s = svc();
     await s.registrar(ctx('org-a'), 'h1', 'X', 'test', attr, O);
-    await expect(s.evaluar(ctx('org-b'), 'h1')).rejects.toBeInstanceOf(ContactoNoEncontradoError);
+    await expect(s.evaluar(ctx('org-b'), 'h1')).rejects.toBeInstanceOf(HipotesisNoEncontradaError);
     expect((await s.listar(ctx('org-b'))).hipotesis).toHaveLength(0);
   });
 });

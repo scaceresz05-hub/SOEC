@@ -85,5 +85,52 @@ reales, automatización/ejecución real. `AUTONOMOUS_REAL` permanece bloqueado p
 ## Validación
 
 Tests unitarios (dominio puro), de integración (servicios sobre `InMemoryEventStore`), de aislamiento
-multiempresa, de explicabilidad (toda recomendación trae razones/alternativas/faltantes), de rollback
-(reconstrucción por reducción) y de auditoría (procedencia). Sin push/PR/merge hasta autorización.
+multiempresa, de explicabilidad (toda recomendación trae razones/alternativas/faltantes), de
+**reconstrucción histórica mediante replay** (no rollback transaccional — ver más abajo) y de
+auditoría (procedencia). Más pruebas adversariales permanentes de las correcciones post-auditoría.
+
+## Frontera de fuentes de verdad (SSOT) — H-3
+
+`@soec/negocio` es el almacén CANÓNICO de la EXISTENCIA de una entidad comercial y de su evidencia.
+`@soec/crm-comercial` es la capa TIPADA/operacional: valida el esquema por tipo, guarda la procedencia
+POR CAMPO y calcula cobertura, **referenciando la entidad canónica por el mismo id** (no es una
+segunda copia independiente: al registrar una entidad, se asegura su ítem canónico en `@soec/negocio`).
+
+| Concepto | SSOT | Rol del CRM |
+|---|---|---|
+| Empresa | `@soec/negocio` (ORGANIZACION) | perfil tipado + cobertura, referencia por id |
+| Producto | `@soec/negocio` (PRODUCTO) | perfil tipado + procedencia por campo |
+| Servicio | `@soec/negocio` (PRODUCTO) | perfil tipado + procedencia por campo |
+| Cliente ideal | `@soec/negocio` (PUBLICO) | perfil tipado (ICP) + cobertura |
+| Competidor | `@soec/negocio` (COMPETIDOR) | perfil tipado + cobertura |
+| Mercado | `@soec/negocio` (MERCADO) | perfil tipado + cobertura |
+| Contacto individual | `@soec/crm-comercial` | agregado propio (no existe en negocio) |
+| Hipótesis comercial | `@soec/crm-comercial` | agregado propio (ciclo cerrado) |
+| **Aprendizaje** | **`@soec/aprendizaje`** | la hipótesis solo guarda `aprendizajeId` (referencia) |
+
+## Semántica de recuperación (aclaración honesta) — H-9 declarada
+
+El event-sourcing provee **reconstrucción histórica mediante replay** (reducción de eventos), no
+rollback transaccional ni compensación automática. Hoy NO existen: rollback transaccional multi-stream,
+eventos de compensación/anulación, ni eliminación física de eventos. Las operaciones multi-stream
+(agregado + índice; entidad crm + ítem canónico en negocio) se hacen **idempotentes y autorreparables**
+(consistencia eventual explícita), no transaccionales.
+
+## Correcciones post-auditoría (PR #4)
+
+- **H-1:** una hipótesis no puede CONFIRMARSE/REFUTARSE sin evidencia coherente (`veredictoAdmisible`);
+  la contradicción lleva a INCONCLUSA. No se fabrica confianza.
+- **H-2:** el APRENDIZAJE vive en su dominio canónico `@soec/aprendizaje`; la hipótesis solo guarda
+  `aprendizajeId`. Sin agregado de aprendizaje embebido.
+- **H-4:** el scoring usa una **política gobernada y versionada** (`PoliticaScoringComercial`,
+  `POLITICA_SCORING_V1`), inyectable; la **confianza deriva de la evidencia** (origen, cobertura,
+  contradicción), no del conteo. La salida es HEURÍSTICA y lo declara (`naturaleza`, `politicaVersion`).
+- **H-5:** validación antes de persistir (montos ≥0/finitos, sin fechas futuras en actividades,
+  límites de texto/colecciones, campos fuera de esquema rechazados).
+- **H-6:** inscripción en índices idempotente y autorreparable (nunca deja estado parcial irreparable).
+- **H-10:** `HipotesisNoEncontradaError` propio.
+
+### Deuda declarada (no bloqueante)
+Trazabilidad navegable por `actividadId` (parcial); read-model paginado a gran escala (índice O(n) por
+inserción); privacidad/consentimiento/retención y eventos de anonimización/compensación; convergencia
+del vocabulario explicativo con `@soec/estrategia` al extraer el contrato común a `@soec/contracts`.

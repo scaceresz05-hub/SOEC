@@ -1,14 +1,16 @@
 /**
  * @soec/crm-comercial · dominio · Scoring multidimensional EXPLICABLE y recomendación fundamentada.
  *
- * Funciones puras y deterministas que derivan puntajes del estado del contacto. Ninguna dimensión se
- * inventa: si falta información, la dimensión es NO EVALUABLE (Evaluabilidad, Constitución §8), con
- * sus faltantes declarados. Toda recomendación es explicada (razones + evidencia + alternativas
- * descartadas + confianza + qué falta) o una ABSTENCIÓN honesta.
+ * Funciones puras y deterministas. Ninguna dimensión se inventa: si falta información, es NO
+ * EVALUABLE (Evaluabilidad). H-4: la mecánica (pesos/umbrales/ventanas) viene de una POLÍTICA
+ * gobernada y versionada, no de números mágicos; y la CONFIANZA se deriva de la EVIDENCIA (origen,
+ * cobertura, contradicción), no del mero conteo de señales. El puntaje es HEURÍSTICO (no una
+ * probabilidad estadística) y así se declara en la salida.
  */
-import type { Confianza } from '@soec/negocio';
-import type { ContactoState } from './contacto';
+import { type Confianza, confianzaPorDefecto } from '@soec/negocio';
+import type { Actividad, ContactoState } from './contacto';
 import type { AlternativaDescartada, Banda, Factor, RecomendacionExplicada } from './explicabilidad';
+import { POLITICA_SCORING_V1, type PoliticaScoringComercial } from './politica-scoring';
 
 export type DimensionNombre =
   | 'actividad'
@@ -22,9 +24,7 @@ export type DimensionNombre =
 export interface DimensionPuntaje {
   readonly dimension: DimensionNombre;
   readonly evaluable: boolean;
-  /** Magnitud normalizada 0..1 cuando aplica; null si no evaluable o sin escala. */
   readonly valor: number | null;
-  /** Monto monetario estimado (solo `valorEsperado`). */
   readonly montoEstimado: number | null;
   readonly banda: Banda | null;
   readonly confianza: Confianza;
@@ -35,17 +35,20 @@ export interface DimensionPuntaje {
 export interface PuntajeContacto {
   readonly contactoId: string;
   readonly asOf: string;
+  /** Naturaleza declarada: es un puntaje HEURÍSTICO, no una probabilidad estadística. */
+  readonly naturaleza: 'HEURISTICO';
+  readonly politicaVersion: string;
   readonly dimensiones: Readonly<Record<DimensionNombre, DimensionPuntaje>>;
 }
 
-/** Contexto opcional para monetizar/priorizar (p. ej. tamaño de negocio típico del rubro). */
 export interface OpcionesPuntaje {
   /** Valor monetario de referencia para normalizar el valor esperado en banda 0..1. */
   readonly valorReferencia?: number;
+  /** Política de scoring gobernada; por defecto V1. */
+  readonly politica?: PoliticaScoringComercial;
 }
 
 const DIA_MS = 86_400_000;
-const VENTANA_DIAS = 180;
 
 function diasEntre(aISO: string, bISO: string): number {
   return Math.floor((Date.parse(bISO) - Date.parse(aISO)) / DIA_MS);
@@ -53,21 +56,48 @@ function diasEntre(aISO: string, bISO: string): number {
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
-function bandaDe(v: number): Banda {
-  return v >= 0.66 ? 'ALTA' : v >= 0.33 ? 'MEDIA' : 'BAJA';
+function bandaDe(v: number, P: PoliticaScoringComercial): Banda {
+  return v >= P.umbralBandaAlta ? 'ALTA' : v >= P.umbralBandaMedia ? 'MEDIA' : 'BAJA';
 }
-const ORDEN: Record<Exclude<Confianza, null>, number> = { BAJA: 1, MEDIA: 2, ALTA: 3 };
-/** Confianza más débil entre varias evaluables (null si alguna es null). */
+const RANGO: Record<Exclude<Confianza, null>, number> = { BAJA: 1, MEDIA: 2, ALTA: 3 };
+function rango(c: Confianza): number {
+  return c === null ? 0 : RANGO[c];
+}
 function minConfianza(cs: readonly Confianza[]): Confianza {
   let min: Confianza = 'ALTA';
   for (const c of cs) {
     if (c === null) return null;
-    if (ORDEN[c] < ORDEN[min ?? 'ALTA']) min = c;
+    if (rango(c) < rango(min)) min = c;
   }
   return min;
 }
+function degradar(c: Confianza): Confianza {
+  return c === 'ALTA' ? 'MEDIA' : c === 'MEDIA' ? 'BAJA' : c;
+}
+
+/**
+ * H-4: la confianza deriva de la EVIDENCIA — mejor origen presente (vía `confianzaPorDefecto`),
+ * acotada por la cobertura (un único dato no puede dar ALTA) y degradada si hay contradicción.
+ * El número de señales es un factor (cobertura), no la autoridad completa.
+ */
+function confianzaDesdeEvidencia(acts: readonly Actividad[], hayContradiccion: boolean): Confianza {
+  if (acts.length === 0) return null;
+  let mejor: Confianza = 'BAJA';
+  for (const a of acts) {
+    const c = confianzaPorDefecto(a.origen);
+    if (rango(c) > rango(mejor)) mejor = c;
+  }
+  let c: Confianza = mejor;
+  if (acts.length === 1 && rango(c) > rango('MEDIA')) c = 'MEDIA';
+  if (hayContradiccion) c = degradar(c);
+  return c;
+}
+
 function contar(state: ContactoState, tipos: readonly string[]): number {
   return state.actividades.filter((a) => tipos.includes(a.tipo)).length;
+}
+function actsDe(state: ContactoState, tipos: readonly string[]): Actividad[] {
+  return state.actividades.filter((a) => tipos.includes(a.tipo));
 }
 function noEvaluable(dim: DimensionNombre, faltantes: readonly string[]): DimensionPuntaje {
   return { dimension: dim, evaluable: false, valor: null, montoEstimado: null, banda: null, confianza: null, factores: [], faltantes };
@@ -76,27 +106,27 @@ function factor(descripcion: string, efecto: Factor['efecto'], evidencia?: strin
   return { descripcion, efecto, ...(evidencia ? { evidencia } : {}) };
 }
 
+const POSITIVAS = ['CONSULTA', 'RESPUESTA_POSITIVA', 'VISITA'] as const;
+const NEGATIVAS = ['RESPUESTA_NEGATIVA', 'NO_ASISTIO'] as const;
+
 // ── Dimensiones individuales ───────────────────────────────────────────────────────────────────
 
-function dimActividad(state: ContactoState, asOf: string): DimensionPuntaje {
+function dimActividad(state: ContactoState, asOf: string, P: PoliticaScoringComercial): DimensionPuntaje {
   const n = state.actividades.length;
-  if (n === 0 || !state.ultimaActividadEn) {
-    return noEvaluable('actividad', ['sin actividad registrada del contacto']);
-  }
+  if (n === 0 || !state.ultimaActividadEn) return noEvaluable('actividad', ['sin actividad registrada del contacto']);
   const dias = diasEntre(state.ultimaActividadEn, asOf);
-  const recencia = clamp01(1 - dias / VENTANA_DIAS);
-  const frecuencia = clamp01(n / 10);
-  const valor = clamp01(0.6 * recencia + 0.4 * frecuencia);
-  const confianza: Confianza = n >= 3 ? 'ALTA' : 'MEDIA';
+  const recencia = clamp01(1 - dias / P.ventanaDias);
+  const frecuencia = clamp01(n / P.frecuenciaTope);
+  const valor = clamp01(P.pesos.actividad.recencia * recencia + P.pesos.actividad.frecuencia * frecuencia);
   return {
     dimension: 'actividad',
     evaluable: true,
     valor,
     montoEstimado: null,
-    banda: bandaDe(valor),
-    confianza,
+    banda: bandaDe(valor, P),
+    confianza: confianzaDesdeEvidencia(state.actividades, false),
     factores: [
-      factor(`${n} actividad(es) registradas`, frecuencia >= 0.3 ? 'SUBE' : 'NEUTRO'),
+      factor(`${n} actividad(es) registradas`, frecuencia >= 0.3 ? 'SUBE' : 'NEUTRO', state.actividades.at(-1)?.actividadId),
       factor(`última actividad hace ${dias} día(s)`, recencia >= 0.5 ? 'SUBE' : 'BAJA'),
     ],
     faltantes: [],
@@ -104,21 +134,21 @@ function dimActividad(state: ContactoState, asOf: string): DimensionPuntaje {
 }
 
 function dimInteres(state: ContactoState): DimensionPuntaje {
-  const compras = contar(state, ['COMPRA']); // una compra es la señal de interés más fuerte (hecho)
-  const positivasSuaves = contar(state, ['CONSULTA', 'RESPUESTA_POSITIVA', 'VISITA']);
-  const negativas = contar(state, ['RESPUESTA_NEGATIVA', 'NO_ASISTIO']);
-  if (compras + positivasSuaves + negativas === 0) {
-    return noEvaluable('interes', ['sin señales de interés (consultas, respuestas, visitas, compras)']);
-  }
-  const valor = clamp01(0.5 + 0.25 * compras + 0.18 * positivasSuaves - 0.22 * negativas);
-  const confianza: Confianza = compras >= 1 ? 'ALTA' : positivasSuaves + negativas >= 3 ? 'MEDIA' : 'BAJA';
+  const compras = contar(state, ['COMPRA']);
+  const positivasSuaves = contar(state, POSITIVAS);
+  const negativas = contar(state, NEGATIVAS);
+  const relevantes = actsDe(state, ['COMPRA', ...POSITIVAS, ...NEGATIVAS]);
+  if (relevantes.length === 0) return noEvaluable('interes', ['sin señales de interés (consultas, respuestas, visitas, compras)']);
+  const P = POLITICA_SCORING_V1;
+  const valor = clamp01(P.pesos.interes.base + 0.25 * compras + P.pesos.interes.positivo * positivasSuaves - P.pesos.interes.negativo * negativas);
+  const contradiccion = (compras + positivasSuaves) > 0 && negativas > 0;
   return {
     dimension: 'interes',
     evaluable: true,
     valor,
     montoEstimado: null,
-    banda: bandaDe(valor),
-    confianza,
+    banda: bandaDe(valor, P),
+    confianza: confianzaDesdeEvidencia(relevantes, contradiccion),
     factores: [
       factor(`${compras} compra(s) — interés demostrado`, compras > 0 ? 'SUBE' : 'NEUTRO'),
       factor(`${positivasSuaves} señal(es) positiva(s)`, positivasSuaves > 0 ? 'SUBE' : 'NEUTRO'),
@@ -128,18 +158,21 @@ function dimInteres(state: ContactoState): DimensionPuntaje {
   };
 }
 
-function dimRelacion(state: ContactoState, asOf: string): DimensionPuntaje {
+function dimRelacion(state: ContactoState, asOf: string, P: PoliticaScoringComercial): DimensionPuntaje {
   const compras = contar(state, ['COMPRA']);
   const antiguedad = state.creadoEn ? diasEntre(state.creadoEn, asOf) : 0;
-  const valor = clamp01(0.45 * clamp01(compras / 3) + 0.3 * clamp01(antiguedad / 365) + 0.25 * clamp01(state.actividades.length / 8));
-  const confianza: Confianza = compras >= 1 ? 'ALTA' : 'MEDIA';
+  const valor = clamp01(
+    P.pesos.relacion.compras * clamp01(compras / P.comprasPlenas) +
+      P.pesos.relacion.antiguedad * clamp01(antiguedad / P.antiguedadPlenaDias) +
+      P.pesos.relacion.actividad * clamp01(state.actividades.length / (P.frecuenciaTope * 0.8)),
+  );
   return {
     dimension: 'relacion',
     evaluable: true,
     valor,
     montoEstimado: null,
-    banda: bandaDe(valor),
-    confianza,
+    banda: bandaDe(valor, P),
+    confianza: state.actividades.length > 0 ? confianzaDesdeEvidencia(state.actividades, false) : 'BAJA',
     factores: [
       factor(`${compras} compra(s) histórica(s)`, compras > 0 ? 'SUBE' : 'NEUTRO'),
       factor(`antigüedad ${antiguedad} día(s)`, antiguedad > 90 ? 'SUBE' : 'NEUTRO'),
@@ -148,19 +181,19 @@ function dimRelacion(state: ContactoState, asOf: string): DimensionPuntaje {
   };
 }
 
-function dimRiesgo(state: ContactoState, asOf: string): DimensionPuntaje {
+function dimRiesgo(state: ContactoState, asOf: string, P: PoliticaScoringComercial): DimensionPuntaje {
   const ref = state.ultimaActividadEn ?? state.creadoEn;
   if (!ref) return noEvaluable('riesgo', ['sin fecha de referencia para estimar inactividad']);
   const diasInactivo = diasEntre(ref, asOf);
-  const negativas = contar(state, ['RESPUESTA_NEGATIVA', 'NO_ASISTIO']);
-  const valor = clamp01(diasInactivo / VENTANA_DIAS + 0.15 * negativas);
+  const negativas = contar(state, NEGATIVAS);
+  const valor = clamp01(P.pesos.riesgo.inactividadPorVentana * (diasInactivo / P.ventanaDias) + P.pesos.riesgo.negativa * negativas);
   return {
     dimension: 'riesgo',
     evaluable: true,
     valor,
     montoEstimado: null,
-    banda: bandaDe(valor),
-    confianza: 'MEDIA',
+    banda: bandaDe(valor, P),
+    confianza: state.actividades.length > 0 ? confianzaDesdeEvidencia(state.actividades, false) : 'BAJA',
     factores: [
       factor(`${diasInactivo} día(s) de inactividad`, diasInactivo > 90 ? 'SUBE' : 'NEUTRO'),
       factor(`${negativas} respuesta(s) negativa(s)/inasistencia(s)`, negativas > 0 ? 'SUBE' : 'NEUTRO'),
@@ -169,19 +202,17 @@ function dimRiesgo(state: ContactoState, asOf: string): DimensionPuntaje {
   };
 }
 
-function dimValorEsperado(state: ContactoState, opciones: OpcionesPuntaje): DimensionPuntaje {
+function dimValorEsperado(state: ContactoState, opciones: OpcionesPuntaje, P: PoliticaScoringComercial): DimensionPuntaje {
   const comprasConValor = state.actividades.filter((a) => a.tipo === 'COMPRA' && a.valor != null);
   const montoHistorico = comprasConValor.length > 0 ? comprasConValor.reduce((s, a) => s + (a.valor ?? 0), 0) / comprasConValor.length : null;
   const monto = montoHistorico ?? opciones.valorReferencia ?? null;
-  if (monto == null) {
-    return noEvaluable('valorEsperado', ['sin valor de compra histórico ni valor de referencia del rubro/producto']);
-  }
+  if (monto == null) return noEvaluable('valorEsperado', ['sin valor de compra histórico ni valor de referencia del rubro/producto']);
   const faltantes: string[] = [];
   let valor: number | null = null;
   let banda: Banda | null = null;
   if (opciones.valorReferencia != null && opciones.valorReferencia > 0) {
     valor = clamp01(monto / opciones.valorReferencia);
-    banda = bandaDe(valor);
+    banda = bandaDe(valor, P);
   } else {
     faltantes.push('sin valor de referencia para normalizar en banda (se reporta el monto)');
   }
@@ -191,37 +222,35 @@ function dimValorEsperado(state: ContactoState, opciones: OpcionesPuntaje): Dime
     valor,
     montoEstimado: monto,
     banda,
-    confianza: montoHistorico != null ? 'ALTA' : 'BAJA',
-    factores: [
-      factor(montoHistorico != null ? `monto medio de ${comprasConValor.length} compra(s)` : 'valor de referencia del rubro', montoHistorico != null ? 'SUBE' : 'NEUTRO'),
-    ],
+    confianza: montoHistorico != null ? confianzaDesdeEvidencia(comprasConValor, false) : 'BAJA',
+    factores: [factor(montoHistorico != null ? `monto medio de ${comprasConValor.length} compra(s)` : 'valor de referencia del rubro', montoHistorico != null ? 'SUBE' : 'NEUTRO')],
     faltantes,
   };
 }
 
 // ── Composición ───────────────────────────────────────────────────────────────────────────────
 
-/** Puntúa un contacto en todas las dimensiones. Determinista respecto a `asOf`. */
 export function puntuarContacto(state: ContactoState, asOf: string, opciones: OpcionesPuntaje = {}): PuntajeContacto {
-  const actividad = dimActividad(state, asOf);
+  const P = opciones.politica ?? POLITICA_SCORING_V1;
+  const actividad = dimActividad(state, asOf, P);
   const interes = dimInteres(state);
-  const relacion = dimRelacion(state, asOf);
-  const riesgo = dimRiesgo(state, asOf);
-  const valorEsperado = dimValorEsperado(state, opciones);
+  const relacion = dimRelacion(state, asOf, P);
+  const riesgo = dimRiesgo(state, asOf, P);
+  const valorEsperado = dimValorEsperado(state, opciones, P);
 
-  // Probabilidad de compra: requiere actividad e interés evaluables.
   let probabilidadCompra: DimensionPuntaje;
   if (!actividad.evaluable || !interes.evaluable) {
     const faltantes = [...actividad.faltantes, ...interes.faltantes];
     probabilidadCompra = noEvaluable('probabilidadCompra', faltantes.length ? faltantes : ['faltan señales para estimar la probabilidad de compra']);
   } else {
-    const v = clamp01(0.4 * (interes.valor ?? 0) + 0.35 * (actividad.valor ?? 0) + 0.25 * (relacion.valor ?? 0) - 0.3 * (riesgo.valor ?? 0));
+    const w = P.pesos.probabilidad;
+    const v = clamp01(w.interes * (interes.valor ?? 0) + w.actividad * (actividad.valor ?? 0) + w.relacion * (relacion.valor ?? 0) - w.riesgo * (riesgo.valor ?? 0));
     probabilidadCompra = {
       dimension: 'probabilidadCompra',
       evaluable: true,
       valor: v,
       montoEstimado: null,
-      banda: bandaDe(v),
+      banda: bandaDe(v, P),
       confianza: minConfianza([interes.confianza, actividad.confianza, relacion.confianza]),
       factores: [
         factor(`interés ${interes.banda}`, (interes.valor ?? 0) >= 0.5 ? 'SUBE' : 'BAJA'),
@@ -232,14 +261,11 @@ export function puntuarContacto(state: ContactoState, asOf: string, opciones: Op
     };
   }
 
-  // Prioridad: probabilidad × valor esperado normalizado. Sin escala de valor → NO EVALUABLE.
   let prioridad: DimensionPuntaje;
   if (!probabilidadCompra.evaluable) {
     prioridad = noEvaluable('prioridad', probabilidadCompra.faltantes);
   } else if (!valorEsperado.evaluable || valorEsperado.valor == null) {
-    prioridad = noEvaluable('prioridad', [
-      ...(valorEsperado.evaluable ? valorEsperado.faltantes : ['no se puede priorizar sin un valor esperado evaluable']),
-    ]);
+    prioridad = noEvaluable('prioridad', valorEsperado.evaluable ? valorEsperado.faltantes : ['no se puede priorizar sin un valor esperado evaluable']);
   } else {
     const v = clamp01((probabilidadCompra.valor ?? 0) * valorEsperado.valor);
     prioridad = {
@@ -247,14 +273,20 @@ export function puntuarContacto(state: ContactoState, asOf: string, opciones: Op
       evaluable: true,
       valor: v,
       montoEstimado: null,
-      banda: bandaDe(v),
+      banda: bandaDe(v, P),
       confianza: minConfianza([probabilidadCompra.confianza, valorEsperado.confianza]),
       factores: [factor(`probabilidad ${probabilidadCompra.banda} × valor ${valorEsperado.banda}`, 'NEUTRO')],
       faltantes: [],
     };
   }
 
-  return { contactoId: state.contactoId, asOf, dimensiones: { actividad, interes, relacion, riesgo, probabilidadCompra, valorEsperado, prioridad } };
+  return {
+    contactoId: state.contactoId,
+    asOf,
+    naturaleza: 'HEURISTICO',
+    politicaVersion: P.version,
+    dimensiones: { actividad, interes, relacion, riesgo, probabilidadCompra, valorEsperado, prioridad },
+  };
 }
 
 // ── Recomendación explicada ──────────────────────────────────────────────────────────────────
@@ -265,18 +297,14 @@ function faltantesGlobales(p: PuntajeContacto): string[] {
   return [...set];
 }
 
-/**
- * Deriva el "siguiente paso recomendado" de un contacto. Si no hay base suficiente (actividad o
- * probabilidad no evaluables), ABSTIENE honestamente. Nunca recomienda sin razones ni evidencia.
- */
 export function recomendarSiguientePaso(state: ContactoState, p: PuntajeContacto): RecomendacionExplicada {
   const d = p.dimensiones;
   if (!d.actividad.evaluable || !d.probabilidadCompra.evaluable) {
     return { tipo: 'ABSTENCION', motivo: 'datos insuficientes para recomendar una acción fundamentada', faltantes: faltantesGlobales(p) };
   }
   const compras = state.actividades.filter((a) => a.tipo === 'COMPRA').length;
-  const diasInactivo = state.ultimaActividadEn ? diasEntre(state.ultimaActividadEn, p.asOf) : VENTANA_DIAS;
-  const evidencia = state.actividades.slice(-3).map((a) => `${a.tipo}@${a.en}`);
+  const diasInactivo = state.ultimaActividadEn ? diasEntre(state.ultimaActividadEn, p.asOf) : POLITICA_SCORING_V1.ventanaDias;
+  const evidencia = state.actividades.slice(-3).map((a) => `${a.tipo}@${a.en}#${a.actividadId}`);
 
   const CATALOGO: Record<string, string> = {
     postventa: 'seguimiento post-venta y venta cruzada',

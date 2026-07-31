@@ -27,6 +27,13 @@ export interface Actividad {
   readonly en: string;
   /** Monto asociado (p. ej. de una COMPRA), si aplica. */
   readonly valor: number | null;
+  /** Origen epistémico de la observación (H-4: la confianza del scoring deriva de aquí). */
+  readonly origen: TipoEvidencia;
+}
+
+/** Origen por defecto de una actividad observada (un hecho registrado por el sistema). */
+export function origenPorDefecto(_tipo: ActividadTipo): TipoEvidencia {
+  return 'HECHO_VERIFICADO';
 }
 
 export interface AtributoContacto {
@@ -85,6 +92,7 @@ interface PActividad {
   tipo: ActividadTipo;
   detalle: string;
   valor: number | null;
+  origen?: TipoEvidencia;
 }
 interface PAtributo {
   clave: string;
@@ -105,7 +113,7 @@ export function aplicarContacto(state: ContactoState, event: RecordedEvent): Con
     }
     case EVENTOS_CONTACTO.actividad: {
       const p = event.payload as PActividad;
-      const act: Actividad = { actividadId: p.actividadId, tipo: p.tipo, detalle: p.detalle, en: event.occurredAt, valor: p.valor };
+      const act: Actividad = { actividadId: p.actividadId, tipo: p.tipo, detalle: p.detalle, en: event.occurredAt, valor: p.valor, origen: p.origen ?? origenPorDefecto(p.tipo) };
       return { ...next, actividades: [...state.actividades, act], ultimaActividadEn: masReciente(state.ultimaActividadEn, event.occurredAt) };
     }
     case EVENTOS_CONTACTO.atributo: {

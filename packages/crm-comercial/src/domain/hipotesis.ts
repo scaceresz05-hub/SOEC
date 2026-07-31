@@ -28,13 +28,6 @@ export interface ResultadoHipotesis {
   readonly en: string;
 }
 
-export interface AprendizajeHipotesis {
-  /** Por qué se cree que funcionó/fracasó (obligatorio: nunca "funcionó" a secas). */
-  readonly porQue: string;
-  /** Enunciado reutilizable/condiciones, si aplica. */
-  readonly transferible: string | null;
-}
-
 export interface HipotesisState {
   readonly organizacionId: string;
   readonly hipotesisId: string;
@@ -45,7 +38,11 @@ export interface HipotesisState {
   readonly estado: EstadoHipotesis;
   readonly evidencias: readonly EvidenciaHipotesis[];
   readonly resultado: ResultadoHipotesis | null;
-  readonly aprendizaje: AprendizajeHipotesis | null;
+  /**
+   * Referencia al aprendizaje CANÓNICO en `@soec/aprendizaje` (H-2: SSOT única de aprendizaje). La
+   * hipótesis NO embebe el contenido del aprendizaje; solo lo enlaza por id.
+   */
+  readonly aprendizajeId: string | null;
 }
 
 export const EVENTOS_HIPOTESIS = {
@@ -53,7 +50,7 @@ export const EVENTOS_HIPOTESIS = {
   evidencia: 'hip.evidencia_agregada',
   transicionada: 'hip.transicionada',
   resultado: 'hip.resultado_registrado',
-  aprendizaje: 'hip.aprendizaje_registrado',
+  aprendizajeVinculado: 'hip.aprendizaje_vinculado',
 } as const;
 
 export function hipotesisStreamId(organizacionId: string, hipotesisId: string): string {
@@ -61,7 +58,7 @@ export function hipotesisStreamId(organizacionId: string, hipotesisId: string): 
 }
 
 export function estadoInicialHipotesis(organizacionId: string, hipotesisId: string): HipotesisState {
-  return { organizacionId, hipotesisId, version: 0, existe: false, enunciado: '', contexto: '', estado: 'ABIERTA', evidencias: [], resultado: null, aprendizaje: null };
+  return { organizacionId, hipotesisId, version: 0, existe: false, enunciado: '', contexto: '', estado: 'ABIERTA', evidencias: [], resultado: null, aprendizajeId: null };
 }
 
 /** Transiciones válidas de la máquina de estados de una hipótesis. */
@@ -69,6 +66,28 @@ export function transicionValida(desde: EstadoHipotesis, hacia: EstadoHipotesis)
   if (desde === 'ABIERTA' && hacia === 'EN_PRUEBA') return true;
   if (desde === 'EN_PRUEBA' && (hacia === 'CONFIRMADA' || hacia === 'REFUTADA' || hacia === 'INCONCLUSA')) return true;
   return false;
+}
+
+/**
+ * H-1: una hipótesis NO puede CONFIRMARSE ni REFUTARSE sin evidencia coherente con el veredicto.
+ * - CONFIRMADA: ≥1 evidencia a favor y el balance no dominado por evidencia en contra.
+ * - REFUTADA: ≥1 evidencia en contra y el balance no dominado por evidencia a favor.
+ * - INCONCLUSA: admisible cuando hay un resultado observado aunque la evidencia no permita concluir
+ *   (incluye el caso de evidencia contradictoria).
+ * Nunca se fabrica confianza: sin evidencia, solo cabe INCONCLUSA.
+ */
+export function veredictoAdmisible(state: HipotesisState, veredicto: Veredicto): { ok: boolean; motivo: string } {
+  const aFavor = state.evidencias.filter((e) => e.aFavor).length;
+  const enContra = state.evidencias.filter((e) => !e.aFavor).length;
+  if (veredicto === 'INCONCLUSA') return { ok: true, motivo: '' };
+  if (state.evidencias.length === 0) return { ok: false, motivo: 'no se puede confirmar ni refutar sin evidencia registrada' };
+  if (veredicto === 'CONFIRMADA') {
+    if (aFavor >= 1 && aFavor > enContra) return { ok: true, motivo: '' };
+    return { ok: false, motivo: 'CONFIRMADA requiere evidencia a favor dominante; use INCONCLUSA si es contradictoria' };
+  }
+  // REFUTADA
+  if (enContra >= 1 && enContra > aFavor) return { ok: true, motivo: '' };
+  return { ok: false, motivo: 'REFUTADA requiere evidencia en contra dominante; use INCONCLUSA si es contradictoria' };
 }
 
 export function aplicarHipotesis(state: HipotesisState, event: RecordedEvent): HipotesisState {
@@ -90,11 +109,12 @@ export function aplicarHipotesis(state: HipotesisState, event: RecordedEvent): H
       const p = event.payload as ResultadoHipotesis;
       return { ...next, resultado: p, estado: p.veredicto };
     }
-    case EVENTOS_HIPOTESIS.aprendizaje: {
-      const p = event.payload as AprendizajeHipotesis;
-      return { ...next, aprendizaje: p };
+    case EVENTOS_HIPOTESIS.aprendizajeVinculado: {
+      const p = event.payload as { aprendizajeId: string };
+      return { ...next, aprendizajeId: p.aprendizajeId };
     }
     default:
+      // Eventos desconocidos (p. ej. de una versión anterior): se ignoran sin romper el replay.
       return next;
   }
 }

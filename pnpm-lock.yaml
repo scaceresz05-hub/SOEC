@@ -371,6 +371,9 @@ importers:
 
   packages/crm-comercial:
     dependencies:
+      '@soec/aprendizaje':
+        specifier: workspace:*
+        version: link:../aprendizaje
       '@soec/contracts':
         specifier: workspace:*
         version: link:../contracts

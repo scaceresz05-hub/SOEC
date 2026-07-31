@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@soec/contracts": "workspace:*",
-    "@soec/negocio": "workspace:*"
+    "@soec/negocio": "workspace:*",
+    "@soec/aprendizaje": "workspace:*"
   },
   "devDependencies": {
     "@soec/event-store": "workspace:*"

@@ -1,13 +1,15 @@
 /**
  * @soec/crm-comercial · aplicación · Servicio de HIPÓTESIS COMERCIALES.
  *
- * Cierra el ciclo hipótesis → evidencia → resultado → aprendizaje en un agregado, event-sourced y
- * multi-tenant. La máquina de estados impide saltos inválidos; el aprendizaje exige explicar el
- * porqué (nunca "funcionó" a secas). La evaluación es explicable y respeta Evaluabilidad.
+ * Cierra el ciclo hipótesis → evidencia → resultado → aprendizaje, event-sourced y multi-tenant.
+ * H-1: no se confirma/refuta sin evidencia coherente (veredictoAdmisible). H-2: el APRENDIZAJE se
+ * persiste en su dominio CANÓNICO `@soec/aprendizaje` y la hipótesis solo guarda su `aprendizajeId`
+ * (SSOT única). H-6: la inscripción en el índice es idempotente y autorreparable.
  */
 import type { Attribution, EventInput, EventStore, RequestContext } from '@soec/contracts';
-import type { TipoEvidencia } from '@soec/negocio';
-import { ComandoCrmInvalidoError, ContactoNoEncontradoError } from '../domain/errors';
+import type { Confianza, TipoEvidencia } from '@soec/negocio';
+import { AprendizajeService, type EntradaAprendizaje } from '@soec/aprendizaje';
+import { ComandoCrmInvalidoError, HipotesisNoEncontradaError } from '../domain/errors';
 import {
   EVENTOS_HIPOTESIS,
   type EvaluacionHipotesis,
@@ -17,11 +19,20 @@ import {
   hipotesisStreamId,
   reconstruirHipotesis,
   transicionValida,
+  veredictoAdmisible,
 } from '../domain/hipotesis';
 import { EVENTOS_HIPINDICE, type HipIndice, hipIndiceStreamId, reconstruirHipIndice } from '../domain/indices';
+import { LIMITES, exigirBajoLimite, validarTexto } from '../domain/validacion';
+
+function aConfianzaAprendizaje(c: Confianza): 'baja' | 'media' | 'alta' {
+  return c === 'ALTA' ? 'alta' : c === 'MEDIA' ? 'media' : 'baja';
+}
 
 export class HipotesisComercialService {
-  constructor(private readonly store: EventStore) {}
+  private readonly aprendizaje: AprendizajeService;
+  constructor(private readonly store: EventStore, aprendizaje?: AprendizajeService) {
+    this.aprendizaje = aprendizaje ?? new AprendizajeService(store);
+  }
 
   private org(ctx: RequestContext): string {
     return String(ctx.organizationId);
@@ -43,54 +54,73 @@ export class HipotesisComercialService {
 
   private async exigir(ctx: RequestContext, hipotesisId: string): Promise<HipotesisState> {
     const st = await this.cargar(ctx, hipotesisId);
-    if (!st.existe) throw new ContactoNoEncontradoError(`hipótesis ${hipotesisId} no encontrada`);
+    if (!st.existe) throw new HipotesisNoEncontradaError(`hipótesis ${hipotesisId} no encontrada`);
     return st;
   }
 
-  /** Registra una hipótesis comercial (idempotente) y la inscribe en el índice. */
+  /** Registra una hipótesis. H-6: asegura el agregado y LUEGO el índice (autorreparable). */
   async registrar(ctx: RequestContext, hipotesisId: string, enunciado: string, contexto: string, a: Attribution, o: string): Promise<void> {
-    if (!hipotesisId?.trim() || !enunciado?.trim()) throw new ComandoCrmInvalidoError('hipotesisId y enunciado son obligatorios');
+    if (!hipotesisId?.trim()) throw new ComandoCrmInvalidoError('hipotesisId es obligatorio');
     const st = await this.cargar(ctx, hipotesisId);
-    if (st.existe) return;
-    await this.append(ctx, hipotesisId, st.version, EVENTOS_HIPOTESIS.registrada, { enunciado: enunciado.trim(), contexto }, a, o);
-    await this.inscribir(ctx, hipotesisId, enunciado.trim(), a, o);
+    if (!st.existe) {
+      if (!enunciado?.trim()) throw new ComandoCrmInvalidoError('enunciado es obligatorio');
+      await this.append(ctx, hipotesisId, st.version, EVENTOS_HIPOTESIS.registrada, { enunciado: enunciado.trim(), contexto }, a, o);
+    }
+    await this.asegurarEnIndice(ctx, hipotesisId, (enunciado || st.enunciado).trim(), a, o);
   }
 
-  /** Agrega evidencia (a favor o en contra) con su origen epistémico. */
   async agregarEvidencia(ctx: RequestContext, hipotesisId: string, evidenciaId: string, descripcion: string, origen: TipoEvidencia, aFavor: boolean, a: Attribution, o: string): Promise<void> {
     const st = await this.exigir(ctx, hipotesisId);
     if (!evidenciaId?.trim()) throw new ComandoCrmInvalidoError('evidenciaId obligatorio');
+    validarTexto(descripcion ?? '', LIMITES.texto, 'descripción de evidencia');
+    exigirBajoLimite(st.evidencias.length, LIMITES.maxEvidencias, 'evidencias');
     await this.append(ctx, hipotesisId, st.version, EVENTOS_HIPOTESIS.evidencia, { evidenciaId, descripcion, origen, aFavor }, a, o);
   }
 
-  /** Pone la hipótesis en prueba (ABIERTA → EN_PRUEBA). */
   async iniciarPrueba(ctx: RequestContext, hipotesisId: string, a: Attribution, o: string): Promise<void> {
     const st = await this.exigir(ctx, hipotesisId);
     if (!transicionValida(st.estado, 'EN_PRUEBA')) throw new ComandoCrmInvalidoError(`no se puede pasar de ${st.estado} a EN_PRUEBA`);
     await this.append(ctx, hipotesisId, st.version, EVENTOS_HIPOTESIS.transicionada, { estado: 'EN_PRUEBA' }, a, o);
   }
 
-  /** Registra el resultado observado y el veredicto (EN_PRUEBA → CONFIRMADA/REFUTADA/INCONCLUSA). */
+  /** Registra el resultado y veredicto. H-1: exige evidencia coherente para CONFIRMAR/REFUTAR. */
   async registrarResultado(ctx: RequestContext, hipotesisId: string, descripcion: string, veredicto: Veredicto, valor: number | null, a: Attribution, o: string): Promise<void> {
     const st = await this.exigir(ctx, hipotesisId);
     if (!transicionValida(st.estado, veredicto)) throw new ComandoCrmInvalidoError(`no se puede registrar resultado desde ${st.estado} (requiere EN_PRUEBA)`);
+    const adm = veredictoAdmisible(st, veredicto);
+    if (!adm.ok) throw new ComandoCrmInvalidoError(adm.motivo);
     await this.append(ctx, hipotesisId, st.version, EVENTOS_HIPOTESIS.resultado, { descripcion, veredicto, valor, en: o }, a, o);
   }
 
-  /** Registra el aprendizaje: exige explicar el porqué (nunca "funcionó" a secas). */
-  async registrarAprendizaje(ctx: RequestContext, hipotesisId: string, porQue: string, transferible: string | null, a: Attribution, o: string): Promise<void> {
+  /**
+   * H-2: crea el aprendizaje en su dominio CANÓNICO (`@soec/aprendizaje`) y vincula su id a la
+   * hipótesis. Exige un resultado observado y una explicación del porqué. No embebe el contenido.
+   */
+  async registrarAprendizaje(ctx: RequestContext, hipotesisId: string, porQue: string, transferible: string | null, a: Attribution, o: string): Promise<string> {
     const st = await this.exigir(ctx, hipotesisId);
     if (!porQue?.trim()) throw new ComandoCrmInvalidoError('el aprendizaje exige explicar el porqué');
     if (!st.resultado) throw new ComandoCrmInvalidoError('no hay resultado observado sobre el cual aprender');
-    await this.append(ctx, hipotesisId, st.version, EVENTOS_HIPOTESIS.aprendizaje, { porQue: porQue.trim(), transferible }, a, o);
+    const ev = evaluarHipotesis(st);
+    const aprendizajeId = `hip-${hipotesisId}`;
+    const soporte = ev.evaluable && (ev.confianza === 'ALTA' || ev.confianza === 'MEDIA') ? 'evidencia_suficiente' : 'evidencia_insuficiente';
+    const entrada: EntradaAprendizaje = {
+      observado: { experimentoId: `hip:${hipotesisId}`, ganador: null, valorControl: 0, valorVariante: st.resultado.valor ?? 0, observaciones: st.evidencias.length, evidencia: st.resultado.descripcion },
+      interpretacion: { texto: porQue.trim(), supuestos: [], confianza: aConfianzaAprendizaje(ev.confianza) },
+      conclusion: { enunciado: `${st.enunciado} → ${st.resultado.veredicto}`, soporte, accionRecomendada: transferible ?? 'sin acción reutilizable declarada' },
+      ...(transferible ? { reutilizable: { enunciado: transferible, condiciones: [st.contexto], ambitoSugerido: [this.org(ctx)] } } : {}),
+    };
+    await this.aprendizaje.registrar(ctx, aprendizajeId, entrada, a, o); // idempotente por aprendizajeId
+    const fresco = await this.cargar(ctx, hipotesisId);
+    await this.append(ctx, hipotesisId, fresco.version, EVENTOS_HIPOTESIS.aprendizajeVinculado, { aprendizajeId }, a, o);
+    return aprendizajeId;
   }
 
-  /** Evaluación explicable del estado de evidencia de la hipótesis. */
   async evaluar(ctx: RequestContext, hipotesisId: string): Promise<EvaluacionHipotesis> {
     return evaluarHipotesis(await this.exigir(ctx, hipotesisId));
   }
 
-  private async inscribir(ctx: RequestContext, hipotesisId: string, enunciado: string, a: Attribution, o: string): Promise<void> {
+  /** H-6: inscribe en el índice de forma idempotente; reparable aunque el agregado ya exista. */
+  private async asegurarEnIndice(ctx: RequestContext, hipotesisId: string, enunciado: string, a: Attribution, o: string): Promise<void> {
     const org = this.org(ctx);
     const idx = reconstruirHipIndice(await this.store.readStream(ctx, hipIndiceStreamId(org)));
     if (idx.hipotesis.some((h) => h.hipotesisId === hipotesisId)) return;
