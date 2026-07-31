@@ -76,3 +76,28 @@ quedan declarados como continuación (no en esta rebanada).
 Tests unitarios (derivación pura), integración (servicio event-sourced), aislamiento multiempresa,
 explicabilidad/evaluabilidad (abstención con faltantes), y test de arquitectura (SDK de proveedores
 prohibidos). Sin push/PR/merge hasta autorización.
+
+## Estado de entrega (tramos D–L)
+
+Cerrado end-to-end sobre datos reales (sin fixtures en el flujo nuevo), todo SIMULADO:
+
+- **D** — Artefacto de estrategia creativa de 1.ª clase, versionado, con afirmaciones ligadas a evidencia
+  (sin inventar prueba social).
+- **E/F** — Variantes A/B (una sola variable, constantes compartidas) y calendario editorial integrados al
+  orquestador.
+- **G** — Aprobación humana granular por recurso+versión: una versión nueva no hereda la aprobación
+  (modificar invalida la previa); aprobar un recurso no aprueba a otro; registra al actor; RECHAZADA revoca.
+- **H** — Orquestador en etapas explícitas y reconstruibles: `prepararPrograma` → gate → `ejecutarSimulado`.
+  Sin aprobación humana, se detiene en `PENDIENTE_APROBACION`; el atajo `generarPrograma` usa un helper de
+  piloto claramente separado que firma como actor humano (nunca autoaprobación dentro de `ejecutarSimulado`).
+- **I** — Recuperación ante fallos parciales: un reintento tras un fallo de la tienda completa el flujo sin
+  duplicar (idempotencia de grano fino: reusa campaña/pieza; A/B y calendario idempotentes por id).
+- **J** — Superficie HTTP autenticada (`/generation/*`) dentro del gateway M1: sesión→401, membresía→404,
+  permiso atómico→403; permisos nuevos en el modelo canónico (`generation.*`, `creative.read`,
+  `content.read`, `experiment.read`, `calendar.*`, `execution.simulate`); rechazo de modo real
+  (AUTONOMOUS_REAL→422); rate limiting (429); CSRF/límite de payload heredados; auditoría por event-sourcing.
+- **K** — UI `/director-autonomo/programas/[programaId]/generacion`: opera el motor y muestra
+  REAL/SIMULADO/ESTIMADO/DESCONOCIDO; sesión en cookie httpOnly (sin tokens en el cliente).
+- **L** — Caso SmileFlow reproducible: semilla sintética (3 segmentos, 3 hipótesis, 3 estrategias, 3
+  campañas, 6 piezas, 2 variantes/campaña, 1 calendario, aprobaciones con actor, ejecución simulada +
+  métricas + aprendizajes). Destruible y recreable; determinista.
