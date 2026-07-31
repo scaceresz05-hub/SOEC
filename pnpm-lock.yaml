@@ -98,6 +98,9 @@ importers:
       '@soec/piloto-director-v1':
         specifier: workspace:*
         version: link:../../packages/piloto-director-v1
+      '@soec/programas':
+        specifier: workspace:*
+        version: link:../../packages/programas
       '@soec/rubros':
         specifier: workspace:*
         version: link:../../packages/rubros

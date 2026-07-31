@@ -14,3 +14,6 @@ export * from './app/negocio-service';
 export * from './app/programa-service';
 export * from './app/vista-programa';
 export * from './app/ciclo-programa-service';
+// Re-exporta el contrato de entrada de contenido para que el runtime tenga un único punto de
+// integración sin depender directamente de @soec/contenido-gobernado.
+export type { EntradaContenido } from '@soec/contenido-gobernado';
