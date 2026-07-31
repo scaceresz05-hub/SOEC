@@ -8,7 +8,7 @@ import { ActorId, OrganizationId, type Attribution, type RequestContext } from '
 import { InMemoryEventStore } from '@soec/event-store';
 import { ConocimientoComercialService, HipotesisComercialService } from '@soec/crm-comercial';
 import { ProgramaService } from '@soec/programas';
-import { OrquestadorProgramaGenerativo, type ParametrosCampania } from '../src/index';
+import { CalendarioEditorialService, OrquestadorProgramaGenerativo, VariantesABService, type ParametrosCampania } from '../src/index';
 
 const attr: Attribution = { source: 'orq', purpose: 'test', assumptions: [], claimType: 'observational', regime: 'empirical', uncertainty: 'na' };
 const ctx = (org = 'org-a'): RequestContext => {
@@ -50,6 +50,22 @@ describe('@soec/estrategia-creativa · orquestador generativo end-to-end', () =>
     expect(prog.estado).toBe('EVALUADO');
     expect(prog.campanias.length).toBeGreaterThan(0);
     expect(prog.campanias[0]?.contenidoIds.length).toBeGreaterThan(0);
+  });
+
+  it('integra variantes A/B (una variable) y calendario editorial al flujo', async () => {
+    const store = new InMemoryEventStore();
+    const con = new ConocimientoComercialService(store);
+    const hip = new HipotesisComercialService(store);
+    await sembrar(con, hip);
+    await new OrquestadorProgramaGenerativo(store).generarPrograma(ctx(), 'prog1', PARAMS, attr, O);
+    const prog = await new ProgramaService(store).cargar(ctx(), 'prog1');
+    const piezaId = prog.campanias[0]!.contenidoIds[0]!;
+    const ab = await new VariantesABService(store).cargar(ctx(), piezaId);
+    expect(ab.variantes).toHaveLength(2);
+    expect(ab.variantes.every((v) => v.elementoModificado === 'gancho')).toBe(true); // una sola variable
+    const cal = await new CalendarioEditorialService(store).cargar(ctx(), 'prog1');
+    expect(cal.entradas.length).toBeGreaterThan(0);
+    expect(cal.entradas[0]?.estado).toBe('BORRADOR'); // no programado sin aprobación
   });
 
   it('es idempotente: re-ejecutar no duplica campañas ni re-corre el ciclo', async () => {

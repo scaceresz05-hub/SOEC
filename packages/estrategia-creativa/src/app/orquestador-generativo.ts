@@ -12,9 +12,13 @@ import type { VistaPrograma } from '@soec/programas';
 import { ProveedorGenerativoDeterminista, type ProveedorGenerativo, type SolicitudGenerativa, validarRespuesta } from '@soec/contenido';
 import { EstrategiaCreativaService } from './estrategia-creativa-service';
 import { EstrategiaCreativaArtefactoService } from './artefacto-creativo-service';
+import { VariantesABService } from './variantes-ab-service';
+import { CalendarioEditorialService } from './calendario-service';
 import { derivarContenidoArtefacto, estrategiaCreativaId } from '../domain/artefacto-creativo';
 import type { ParametrosCampania } from '../domain/conexion';
 import type { BriefComercial, EstrategiaCreativa } from '../domain/estrategia-creativa';
+
+const DIA_MS = 86_400_000;
 
 export type ResultadoOrquestacion =
   | { readonly tipo: 'PROPUESTA'; readonly vista: VistaPrograma }
@@ -26,12 +30,16 @@ export class OrquestadorProgramaGenerativo {
   private readonly ciclo: CicloProgramaService;
   private readonly proveedor: ProveedorGenerativo;
   private readonly artefactos: EstrategiaCreativaArtefactoService;
+  private readonly ab: VariantesABService;
+  private readonly calendario: CalendarioEditorialService;
   constructor(store: EventStore, opts?: { proveedor?: ProveedorGenerativo; estrategia?: EstrategiaCreativaService }) {
     this.estrategia = opts?.estrategia ?? new EstrategiaCreativaService(store);
     this.programas = new ProgramaService(store);
     this.ciclo = new CicloProgramaService(store);
     this.proveedor = opts?.proveedor ?? new ProveedorGenerativoDeterminista();
     this.artefactos = new EstrategiaCreativaArtefactoService(store);
+    this.ab = new VariantesABService(store);
+    this.calendario = new CalendarioEditorialService(store);
   }
 
   /**
@@ -69,7 +77,10 @@ export class OrquestadorProgramaGenerativo {
       versionPorHipotesis.set(h.id, { id: estId, version: art.artefacto?.version ?? 1 });
     }
 
+    await this.calendario.crear(ctx, programaId, 'UTC', a, o); // Tramo F: calendario editorial
+
     for (const h of hipotesis) {
+      const idxH = hipotesis.indexOf(h);
       const prog = await this.programas.cargar(ctx, programaId);
       if (prog.campanias.some((c) => c.hipotesisId === h.id)) continue; // idempotente: ya vinculada
       const conCampania = await this.programas.vincularCampania(
@@ -94,7 +105,7 @@ export class OrquestadorProgramaGenerativo {
       const estrategiaRef = ref ? `${ref.id}@v${ref.version}` : `estrategia:${programaId}`;
       const cuerpo = await this.generarCuerpo(ctx, brief, estrategia, params.idioma, estrategiaRef);
       if (cuerpo === null) return { tipo: 'ABSTENCION', faltantes: ['la generación de contenido no produjo una salida válida (rechazada por validación)'] };
-      await this.programas.vincularContenido(
+      const conContenido = await this.programas.vincularContenido(
         ctx,
         programaId,
         campaignId,
@@ -102,6 +113,17 @@ export class OrquestadorProgramaGenerativo {
         a,
         o,
       );
+      const refCamp = conContenido.campanias.find((c) => c.campaignId === campaignId);
+      const piezaBaseId = refCamp?.contenidoIds[refCamp.contenidoIds.length - 1];
+      if (piezaBaseId) {
+        // Tramo E: dos variantes A/B que cambian UNA sola variable (gancho), constantes compartidas.
+        const constantes = ['cta', 'oferta', 'audiencia'];
+        await this.ab.agregarVariante(ctx, piezaBaseId, { varianteId: `${piezaBaseId}-A`, hipotesisQuePrueba: h.propuesta, elementoModificado: 'gancho', diferenciaControlada: `gancho A: ${estrategia.gancho}`, elementosConstantes: constantes, criterioExito: h.criterioContinuacion }, a, o);
+        await this.ab.agregarVariante(ctx, piezaBaseId, { varianteId: `${piezaBaseId}-B`, hipotesisQuePrueba: h.propuesta, elementoModificado: 'gancho', diferenciaControlada: `gancho B: ${estrategia.mensajesClave[1] ?? estrategia.concepto}`, elementosConstantes: constantes, criterioExito: h.criterioContinuacion }, a, o);
+        // Tramo F: una entrada de calendario por pieza, con fecha determinista según frecuencia.
+        const fechaHora = new Date(Date.parse(o) + (idxH + 1) * Math.max(1, params.frecuenciaDias) * DIA_MS).toISOString();
+        await this.calendario.agregarEntrada(ctx, programaId, { entradaId: `cal-${piezaBaseId}`, fechaHora, canal, piezaId: piezaBaseId, objetivo: params.objetivoMarketing, segmento: h.segmentoId }, a, o);
+      }
     }
 
     const vista = await this.ciclo.ejecutarCiclo(ctx, programaId, a, o);
