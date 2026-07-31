@@ -57,6 +57,9 @@ class TiendaQueFalla implements EventStore {
   reconstructAt(ctx: RequestContext, streamId: string, asOf: string): Promise<readonly RecordedEvent[]> {
     return this.inner.reconstructAt(ctx, streamId, asOf);
   }
+  currentVersion(ctx: RequestContext, streamId: string): Promise<number> {
+    return this.inner.currentVersion(ctx, streamId);
+  }
 }
 
 describe('@soec/estrategia-creativa · Tramo I · recuperación ante fallos parciales', () => {
