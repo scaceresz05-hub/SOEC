@@ -52,6 +52,60 @@ async function configurarSmileFlow(app: App): Promise<void> {
   await app.inject({ method: 'POST', url: `${BASE}/${ORG}/programas/${PROG}/listo`, headers: H, payload: {} });
 }
 
+/** Crea un programa mínimo pero ejecutable (1 segmento / 1 hipótesis / 1 campaña / 1 contenido). */
+async function programaMinimo(app: App, org: string, prog: string): Promise<void> {
+  await app.inject({ method: 'POST', url: BASE, headers: H, payload: { org, negocio: { nombre: org, descripcion: '', industria: '', pais: 'CL', moneda: 'CLP', zonaHoraria: 'UTC' } } });
+  await app.inject({ method: 'POST', url: `${BASE}/${org}/programas`, headers: H, payload: { programaId: prog, nombre: prog, objetivoPrincipal: 'o', presupuestoTotalSimulado: 100000 } });
+  await app.inject({ method: 'POST', url: `${BASE}/${org}/programas/${prog}/segmentos`, headers: H, payload: { id: 's1', nombre: 'S1', descripcion: '', problemas: [], necesidades: [], criterios: [], prioridad: 1 } });
+  await app.inject({ method: 'POST', url: `${BASE}/${org}/programas/${prog}/hipotesis`, headers: H, payload: { id: 'h1', segmentoId: 's1', problema: 'p', propuesta: 'x', mensaje: 'm', canalSimulado: 'correo', accionEsperada: 'a', evidencia: [], informacionFaltante: [], confianza: 'MEDIA', estado: 'ABIERTA', criterioContinuacion: 'c' } });
+  await app.inject({ method: 'POST', url: `${BASE}/${org}/programas/${prog}/campanias`, headers: H, payload: { nombre: 'C', segmentoId: 's1', hipotesisId: 'h1', publico: 'x', propuesta: 'y', mensaje: 'z', canal: 'correo', presupuestoSimulado: 50000, duracionHipotetica: '14d' } });
+  await app.inject({ method: 'POST', url: `${BASE}/${org}/programas/${prog}/contenidos`, headers: H, payload: { campaignId: `${prog}-c1`, contenido: { canal: 'correo', cuerpo: 'x', marcaId: 'm', productoServicio: 'p', llamadaAccion: 'cta', idioma: 'es' } } });
+  await app.inject({ method: 'POST', url: `${BASE}/${org}/programas/${prog}/listo`, headers: H, payload: {} });
+}
+
+describe('Director Autónomo · Programas · PAUSA por organización (V1)', () => {
+  it('la respuesta de pausa/reanudación declara alcance=ORGANIZACION (no por programa)', async () => {
+    const app = makeApp();
+    await programaMinimo(app, 'org-1', 'pA');
+    const pausa = await app.inject({ method: 'POST', url: `${BASE}/org-1/programas/pA/pausar`, headers: H, payload: { motivo: 't' } });
+    expect(pausa.statusCode).toBe(201);
+    const b = pausa.json();
+    expect(b.alcance).toBe('ORGANIZACION');
+    expect(b.organizacionId).toBe('org-1');
+    expect(b.programaSolicitadoId).toBe('pA');
+    expect(b.estadoAutonomia).toBe('PAUSADA');
+    expect(b.alcance).not.toBe('PROGRAMA'); // no puede leerse como exclusivo del programa
+    expect(b.programaPausado).toBeUndefined();
+  });
+
+  it('pausar desde un programa detiene TODOS los programas de la organización; reanudar los libera', async () => {
+    const app = makeApp();
+    await programaMinimo(app, 'org-1', 'pA');
+    await programaMinimo(app, 'org-1', 'pB');
+    // Pausa solicitada desde pA → afecta a toda org-1.
+    const pausa = await app.inject({ method: 'POST', url: `${BASE}/org-1/programas/pA/pausar`, headers: H, payload: {} });
+    expect(pausa.json().alcance).toBe('ORGANIZACION');
+    // Ambos programas quedan bloqueados (422).
+    expect((await app.inject({ method: 'POST', url: `${BASE}/org-1/programas/pA/ejecutar-ciclo`, headers: H, payload: {} })).statusCode).toBe(422);
+    expect((await app.inject({ method: 'POST', url: `${BASE}/org-1/programas/pB/ejecutar-ciclo`, headers: H, payload: {} })).statusCode).toBe(422);
+    // Reanudar desde pB → libera toda org-1.
+    const reanuda = await app.inject({ method: 'POST', url: `${BASE}/org-1/programas/pB/reanudar`, headers: H, payload: { actorHumano: 'humano' } });
+    expect(reanuda.json().alcance).toBe('ORGANIZACION');
+    expect(reanuda.json().estadoAutonomia).toBe('ACTIVA');
+    expect((await app.inject({ method: 'POST', url: `${BASE}/org-1/programas/pA/ejecutar-ciclo`, headers: H, payload: {} })).statusCode).toBe(201);
+    expect((await app.inject({ method: 'POST', url: `${BASE}/org-1/programas/pB/ejecutar-ciclo`, headers: H, payload: {} })).statusCode).toBe(201);
+  });
+
+  it('aislamiento entre organizaciones: pausar org-A no bloquea org-B', async () => {
+    const app = makeApp();
+    await programaMinimo(app, 'org-A', 'p');
+    await programaMinimo(app, 'org-B', 'p');
+    await app.inject({ method: 'POST', url: `${BASE}/org-A/programas/p/pausar`, headers: H, payload: {} });
+    expect((await app.inject({ method: 'POST', url: `${BASE}/org-A/programas/p/ejecutar-ciclo`, headers: H, payload: {} })).statusCode).toBe(422); // A bloqueada
+    expect((await app.inject({ method: 'POST', url: `${BASE}/org-B/programas/p/ejecutar-ciclo`, headers: H, payload: {} })).statusCode).toBe(201); // B ejecutable
+  });
+});
+
 describe('Director Autónomo · Programas · caso SmileFlow (simulado)', () => {
   it('configura el programa completo (3 segmentos / 3 hipótesis / 3 campañas / 3 piezas c/u, 300k simulado)', async () => {
     const app = makeApp();

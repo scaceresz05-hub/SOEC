@@ -72,6 +72,20 @@ describe('@soec/programas · configuración por negocio', () => {
     expect(idx.programas.some((x) => x.programaId === programaId)).toBe(true);
   });
 
+  it('rechaza segmentos e hipótesis con id duplicado (no sobrescribe ni duplica en silencio)', async () => {
+    const store = new InMemoryEventStore();
+    const prog = new ProgramaService(store);
+    await new NegocioConfigService(store).registrar(ctx(), { nombre: 'X', descripcion: '', industria: '', pais: 'CL', moneda: 'CLP', zonaHoraria: 'UTC' }, attr, now);
+    await prog.crear(ctx(), 'p1', { nombre: 'P', objetivoPrincipal: 'o', presupuestoTotalSimulado: 100000 }, attr, now);
+    await prog.agregarSegmento(ctx(), 'p1', seg('a', 1), attr, now);
+    await expect(prog.agregarSegmento(ctx(), 'p1', seg('a', 2), attr, now)).rejects.toBeInstanceOf(ProgramaInvalidoError);
+    await prog.agregarHipotesis(ctx(), 'p1', hip('h1', 'a'), attr, now);
+    await expect(prog.agregarHipotesis(ctx(), 'p1', hip('h1', 'a'), attr, now)).rejects.toBeInstanceOf(ProgramaInvalidoError);
+    const p = await prog.cargar(ctx(), 'p1');
+    expect(p.segmentos).toHaveLength(1); // no se duplicó
+    expect(p.hipotesis).toHaveLength(1);
+  });
+
   it('rechaza una campaña cuyo presupuesto excede el total simulado del programa', async () => {
     const store = new InMemoryEventStore();
     const prog = new ProgramaService(store);
