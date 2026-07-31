@@ -16,6 +16,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             SOEC
           </Link>
           <nav>
+            <Link href="/login">Sesión</Link>
+            <Link href="/select-organization">Organizaciones</Link>
             <Link href="/evaluacion">Evaluación</Link>
             <Link href="/director-workspace">Director Workspace</Link>
             <Link href="/director-autonomo">Director Autónomo</Link>
