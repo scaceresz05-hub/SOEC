@@ -108,12 +108,38 @@ describe('API · aislamiento multi-tenant', () => {
   });
 });
 
-describe('API · demo legacy deshabilitada (18)', () => {
-  it('con legacyDemoAccess=false, las rutas /experience/* NO existen (404): acceso anónimo imposible', async () => {
-    const app = makeApp(); // legacyDemoAccess: false
-    const res = await app.inject({ method: 'GET', url: '/experience/director-autonomo/estado?org=cualquiera' });
-    expect(res.statusCode).toBe(404); // ruta no registrada
-    const catalogo = await app.inject({ method: 'GET', url: '/experience/catalogo' });
-    expect(catalogo.statusCode).toBe(404);
+describe('API · cutover de la superficie vertical (18)', () => {
+  it('sin sesión, una ruta vertical real → 401: ya NO es alcanzable sin autenticación', async () => {
+    const app = makeApp(); // pool presente, legacy off ⇒ superficie vertical bajo gateway autenticado
+    const res = await app.inject({ method: 'GET', url: '/experiencia/comprender-estado/historial' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('con sesión pero sin organización → 400; con sesión + organización propia el gateway deja pasar', async () => {
+    const app = makeApp();
+    const cookie = await registrarYLoguear(app, 'a@x.com');
+    await crearOrg(app, cookie, 'org-a');
+    // Con sesión pero sin indicar organización → 400 (el gateway exige membresía).
+    expect((await app.inject({ method: 'GET', url: '/experiencia/comprender-estado/historial', headers: { cookie } })).statusCode).toBe(400);
+    // Con sesión + organización propia → pasa el gateway (no 401/404).
+    const ok = await app.inject({ method: 'GET', url: '/experiencia/comprender-estado/historial', headers: { cookie, 'x-organization-slug': 'org-a' } });
+    expect(ok.statusCode).toBe(200);
+  });
+
+  it('con sesión, indicar una organización ajena NO da autoridad (404)', async () => {
+    const app = makeApp();
+    const a = await registrarYLoguear(app, 'a@x.com');
+    await crearOrg(app, a, 'org-a');
+    const b = await registrarYLoguear(app, 'b@x.com');
+    await crearOrg(app, b, 'org-b');
+    // A intenta operar sobre org-b vía cabecera → 404 (no es miembro).
+    const res = await app.inject({ method: 'GET', url: '/experiencia/comprender-estado/historial', headers: { cookie: a, 'x-organization-slug': 'org-b' } });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('demo legacy: bajo el flag explícito, la misma ruta responde SIN sesión (aislada a test/dev)', async () => {
+    const legacy = buildApp({ store: new InMemoryEventStore(), intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true });
+    const res = await legacy.inject({ method: 'GET', url: '/experiencia/comprender-estado/historial' });
+    expect(res.statusCode).toBe(200);
   });
 });

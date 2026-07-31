@@ -138,6 +138,26 @@ export async function marcarInvitacionAceptada(q: Queryable, id: string): Promis
   await q.query('update identity_invitations set accepted_at = now() where id = $1', [id]);
 }
 
+// ── Restablecimiento de contraseña ──────────────────────────────────────────────────────────────
+export async function crearPasswordReset(q: Queryable, userId: string, tokenHash: string, ttlMin = 30): Promise<{ id: string; expiresAt: string }> {
+  const r = await q.query(`insert into identity_password_resets (id, user_id, token_hash, expires_at) values ($1,$2,$3, now() + ($4 || ' minutes')::interval) returning id, expires_at`, [randomUUID(), userId, tokenHash, String(ttlMin)]);
+  return { id: r.rows[0].id as string, expiresAt: iso(r.rows[0].expires_at) };
+}
+/** Reset vigente por hash (no usado, no vencido) + el usuario asociado. */
+export async function passwordResetVigentePorHash(q: Queryable, tokenHash: string): Promise<{ id: string; user: User } | null> {
+  const r = await q.query('select pr.id as pr_id, u.* from identity_password_resets pr join identity_users u on u.id = pr.user_id where pr.token_hash = $1 and pr.used_at is null and pr.expires_at > now()', [tokenHash]);
+  const row = r.rows[0];
+  if (!row) return null;
+  return { id: row.pr_id as string, user: aUser(row) };
+}
+export async function marcarPasswordResetUsado(q: Queryable, id: string): Promise<void> {
+  await q.query('update identity_password_resets set used_at = now() where id = $1', [id]);
+}
+/** Invalida los resets pendientes de un usuario (al emitir uno nuevo o tras cambiar la contraseña). */
+export async function invalidarResetsDeUsuario(q: Queryable, userId: string): Promise<void> {
+  await q.query('update identity_password_resets set used_at = now() where user_id = $1 and used_at is null', [userId]);
+}
+
 // ── Auditoría ─────────────────────────────────────────────────────────────────────────────────────
 export async function registrarAuditoria(q: Queryable, e: Omit<AuditEvent, 'id' | 'createdAt'>): Promise<void> {
   await q.query('insert into identity_audit_events (id, organization_id, actor_user_id, action, resource_type, resource_id, result, metadata) values ($1,$2,$3,$4,$5,$6,$7,$8)', [randomUUID(), e.organizationId, e.actorUserId, e.action, e.resourceType, e.resourceId, e.result, JSON.stringify(e.metadata ?? {})]);

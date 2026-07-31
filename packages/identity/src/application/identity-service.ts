@@ -56,14 +56,23 @@ export class IdentityService {
     return repo.crearUsuario(this.pool, e, displayName.trim(), hashPassword(password), 'ACTIVE');
   }
 
-  /** Login: mensaje genérico para no permitir enumeración de correos. Crea sesión. */
-  async login(email: string, password: string): Promise<{ user: User; token: string; session: Session }> {
+  /**
+   * Login: mensaje genérico para no permitir enumeración de correos. Crea una sesión nueva y
+   * **rota** la sesión presentada (`tokenSesionPrevio`): la revoca antes de emitir la nueva, de modo
+   * que nunca coexista una credencial anterior con la recién emitida (defensa ante fijación/reuso).
+   */
+  async login(email: string, password: string, opts?: { tokenSesionPrevio?: string }): Promise<{ user: User; token: string; session: Session }> {
     const e = normalizarEmail(email);
     const user = await repo.usuarioPorEmail(this.pool, e);
     const ok = user && user.status === 'ACTIVE' && verifyPassword(password, user.passwordHash);
     if (!user || !ok) {
       await this.audit({ organizationId: null, actorUserId: user?.id ?? null, action: 'auth.login.failed', resourceType: 'user', resourceId: null, result: 'FAILED', metadata: {} });
       throw new NoAutenticadoError();
+    }
+    // Rotación: revocar la sesión presentada (si la hubiera) antes de crear la nueva.
+    if (opts?.tokenSesionPrevio) {
+      const prev = await repo.sesionVigentePorHash(this.pool, hashToken(opts.tokenSesionPrevio));
+      if (prev) await repo.revocarSesion(this.pool, prev.session.id);
     }
     const { token, tokenHash } = generarTokenSesion();
     const session = await repo.crearSesion(this.pool, user.id, tokenHash);
@@ -102,7 +111,44 @@ export class IdentityService {
     if (!verifyPassword(actual, user.passwordHash)) throw new NoAutenticadoError('contraseña actual incorrecta');
     await repo.actualizarPasswordUsuario(this.pool, userId, hashPassword(nueva));
     await repo.revocarSesionesDeUsuario(this.pool, userId);
+    await repo.invalidarResetsDeUsuario(this.pool, userId);
     await this.audit({ organizationId: null, actorUserId: userId, action: 'auth.password.changed', resourceType: 'user', resourceId: userId, result: 'SUCCESS', metadata: {} });
+  }
+
+  // ── Restablecimiento de contraseña ────────────────────────────────────────────────────────────
+  /**
+   * Solicita un restablecimiento. Devuelve el token en claro SÓLO si el email corresponde a una
+   * cuenta activa; si no, devuelve null. El handler HTTP responde siempre igual (no enumera). El
+   * canal de entrega real (correo) es una integración futura; aquí el token se transporta fuera de
+   * banda (dev) y jamás se registra en auditoría ni logs.
+   */
+  async solicitarResetPassword(email: string): Promise<{ token: string; expiresAt: string } | null> {
+    const e = normalizarEmail(email);
+    const user = await repo.usuarioPorEmail(this.pool, e);
+    if (!user || user.status !== 'ACTIVE') {
+      await this.audit({ organizationId: null, actorUserId: user?.id ?? null, action: 'auth.password.reset_requested', resourceType: 'user', resourceId: null, result: 'DENIED', metadata: {} });
+      return null;
+    }
+    await repo.invalidarResetsDeUsuario(this.pool, user.id); // un solo reset vigente a la vez
+    const { token, tokenHash } = generarTokenSesion();
+    const { expiresAt } = await repo.crearPasswordReset(this.pool, user.id, tokenHash);
+    await this.audit({ organizationId: null, actorUserId: user.id, action: 'auth.password.reset_requested', resourceType: 'user', resourceId: user.id, result: 'SUCCESS', metadata: {} });
+    return { token, expiresAt };
+  }
+
+  /** Confirma el restablecimiento: valida token de un solo uso, fija la nueva contraseña y revoca
+   * TODAS las sesiones del usuario (la credencial anterior queda inutilizable). */
+  async confirmarResetPassword(token: string, nueva: string): Promise<void> {
+    if (typeof nueva !== 'string' || nueva.length < 8) throw new EntradaInvalidaError('la contraseña debe tener al menos 8 caracteres');
+    const r = await repo.passwordResetVigentePorHash(this.pool, hashToken(token));
+    if (!r) throw new NoEncontradoError('token de restablecimiento inválido o expirado');
+    await enTransaccion(this.pool, async (c) => {
+      await repo.actualizarPasswordUsuario(c, r.user.id, hashPassword(nueva));
+      await repo.marcarPasswordResetUsado(c, r.id);
+      await repo.invalidarResetsDeUsuario(c, r.user.id);
+      await repo.revocarSesionesDeUsuario(c, r.user.id);
+      await repo.registrarAuditoria(c, { organizationId: null, actorUserId: r.user.id, action: 'auth.password.reset_confirmed', resourceType: 'user', resourceId: r.user.id, result: 'SUCCESS', metadata: {} });
+    });
   }
 
   // ── Organizaciones y contexto ───────────────────────────────────────────────────────────────
@@ -223,7 +269,13 @@ export class IdentityService {
     const m = await this.membresiaDeLaOrg(ctx, membershipId);
     if (m.role === 'OWNER') throw new PoliticaError('no se puede suspender/revocar un OWNER');
     const upd = await repo.actualizarEstadoMembresia(this.pool, m.id, status);
-    await this.audit({ organizationId: ctx.organization.id, actorUserId: ctx.user.id, action: status === 'SUSPENDED' ? 'membership.suspended' : 'membership.revoked', resourceType: 'membership', resourceId: m.id, result: 'SUCCESS', metadata: {} });
+    // La garantía primaria es el chequeo EN VIVO de membresía activa en resolverContextoOrganizacion
+    // (bloqueo inmediato per-org). Adicionalmente, como defensa en profundidad, revocamos las
+    // sesiones del usuario afectado. Nota honesta: las sesiones son a nivel de usuario (no por org),
+    // por lo que esto también cierra sesiones en OTRAS organizaciones del mismo usuario; se prefiere
+    // el corte inmediato y explícito por sobre esa comodidad.
+    const revocadas = await repo.revocarSesionesDeUsuario(this.pool, m.userId);
+    await this.audit({ organizationId: ctx.organization.id, actorUserId: ctx.user.id, action: status === 'SUSPENDED' ? 'membership.suspended' : 'membership.revoked', resourceType: 'membership', resourceId: m.id, result: 'SUCCESS', metadata: { sesionesRevocadas: revocadas } });
     return upd;
   }
 

@@ -107,3 +107,30 @@ intentos sensibles rechazados relevantes (login fallido, acceso cruzado denegado
 ## Fuera de alcance de este macrobloque
 Meta/Google/LinkedIn/TikTok Ads, publicación/envío real, WhatsApp, pagos, gasto, ROI real,
 scraping, adquisición de datos personales externos, conexión con producción SmileFlow.
+
+## Incremento final (cierre de deudas del Macrobloque 1)
+
+Tras la auditoría, se implementó el endurecimiento y el cutover que faltaban:
+
+### D11 — Rotación de sesión y revocación por suspensión
+Login revoca la sesión presentada antes de emitir la nueva. Suspender/revocar una membresía revoca
+las sesiones del usuario (defensa en profundidad); la garantía primaria sigue siendo el chequeo EN
+VIVO de membresía activa por request. Sesiones a nivel de usuario: la revocación es global al
+usuario (tradeoff documentado).
+
+### D12 — Restablecimiento de contraseña (núcleo)
+Token de un solo uso, hasheado, con vencimiento; al confirmar revoca todas las sesiones. Respuesta
+uniforme (no enumera). Canal de correo = integración futura; `devToken` solo fuera de producción.
+
+### D13 — Rate limiting y cabeceras de seguridad
+Limitador en memoria por identificador (login: email+IP; reset: IP): 5/15 min → bloqueo 15 min (429).
+Cabeceras en todas las respuestas: `nosniff`, `DENY`, `no-referrer`, CSP restrictiva; HSTS solo con
+cookies `Secure`. Alcance del limitador: por proceso (multi-instancia ⇒ Redis, futuro).
+
+### D14 — Cutover de la superficie vertical a auth obligatoria (gateway)
+En condiciones normales (hay `pool`, legacy off) TODA la superficie vertical/experiencia se registra
+dentro de un **gateway autenticado**: sin sesión ⇒ 401; sin membresía en la organización indicada ⇒
+404. El gateway inyecta contexto autoritativo server-side (`x-organization-id`/`x-actor-id`/`x-scope`
+derivado del rol) y descarta lo que envíe el cliente. La confianza-en-cabeceras sin auth queda
+únicamente bajo el flag legacy en test/dev. Residual: ligar cada experiencia sintética a los datos
+reales del tenant (la seguridad ya está; la vinculación de datos es trabajo posterior).

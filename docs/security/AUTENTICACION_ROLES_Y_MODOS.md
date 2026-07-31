@@ -31,6 +31,48 @@ Token opaco (32 bytes, `base64url`); en PostgreSQL se guarda solo su **hash SHA-
 `httpOnly`, `SameSite=Lax`, `Secure` en producción, `Max-Age` (7 días). Revocables (individual y
 todas). Al cambiar la contraseña se revocan todas las sesiones. Nunca en `localStorage` ni en URL.
 
+- **Rotación en login:** al iniciar sesión se **revoca la sesión presentada** (si la hubiera) antes
+  de emitir la nueva; nunca coexiste una credencial anterior con la recién emitida.
+- **Revocación por suspensión:** suspender o revocar una membresía **revoca las sesiones** del
+  usuario afectado (defensa en profundidad). La garantía primaria es el chequeo EN VIVO de membresía
+  activa en cada request (bloqueo inmediato per-org). Nota honesta: las sesiones son a nivel de
+  usuario (no por organización), por lo que la revocación también cierra sesiones del mismo usuario
+  en otras organizaciones; se prefiere el corte explícito.
+
+## Restablecimiento de contraseña
+
+Token de **un solo uso**, hasheado (SHA-256), con vencimiento (30 min); un solo reset vigente por
+usuario. Al confirmar: fija la nueva contraseña, marca el token usado y **revoca todas las sesiones**.
+Respuesta uniforme en la solicitud (no enumera cuentas). El **canal de entrega (correo) es una
+integración futura**; hoy el token se transporta fuera de banda y, solo fuera de producción, se
+expone como `devToken` para pruebas. Nunca se registra el token en auditoría ni logs.
+
+## Rate limiting
+
+Limitador de intentos en memoria por identificador (login: email+IP; reset: IP): 5 intentos por
+ventana de 15 min → bloqueo temporal de 15 min (**429** con `Retry-After`). Alcance declarado: el
+estado vive en el proceso — efectivo en un despliegue de una instancia; multi-instancia requeriría un
+backend compartido (Redis), integración futura. No sustituye WAF ni protección de red.
+
+## Cabeceras de seguridad
+
+Todas las respuestas: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none';
+base-uri 'none'` (la API sirve JSON). `Strict-Transport-Security` solo cuando las cookies son
+`Secure` (producción tras TLS).
+
+## Cutover de la superficie vertical (auth obligatoria)
+
+En condiciones normales (hay `pool` y la demo legacy está deshabilitada) TODA la superficie
+vertical/experiencia se registra dentro de un **gateway autenticado**: sin sesión ⇒ **401**; sin
+membresía activa en la organización indicada (`x-organization-slug`) ⇒ **404**. El gateway inyecta
+contexto **autoritativo** server-side (`x-organization-id` = slug de la membresía, `x-actor-id` =
+usuario de la sesión, `x-scope` = alcance del rol) y descarta lo que envíe el cliente para esas
+cabeceras. La confianza-en-cabeceras SIN autenticar existe únicamente bajo el flag legacy en
+test/dev. Residual declarado: las experiencias con contexto sintético server-side quedan
+autenticadas (sesión + membresía) pero siguen operando sobre datos de demostración; su vinculación
+tenant-a-tenant por experiencia es trabajo posterior.
+
 ## Contraseñas
 
 `scrypt` (node:crypto, memory-hard; alternativa justificada a Argon2id para evitar dependencia
@@ -78,5 +120,7 @@ bootstrap. Incluye intentos sensibles rechazados relevantes.
 
 ## Fuera de alcance (macrobloques futuros)
 
-Migración dura de TODAS las rutas `/experience/*` a auth obligatoria (hoy demo-only tras el flag);
+Vinculación tenant-a-tenant de cada experiencia de contexto sintético (la SEGURIDAD ya exige sesión +
+membresía; falta ligar cada experiencia a los datos reales del tenant); entrega de correo real para
+invitaciones y reset; rate limiting con backend compartido (Redis) para multi-instancia;
 publicación/envío/gasto real; canales externos; autonomía real; atribución de ROI financiero real.

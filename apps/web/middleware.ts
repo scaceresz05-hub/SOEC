@@ -16,5 +16,5 @@ export function middleware(req: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ['/select-organization/:path*', '/settings/:path*'],
+  matcher: ['/select-organization/:path*', '/settings/:path*', '/organizaciones/:path*'],
 };

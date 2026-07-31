@@ -136,6 +136,7 @@ import type { Pool } from 'pg';
 import { IdentityError, IdentityService } from '@soec/identity';
 import { registerAuthRoutes } from './auth-routes';
 import { registerOrganizationsRoutes } from './organizations-routes';
+import { registrarVerticalesAutenticadas } from './vertical-gateway';
 
 export interface AppDeps {
   store: EventStore;
@@ -188,6 +189,19 @@ interface AppendBody {
 export function buildApp(deps: AppDeps): FastifyInstance {
   const app = Fastify({ logger: false });
   const clock = deps.clock ?? systemClock;
+  const secure = deps.secureCookies ?? false;
+
+  // ── Cabeceras de seguridad (todas las respuestas) ─────────────────────────────────────────────
+  // La API sirve JSON: CSP restrictiva, sin marcos, sin sniffing, sin referrer. HSTS sólo cuando las
+  // cookies son `Secure` (producción tras TLS), para no forzar HTTPS en dev local.
+  app.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('Referrer-Policy', 'no-referrer');
+    reply.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+    if (secure) reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    return payload;
+  });
 
   app.setErrorHandler((err, _req, reply) => {
     // Errores de identidad: llevan su propio código HTTP (401/403/404/409/400).
@@ -327,50 +341,42 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   app.get('/health', async () => ({ status: 'ok' }));
 
-  // ── Plano PRODUCTIVO: autenticación y organizaciones (siempre; exige sesión) ──────────────────
-  if (deps.pool) {
-    const identity = new IdentityService(deps.pool);
-    const secure = deps.secureCookies ?? false;
-    registerAuthRoutes(app, identity, secure);
-    registerOrganizationsRoutes(app, identity, !secure); // devToken de invitación solo fuera de prod
-  }
+  // Registra TODA la superficie vertical/experiencia sobre un destino (app raíz o ámbito del
+  // gateway). El contexto lo derivan las rutas de las cabeceras `x-organization-id/-actor-id/-scope`,
+  // que el gateway autenticado sobreescribe con valores autoritativos server-side.
+  const registrarSuperficieVertical = (target: FastifyInstance): void => {
+    registerModelRoutes(target, deps.store);
+    registerEceRoutes(target, deps.store);
+    registerOperationsRoutes(target, deps.store);
+    registerCapabilityRoutes(target, deps.store);
+    registerExperienceRoutes(target, deps.store);
+    registerOperationalRoutes(target, deps.store);
+    registerMarketingRoutes(target, deps.store);
+    registerContentRoutes(target, deps.store);
+    registerChannelRoutes(target, deps.store);
+    registerMeasurementRoutes(target, deps.store);
+    registerControlRoutes(target, deps.store);
+    registerPilotRoutes(target, deps.store);
+    registerDirectorWorkspaceRoutes(target, deps.store, clock);
+    registerDirectorAutonomoRoutes(target, deps.store, clock);
+    registerDirectorAutonomoProgramasRoutes(target, deps.store, clock);
+    registerEvaluacionRoutes(target, deps.store, clock);
 
-  // ── Superficie DEMO LEGACY (sin autenticación): SOLO si está explícitamente habilitada ────────
-  // La ausencia de sesión NUNCA autoriza; estas rutas existen únicamente para test/dev/demo cuando
-  // `legacyDemoAccess` es true. En producción NO se registran.
-  if (deps.legacyDemoAccess === true) {
-    registerModelRoutes(app, deps.store);
-    registerEceRoutes(app, deps.store);
-    registerOperationsRoutes(app, deps.store);
-    registerCapabilityRoutes(app, deps.store);
-    registerExperienceRoutes(app, deps.store);
-    registerOperationalRoutes(app, deps.store);
-    registerMarketingRoutes(app, deps.store);
-    registerContentRoutes(app, deps.store);
-    registerChannelRoutes(app, deps.store);
-    registerMeasurementRoutes(app, deps.store);
-    registerControlRoutes(app, deps.store);
-    registerPilotRoutes(app, deps.store);
-    registerDirectorWorkspaceRoutes(app, deps.store, clock);
-    registerDirectorAutonomoRoutes(app, deps.store, clock);
-    registerDirectorAutonomoProgramasRoutes(app, deps.store, clock);
-    registerEvaluacionRoutes(app, deps.store, clock);
-
-    app.post('/events', async (req, reply) => {
+    target.post('/events', async (req, reply) => {
       const ctx = contextFrom(req);
       const body = req.body as AppendBody;
       const result = await deps.store.append(ctx, body.streamId, body.expectedVersion, body.events);
       return reply.code(201).send({ version: result.version, events: result.events });
     });
 
-    app.get('/streams/:id', async (req, reply) => {
+    target.get('/streams/:id', async (req, reply) => {
       const ctx = contextFrom(req);
       const { id } = req.params as { id: string };
       const events = await deps.store.readStream(ctx, id);
       return reply.send({ streamId: id, version: events.length, events });
     });
 
-    app.get('/streams/:id/at', async (req, reply) => {
+    target.get('/streams/:id/at', async (req, reply) => {
       const ctx = contextFrom(req);
       const { id } = req.params as { id: string };
       const { asOf } = req.query as { asOf?: string };
@@ -379,13 +385,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       return reply.send({ streamId: id, asOf, events });
     });
 
-    app.post('/intelligence', async (req, reply) => {
+    target.post('/intelligence', async (req, reply) => {
       const ctx = contextFrom(req);
       const request = req.body as IntelligenceRequest;
       const product = await deps.intelligence.operate(ctx, request);
       // Un producto se ofrece al juicio humano; nunca es una decisión ejecutada.
       return reply.send({ product, awaitingHumanJudgment: true });
     });
+  };
+
+  // ── Plano PRODUCTIVO: autenticación y organizaciones (siempre; exige sesión) ──────────────────
+  if (deps.pool) {
+    const identity = new IdentityService(deps.pool);
+    registerAuthRoutes(app, identity, secure, { exposeResetToken: !secure });
+    registerOrganizationsRoutes(app, identity, !secure); // devToken de invitación solo fuera de prod
+
+    // CUTOVER (Macrobloque 1, incremento final): en condiciones normales (sin demo legacy), la
+    // superficie vertical se registra DENTRO del gateway autenticado ⇒ sin sesión 401, sin
+    // membresía 404. Ya no es alcanzable sin autenticación.
+    if (deps.legacyDemoAccess !== true) {
+      registrarVerticalesAutenticadas(app, identity, registrarSuperficieVertical);
+    }
+  }
+
+  // ── Superficie DEMO LEGACY (sin autenticación): SOLO bajo flag explícito, test/dev ────────────
+  // La ausencia de sesión NUNCA autoriza; estas rutas se re-exponen sin auth únicamente cuando
+  // `legacyDemoAccess` es true (prohibido en producción; el arranque lo bloquea).
+  if (deps.legacyDemoAccess === true) {
+    registrarSuperficieVertical(app);
   }
 
   return app;

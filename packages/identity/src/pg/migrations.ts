@@ -85,4 +85,20 @@ export const identityMigrations: ReadonlyArray<Migration> = [
       create index if not exists idx_identity_audit_org on identity_audit_events(organization_id, created_at desc);
     `,
   },
+  {
+    // Restablecimiento de contraseña: token de un solo uso, hasheado, con vencimiento. Nunca se
+    // guarda el token en claro; el canal de entrega (correo) es una integración futura.
+    id: '0002_password_resets',
+    sql: `
+      create table if not exists identity_password_resets (
+        id uuid primary key,
+        user_id uuid not null references identity_users(id) on delete cascade,
+        token_hash text not null unique,
+        expires_at timestamptz not null,
+        used_at timestamptz,
+        created_at timestamptz not null default now()
+      );
+      create index if not exists idx_identity_pwreset_user on identity_password_resets(user_id);
+    `,
+  },
 ];

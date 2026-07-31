@@ -55,6 +55,7 @@ export default function SelectOrganizationPage() {
             <button className="btn" onClick={() => router.push(`/director-autonomo/programas?org=${encodeURIComponent(o.slug)}`)}>
               {o.name}
             </button>{' '}
+            <a className="chip" href={`/organizaciones/${encodeURIComponent(o.slug)}`}>Administrar</a>{' '}
             <span className="chip">{o.role}</span>
             <span className="chip">{o.operationalMode}</span>
           </div>
