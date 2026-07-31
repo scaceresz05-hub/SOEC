@@ -95,12 +95,18 @@ export class ProgramaService {
 
   async agregarSegmento(ctx: RequestContext, programaId: string, segmento: Segmento, a: Attribution, o: string): Promise<Programa> {
     const p = await this.exigirPrograma(ctx, programaId);
+    if (p.segmentos.some((s) => s.id === segmento.id)) {
+      throw new ProgramaInvalidoError(`el segmento ya existe en el programa: ${segmento.id}`);
+    }
     await this.append(ctx, programaId, p.version, EVENTOS_PROGRAMA.segmentoAgregado, segmento, a, o);
     return this.cargar(ctx, programaId);
   }
 
   async agregarHipotesis(ctx: RequestContext, programaId: string, hipotesis: Hipotesis, a: Attribution, o: string): Promise<Programa> {
     const p = await this.exigirPrograma(ctx, programaId);
+    if (p.hipotesis.some((h) => h.id === hipotesis.id)) {
+      throw new ProgramaInvalidoError(`la hipótesis ya existe en el programa: ${hipotesis.id}`);
+    }
     if (!p.segmentos.some((s) => s.id === hipotesis.segmentoId)) {
       throw new ProgramaInvalidoError(`la hipótesis referencia un segmento inexistente: ${hipotesis.segmentoId}`);
     }

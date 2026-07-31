@@ -84,16 +84,31 @@ export class DirectorAutonomoProgramasExperience {
     return new ProgramaService(this.store).marcarListo(this.ctx(org), programaId, ATRIBUCION, this.clock.now());
   }
 
-  // ── Ciclo + modo seguro (autonomía por organización) ────────────────────────────────────────
+  // ── Ciclo + modo seguro (autonomía por ORGANIZACIÓN en V1) ──────────────────────────────────
   async ejecutarCiclo(org: string, programaId: string): Promise<VistaPrograma> {
     return new CicloProgramaService(this.store).ejecutarCiclo(this.ctx(org), programaId, ATRIBUCION, this.clock.now());
   }
-  async pausar(org: string, programaId: string, motivo: string): Promise<VistaPrograma | null> {
-    await new AutonomiaService(this.store).pausar(this.ctx(org), motivo || 'pausa del programa', ATRIBUCION, this.clock.now());
-    return this.estadoPrograma(org, programaId);
+
+  /**
+   * PAUSA a nivel de ORGANIZACIÓN (V1). La ruta lleva `programaId` solo como contexto de la
+   * solicitud: NO existe aislamiento de autonomía por programa. La respuesta lo declara
+   * explícitamente (`alcance: ORGANIZACION`) para que no pueda leerse como exclusiva del programa.
+   */
+  async pausar(org: string, programaId: string, motivo: string): Promise<RespuestaAutonomia> {
+    await new AutonomiaService(this.store).pausar(this.ctx(org), motivo || 'pausa de la organización', ATRIBUCION, this.clock.now());
+    return { alcance: 'ORGANIZACION', organizacionId: org, programaSolicitadoId: programaId, estadoAutonomia: 'PAUSADA', vista: await this.estadoPrograma(org, programaId) };
   }
-  async reanudar(org: string, programaId: string, actorHumano: string, motivo: string): Promise<VistaPrograma | null> {
-    await new AutonomiaService(this.store).reanudar(this.ctx(org), actorHumano, motivo || 'reanudación del programa', ATRIBUCION, this.clock.now());
-    return this.estadoPrograma(org, programaId);
+  async reanudar(org: string, programaId: string, actorHumano: string, motivo: string): Promise<RespuestaAutonomia> {
+    await new AutonomiaService(this.store).reanudar(this.ctx(org), actorHumano, motivo || 'reanudación de la organización', ATRIBUCION, this.clock.now());
+    return { alcance: 'ORGANIZACION', organizacionId: org, programaSolicitadoId: programaId, estadoAutonomia: 'ACTIVA', vista: await this.estadoPrograma(org, programaId) };
   }
+}
+
+/** Respuesta de pausa/reanudación: declara el alcance ORG-WIDE de la autonomía en V1. */
+export interface RespuestaAutonomia {
+  readonly alcance: 'ORGANIZACION';
+  readonly organizacionId: string;
+  readonly programaSolicitadoId: string;
+  readonly estadoAutonomia: 'PAUSADA' | 'ACTIVA';
+  readonly vista: VistaPrograma | null;
 }

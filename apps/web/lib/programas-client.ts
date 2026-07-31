@@ -1,4 +1,4 @@
-import type { OrgLista, ProgramaLista, VistaPrograma } from './programas-types';
+import type { OrgLista, ProgramaLista, RespuestaAutonomia, VistaPrograma } from './programas-types';
 
 async function jget<T>(url: string): Promise<T> {
   const res = await fetch(url, { cache: 'no-store' });
@@ -18,8 +18,8 @@ export const listarOrganizaciones = (): Promise<OrgLista> => jget('/api/programa
 export const listarProgramas = (org: string): Promise<ProgramaLista> => jget(`/api/programas/${encodeURIComponent(org)}/programas`);
 export const obtenerPrograma = (org: string, prog: string): Promise<VistaPrograma> => jget(`/api/programas/${encodeURIComponent(org)}/programas/${encodeURIComponent(prog)}`);
 export const ejecutarCiclo = (org: string, prog: string): Promise<VistaPrograma> => jpost(`/api/programas/${encodeURIComponent(org)}/programas/${encodeURIComponent(prog)}/ejecutar-ciclo`, {});
-export const pausar = (org: string, prog: string): Promise<VistaPrograma> => jpost(`/api/programas/${encodeURIComponent(org)}/programas/${encodeURIComponent(prog)}/pausar`, { motivo: 'pausa desde la UI' });
-export const reanudar = (org: string, prog: string, actorHumano: string): Promise<VistaPrograma> => jpost(`/api/programas/${encodeURIComponent(org)}/programas/${encodeURIComponent(prog)}/reanudar`, { actorHumano, motivo: 'reanudación desde la UI' });
+export const pausar = (org: string, prog: string): Promise<RespuestaAutonomia> => jpost(`/api/programas/${encodeURIComponent(org)}/programas/${encodeURIComponent(prog)}/pausar`, { motivo: 'pausa desde la UI' });
+export const reanudar = (org: string, prog: string, actorHumano: string): Promise<RespuestaAutonomia> => jpost(`/api/programas/${encodeURIComponent(org)}/programas/${encodeURIComponent(prog)}/reanudar`, { actorHumano, motivo: 'reanudación desde la UI' });
 
 /** Configura el programa de DEMOSTRACIÓN SmileFlow vía los endpoints reales (datos sintéticos). */
 export async function configurarSmileFlowDemo(): Promise<{ org: string; programaId: string }> {

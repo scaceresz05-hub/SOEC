@@ -75,6 +75,15 @@ pausa detiene la ejecución autónoma de esa org). **Autonomía por programa** q
 futuro documentado (requeriría extender `autonomiaStreamId` con un sufijo de programa, cambio menor
 y retrocompatible, pero fuera del mínimo de este bloque). Se señala para no confundir el alcance.
 
+**Aclaración post-auditoría (semántica no engañosa).** Las rutas con `programaId` conservan el
+contexto de la solicitud pero **NO aíslan autonomía por programa**. Para que esto no pueda leerse
+como exclusivo del programa: (a) las respuestas de `pausar`/`reanudar` declaran explícitamente
+`alcance: "ORGANIZACION"`, `organizacionId`, `programaSolicitadoId` y `estadoAutonomia`; (b) la UI
+muestra un aviso permanente ("La autonomía se controla por organización… Pausar detendrá todos los
+programas de esta organización") y confirma "Organización pausada/reanudada", nunca "Programa
+pausado". Ver también `docs/security/POSTURA_SEGURIDAD_PILOTO_V1.md` (postura de seguridad V1:
+runtime abierto sin autenticación multi-tenant; no apto para datos/inquilinos reales).
+
 ## Único cambio de dominio propuesto
 
 Añadir a `EntradaCampania` campos **opcionales** de vínculo (`programaId?`, `segmentoId?`,

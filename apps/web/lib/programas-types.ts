@@ -28,6 +28,15 @@ export interface CampaniaVista {
   ejecuciones: EjecucionVista[];
   roi: { valor: number | null; clasificacion: string; naturaleza: Naturaleza };
 }
+/** Respuesta de pausa/reanudación: la autonomía es por ORGANIZACIÓN en V1. */
+export interface RespuestaAutonomia {
+  alcance: 'ORGANIZACION';
+  organizacionId: string;
+  programaSolicitadoId: string;
+  estadoAutonomia: 'PAUSADA' | 'ACTIVA';
+  vista: VistaPrograma | null;
+}
+
 export interface VistaPrograma {
   organizacionActiva: string;
   programaId: string;

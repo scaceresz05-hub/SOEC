@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { configurarSmileFlowDemo, ejecutarCiclo, listarOrganizaciones, listarProgramas, obtenerPrograma, pausar, reanudar } from '../../../lib/programas-client';
 import type { VistaPrograma } from '../../../lib/programas-types';
+import { AVISO_PAUSA_ORG, AVISO_PILOTO_SIN_AUTH, AVISO_SIMULACION, MSG_ORG_PAUSADA, MSG_ORG_REANUDADA } from '../../../lib/programas-avisos';
 
 function Tag({ tipo }: { tipo: 'CONFIGURADO' | 'SIMULADO' | 'INFERIDO' | 'FALTANTE' }) {
   const cls = tipo === 'SIMULADO' ? 'badge--warn' : tipo === 'INFERIDO' ? 'badge--reserved' : tipo === 'FALTANTE' ? 'badge--danger' : 'badge--ok';
@@ -26,6 +27,7 @@ export default function ProgramasPage() {
   const [actor, setActor] = useState('');
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mensaje, setMensaje] = useState<string | null>(null);
 
   const refrescarOrgs = useCallback(async () => {
     const r = await listarOrganizaciones();
@@ -61,6 +63,7 @@ export default function ProgramasPage() {
   async function accion<T>(fn: () => Promise<T>, despues?: (r: T) => void) {
     setCargando(true);
     setError(null);
+    setMensaje(null);
     try {
       const r = await fn();
       despues?.(r);
@@ -78,9 +81,11 @@ export default function ProgramasPage() {
         Configura un programa de marketing para un negocio concreto y opera su ciclo autónomo. El
         ciclo de demostración fijo sigue en <Link href="/director-autonomo">/director-autonomo</Link>.
       </p>
-      <div className="aviso" style={{ marginBottom: 12 }}>
-        No se ejecutan campañas reales. No se realiza gasto real. Todos los resultados de esta
-        versión son <strong>simulados</strong> (modo <Tag tipo="SIMULADO" />).
+      <div className="aviso" style={{ marginBottom: 8 }}>
+        {AVISO_SIMULACION} (modo <Tag tipo="SIMULADO" />)
+      </div>
+      <div className="aviso aviso--danger" style={{ marginBottom: 12 }}>
+        {AVISO_PILOTO_SIN_AUTH}
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
@@ -105,12 +110,14 @@ export default function ProgramasPage() {
         </div>
         <div style={{ marginTop: 10 }}>
           <button className="btn" disabled={cargando || !programaId} onClick={() => void accion(() => ejecutarCiclo(org, programaId), setVista)}>Ejecutar ciclo (simulado)</button>{' '}
-          <button className="btn" disabled={cargando || !programaId} onClick={() => void accion(() => pausar(org, programaId), setVista)}>Pausar</button>{' '}
+          <button className="btn" disabled={cargando || !programaId} onClick={() => void accion(() => pausar(org, programaId), (r) => { setVista(r.vista); setMensaje(MSG_ORG_PAUSADA); })}>Pausar</button>{' '}
           <input placeholder="actor humano" value={actor} onChange={(e) => setActor(e.target.value)} style={{ width: 160 }} />{' '}
-          <button className="btn" disabled={cargando || !programaId || !actor.trim()} onClick={() => void accion(() => reanudar(org, programaId, actor.trim()), setVista)}>Reanudar</button>
+          <button className="btn" disabled={cargando || !programaId || !actor.trim()} onClick={() => void accion(() => reanudar(org, programaId, actor.trim()), (r) => { setVista(r.vista); setMensaje(MSG_ORG_REANUDADA); })}>Reanudar</button>
         </div>
+        <p className="muted small" style={{ marginTop: 8 }}>{AVISO_PAUSA_ORG}</p>
       </div>
 
+      {mensaje && <div className="aviso" style={{ marginBottom: 12 }}><strong>{mensaje}</strong></div>}
       {error && <div className="aviso aviso--danger" style={{ marginBottom: 12 }}>{error}</div>}
       {cargando && <p className="muted">Cargando…</p>}
 
