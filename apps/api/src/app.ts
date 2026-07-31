@@ -99,7 +99,14 @@ import { registerControlRoutes } from './control-routes';
 import { registerPilotRoutes } from './pilot-routes';
 import { registerDirectorWorkspaceRoutes } from './director-workspace-routes';
 import { registerDirectorAutonomoRoutes } from './director-autonomo-routes';
+import { registerDirectorAutonomoProgramasRoutes } from './director-autonomo-programas-routes';
 import { registerEvaluacionRoutes } from './evaluacion-routes';
+import {
+  NegocioInvalidoError,
+  ProgramaInvalidoError,
+  ProgramaNoEjecutableError,
+  SeparacionProgramaVioladaError,
+} from '@soec/programas';
 import {
   AutonomiaInvalidaError,
   AutonomiaNoAutoElevableError,
@@ -220,9 +227,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (
       err instanceof SeparacionCampaniaVioladaError ||
       err instanceof SeparacionContenidoVioladaError ||
-      err instanceof SeparacionEjecucionVioladaError
+      err instanceof SeparacionEjecucionVioladaError ||
+      err instanceof SeparacionProgramaVioladaError
     ) {
       return reply.code(403).send({ error: err.name, message: err.message });
+    }
+    if (err instanceof NegocioInvalidoError || err instanceof ProgramaInvalidoError || err instanceof ProgramaNoEjecutableError) {
+      return reply.code(422).send({ error: err.name, message: err.message });
     }
     if (
       err instanceof DecisionMktInvalidaError ||
@@ -313,6 +324,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   registerPilotRoutes(app, deps.store);
   registerDirectorWorkspaceRoutes(app, deps.store, clock);
   registerDirectorAutonomoRoutes(app, deps.store, clock);
+  registerDirectorAutonomoProgramasRoutes(app, deps.store, clock);
   registerEvaluacionRoutes(app, deps.store, clock);
 
   app.post('/events', async (req, reply) => {

@@ -19,6 +19,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <Link href="/evaluacion">Evaluación</Link>
             <Link href="/director-workspace">Director Workspace</Link>
             <Link href="/director-autonomo">Director Autónomo</Link>
+            <Link href="/director-autonomo/programas">Programas</Link>
             <Link href="/control">Centro de control</Link>
             <Link href="/piloto">Piloto</Link>
             <Link href="/marketing">Marketing</Link>
