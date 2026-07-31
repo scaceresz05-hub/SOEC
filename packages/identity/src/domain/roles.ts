@@ -24,36 +24,55 @@ export type Permission =
   | 'budget.manage'
   | 'execution.read'
   | 'execution.approve'
+  | 'execution.simulate'
   | 'analytics.read'
   | 'audit.read'
-  | 'operational_mode.manage';
+  | 'operational_mode.manage'
+  // Motor de Generación Autónoma de Marketing (Macrobloque 3): permisos atómicos de la superficie de
+  // generación gobernada. Las lecturas son transversales; start/retry/simulate/approve/manage son acciones.
+  | 'generation.read'
+  | 'generation.start'
+  | 'generation.retry'
+  | 'creative.read'
+  | 'content.read'
+  | 'experiment.read'
+  | 'calendar.read'
+  | 'calendar.manage';
 
 export type Role = 'OWNER' | 'ADMIN' | 'MARKETING_MANAGER' | 'MARKETING_OPERATOR' | 'ANALYST' | 'VIEWER';
 
 export const ROLES: readonly Role[] = ['OWNER', 'ADMIN', 'MARKETING_MANAGER', 'MARKETING_OPERATOR', 'ANALYST', 'VIEWER'];
 
-const LECTURA: readonly Permission[] = ['organization.read', 'members.read', 'business.read', 'program.read', 'campaign.read', 'budget.read', 'execution.read', 'analytics.read'];
+const LECTURA: readonly Permission[] = [
+  'organization.read', 'members.read', 'business.read', 'program.read', 'campaign.read', 'budget.read',
+  'execution.read', 'analytics.read',
+  // Lecturas de la superficie de generación (todos los roles pueden observar el estado generado).
+  'generation.read', 'creative.read', 'content.read', 'experiment.read', 'calendar.read',
+];
+
+/** Acciones del motor de generación reservadas a quien opera campañas (no a los roles de solo lectura). */
+const GENERACION_OPERAR: readonly Permission[] = ['generation.start', 'generation.retry', 'calendar.manage'];
 
 /** Mapa rol → permisos. Único punto de expansión. */
 const MAPA: Readonly<Record<Role, readonly Permission[]>> = {
   OWNER: [
-    ...LECTURA,
+    ...LECTURA, ...GENERACION_OPERAR,
     'organization.manage', 'members.invite', 'members.manage', 'business.manage', 'program.manage',
-    'campaign.manage', 'content.review', 'content.approve', 'budget.manage', 'execution.approve',
+    'campaign.manage', 'content.review', 'content.approve', 'budget.manage', 'execution.approve', 'execution.simulate',
     'audit.read', 'operational_mode.manage',
   ],
   ADMIN: [
-    ...LECTURA,
+    ...LECTURA, ...GENERACION_OPERAR,
     'organization.manage', 'members.invite', 'members.manage', 'business.manage', 'program.manage',
-    'campaign.manage', 'content.review', 'content.approve', 'budget.manage', 'execution.approve',
+    'campaign.manage', 'content.review', 'content.approve', 'budget.manage', 'execution.approve', 'execution.simulate',
     'audit.read',
   ],
   MARKETING_MANAGER: [
-    ...LECTURA,
+    ...LECTURA, ...GENERACION_OPERAR,
     'business.manage', 'program.manage', 'campaign.manage', 'content.review', 'content.approve',
-    'budget.manage', 'execution.approve',
+    'budget.manage', 'execution.approve', 'execution.simulate',
   ],
-  MARKETING_OPERATOR: [...LECTURA, 'program.manage', 'campaign.manage', 'content.review'],
+  MARKETING_OPERATOR: [...LECTURA, ...GENERACION_OPERAR, 'program.manage', 'campaign.manage', 'content.review'],
   ANALYST: [...LECTURA, 'audit.read'],
   VIEWER: [...LECTURA],
 };
