@@ -25,6 +25,10 @@ const DIA_MS = 86_400_000;
 /** Versión de las piezas creadas por el orquestador: se emiten una vez (contenido inmutable en este flujo). */
 const VERSION_PIEZA = 1;
 
+/** Piezas generadas por campaña (formatos distintos del mismo mensaje). */
+const PIEZAS_POR_CAMPANIA = 2;
+const FORMATOS = ['correo', 'anuncio_corto', 'publicacion_educativa'] as const;
+
 export type ResultadoOrquestacion =
   | { readonly tipo: 'PROPUESTA'; readonly vista: VistaPrograma }
   | { readonly tipo: 'PENDIENTE_APROBACION'; readonly faltantes: readonly string[] }
@@ -133,12 +137,13 @@ export class OrquestadorProgramaGenerativo {
         campania = conCampania.campanias[conCampania.campanias.length - 1]!;
       }
       const campaignId = campania.campaignId;
-      // Reusar la pieza si la campaña ya tiene contenido; si no, generarla por el puerto neutral.
-      let piezaBaseId = campania.contenidoIds[campania.contenidoIds.length - 1];
-      if (!piezaBaseId) {
-        const ref = versionPorHipotesis.get(h.id);
-        const estrategiaRef = ref ? `${ref.id}@v${ref.version}` : `estrategia:${programaId}`;
-        const cuerpo = await this.generarCuerpo(ctx, brief, estrategia, params.idioma, estrategiaRef);
+      // Generar PIEZAS_POR_CAMPANIA piezas por el puerto neutral (idempotente: sólo se completan las que
+      // falten, reusando las ya persistidas ante un reintento tras un fallo parcial).
+      const ref = versionPorHipotesis.get(h.id);
+      const estrategiaRef = ref ? `${ref.id}@v${ref.version}` : `estrategia:${programaId}`;
+      let piezas = [...campania.contenidoIds];
+      for (let f = piezas.length; f < PIEZAS_POR_CAMPANIA; f++) {
+        const cuerpo = await this.generarCuerpo(ctx, brief, estrategia, params.idioma, `${estrategiaRef}|formato:${FORMATOS[f] ?? `f${f}`}`, FORMATOS[f]);
         if (cuerpo === null) return { tipo: 'ABSTENCION', faltantes: ['la generación de contenido no produjo una salida válida (rechazada por validación)'] };
         const conContenido = await this.programas.vincularContenido(
           ctx,
@@ -148,17 +153,20 @@ export class OrquestadorProgramaGenerativo {
           a,
           o,
         );
-        const refCamp = conContenido.campanias.find((c) => c.campaignId === campaignId);
-        piezaBaseId = refCamp?.contenidoIds[refCamp.contenidoIds.length - 1];
+        piezas = [...(conContenido.campanias.find((c) => c.campaignId === campaignId)?.contenidoIds ?? piezas)];
       }
+      const piezaBaseId = piezas[0];
       if (piezaBaseId) {
-        // Tramo E: dos variantes A/B que cambian UNA sola variable (gancho), constantes compartidas.
+        // Tramo E: dos variantes A/B sobre la pieza base que cambian UNA sola variable (gancho).
         const constantes = ['cta', 'oferta', 'audiencia'];
         await this.ab.agregarVariante(ctx, piezaBaseId, { varianteId: `${piezaBaseId}-A`, hipotesisQuePrueba: h.propuesta, elementoModificado: 'gancho', diferenciaControlada: `gancho A: ${estrategia.gancho}`, elementosConstantes: constantes, criterioExito: h.criterioContinuacion }, a, o);
         await this.ab.agregarVariante(ctx, piezaBaseId, { varianteId: `${piezaBaseId}-B`, hipotesisQuePrueba: h.propuesta, elementoModificado: 'gancho', diferenciaControlada: `gancho B: ${estrategia.mensajesClave[1] ?? estrategia.concepto}`, elementosConstantes: constantes, criterioExito: h.criterioContinuacion }, a, o);
         // Tramo F: una entrada de calendario por pieza, con fecha determinista según frecuencia.
-        const fechaHora = new Date(Date.parse(o) + (idxH + 1) * Math.max(1, params.frecuenciaDias) * DIA_MS).toISOString();
-        await this.calendario.agregarEntrada(ctx, programaId, { entradaId: `cal-${piezaBaseId}`, fechaHora, canal, piezaId: piezaBaseId, objetivo: params.objetivoMarketing, segmento: h.segmentoId }, a, o);
+        for (let i = 0; i < piezas.length; i++) {
+          const pieza = piezas[i]!;
+          const fechaHora = new Date(Date.parse(o) + ((idxH * PIEZAS_POR_CAMPANIA + i) + 1) * Math.max(1, params.frecuenciaDias) * DIA_MS).toISOString();
+          await this.calendario.agregarEntrada(ctx, programaId, { entradaId: `cal-${pieza}`, fechaHora, canal, piezaId: pieza, objetivo: params.objetivoMarketing, segmento: h.segmentoId }, a, o);
+        }
       }
     }
 
@@ -197,7 +205,8 @@ export class OrquestadorProgramaGenerativo {
   }
 
   /** Tramo C: genera el cuerpo por el puerto neutral y lo VALIDA; devuelve null si es inválido. */
-  private async generarCuerpo(ctx: RequestContext, brief: BriefComercial, estrategia: EstrategiaCreativa, idioma: string, estrategiaRef: string): Promise<string | null> {
+  private async generarCuerpo(ctx: RequestContext, brief: BriefComercial, estrategia: EstrategiaCreativa, idioma: string, estrategiaRef: string, formato?: string): Promise<string | null> {
+    const mensajePrincipal = formato ? `${brief.mensajePrincipal} [formato: ${formato}]` : brief.mensajePrincipal;
     const solicitud: SolicitudGenerativa = {
       tarea: 'pieza_fuente',
       contexto: {
@@ -205,7 +214,7 @@ export class OrquestadorProgramaGenerativo {
         problemaCliente: brief.problemaCliente,
         propuestaValor: brief.propuestaValor,
         productoServicio: brief.producto,
-        mensajePrincipal: brief.mensajePrincipal,
+        mensajePrincipal,
         llamadaAccion: estrategia.mensajesClave[0] ?? 'Solicita más información',
       },
       esquemaSalida: ['cuerpo'],
