@@ -82,3 +82,44 @@ describe('API · restablecimiento de contraseña (extremo a extremo)', () => {
     expect(req.json().devToken).toBeUndefined();
   });
 });
+
+describe('API · rate limit agregado por IP (F-06)', () => {
+  it('muchos emails distintos desde la misma IP → 429 por el límite global de IP', async () => {
+    // ipMax bajo para la prueba; loginMax alto para aislar el límite por IP del específico por email.
+    const app = buildApp({ store: new InMemoryEventStore(), intelligence: new DeterministicIntelligenceProvider(), pool, rateLimit: { ipMax: 3, loginMax: 20 } });
+    for (let i = 0; i < 3; i++) {
+      const r = await app.inject({ method: 'POST', url: '/auth/login', headers: H, payload: { email: `spray${i}@x.com`, password: 'Password123' } });
+      expect(r.statusCode).toBe(401); // email inexistente → credenciales inválidas
+    }
+    // El 4º (email aún distinto) queda bloqueado por el agregado por IP.
+    const bloqueado = await app.inject({ method: 'POST', url: '/auth/login', headers: H, payload: { email: 'spray99@x.com', password: 'Password123' } });
+    expect(bloqueado.statusCode).toBe(429);
+    expect(bloqueado.headers['retry-after']).toBeDefined();
+  });
+});
+
+describe('API · errores de contraseña uniformes (F-04)', () => {
+  it('contraseña demasiado corta → 400 (no 500) en registro', async () => {
+    const app = makeApp();
+    const r = await app.inject({ method: 'POST', url: '/auth/register', headers: H, payload: { email: 'x@x.com', displayName: 'X', password: 'corta' } });
+    expect(r.statusCode).toBe(400);
+  });
+
+  it('contraseña excesivamente larga → 400 en registro', async () => {
+    const app = makeApp();
+    const r = await app.inject({ method: 'POST', url: '/auth/register', headers: H, payload: { email: 'y@x.com', displayName: 'Y', password: 'a'.repeat(200) } });
+    expect(r.statusCode).toBe(400);
+  });
+});
+
+describe('API · anti-enumeración temporal en login (F-05)', () => {
+  it('el login de un email inexistente ejecuta verificación (tiempo comparable) y da 401', async () => {
+    const app = makeApp();
+    const t0 = process.hrtime.bigint();
+    const r = await app.inject({ method: 'POST', url: '/auth/login', headers: H, payload: { email: 'fantasma@x.com', password: 'Password123' } });
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    expect(r.statusCode).toBe(401);
+    // Evidencia estructural de que se ejecutó una derivación scrypt (no un short-circuit): > 80 ms.
+    expect(ms).toBeGreaterThan(80);
+  });
+});

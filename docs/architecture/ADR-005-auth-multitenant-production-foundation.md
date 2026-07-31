@@ -134,3 +134,28 @@ dentro de un **gateway autenticado**: sin sesión ⇒ 401; sin membresía en la 
 derivado del rol) y descarta lo que envíe el cliente. La confianza-en-cabeceras sin auth queda
 únicamente bajo el flag legacy en test/dev. Residual: ligar cada experiencia sintética a los datos
 reales del tenant (la seguridad ya está; la vinculación de datos es trabajo posterior).
+
+## Correcciones post-auditoría (PR #3)
+
+Tras la reauditoría del PR #3 se corrigieron los hallazgos F-01..F-06 (ver
+`docs/security/AUTENTICACION_ROLES_Y_MODOS.md` para el detalle operativo):
+
+### D15 — Endurecimiento de credenciales y CSRF
+- **F-01 (CSRF):** hook global que valida `Origin`/`Referer` en métodos mutativos contra una allowlist
+  explícita (`SOEC_ALLOWED_ORIGINS`); origen ajeno → 403; en producción la lista es obligatoria (el
+  arranque falla si está vacía). Defensa en profundidad sobre `SameSite=Lax`; el origen permitido
+  nunca se deriva del request.
+- **F-02 (scrypt):** parámetros a `N=2^17` (piso OWASP), formato versionado `scrypt$v2$...`,
+  compatibilidad de verificación con hashes `v1` y rehash oportunista al login.
+- **F-03 (longitud):** contraseñas 8..128 validadas antes de derivar (anti-DoS de CPU), en todas las
+  rutas de contraseña incluido bootstrap.
+- **F-04 (errores):** contraseña inválida ⇒ `EntradaInvalidaError → 400` uniforme (antes 500 en
+  registro/cambio).
+- **F-05 (enumeración temporal):** verificación scrypt contra un hash señuelo estable cuando el usuario
+  no existe/está inactivo; respuesta genérica idéntica.
+- **F-06 (rate limiting):** además del límite por `(email,IP)`, un límite **agregado por IP** en
+  login/registro que frena password spraying; valores configurables (`SOEC_RL_*`).
+
+Deuda declarada (no bloqueante, documentada): protección append-only a nivel de base de datos (F-07);
+rate limiting distribuido (Redis) para despliegue horizontal; correo real para invitaciones/reset;
+hallazgos informativos F-08..F-12.

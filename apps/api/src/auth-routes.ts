@@ -19,23 +19,50 @@ function ipDe(req: FastifyRequest): string {
   return req.ip || 'desconocida';
 }
 
+/** Parámetros de rate limiting (configurables; ver defaults). El limitador es en-memoria por proceso. */
+export interface AuthRateLimitConfig {
+  /** Intentos fallidos de login por (email,IP) antes de bloquear. Default 5. */
+  readonly loginMax?: number;
+  /** Intentos agregados por IP (login/registro) antes de bloquear — frena password spraying. Default 30. */
+  readonly ipMax?: number;
+  /** Solicitudes de reset por IP antes de bloquear. Default 5. */
+  readonly resetMax?: number;
+  /** Ventana y bloqueo, en minutos. Default 15. */
+  readonly windowMin?: number;
+}
+
 export interface AuthRoutesOpts {
   /** Expone el token de reset/invitación en la respuesta (solo fuera de producción). */
   readonly exposeResetToken?: boolean;
   /** Reloj inyectable para los limitadores (tests deterministas). */
   readonly now?: () => number;
+  /** Parámetros de rate limiting (F-06). */
+  readonly rateLimit?: AuthRateLimitConfig;
 }
 
 export function registerAuthRoutes(app: FastifyInstance, svc: IdentityService, secure: boolean, opts: AuthRoutesOpts = {}): void {
   const exposeResetToken = opts.exposeResetToken ?? !secure;
-  // 5 intentos por 15 min → bloqueo de 15 min. Clave: email+IP para login, IP para reset.
   const now = opts.now;
-  const loginLimiter = new RateLimiter({ maxIntentos: 5, ventanaMs: 15 * 60_000, bloqueoMs: 15 * 60_000, ...(now ? { now } : {}) });
-  const resetLimiter = new RateLimiter({ maxIntentos: 5, ventanaMs: 15 * 60_000, bloqueoMs: 15 * 60_000, ...(now ? { now } : {}) });
+  const rl = opts.rateLimit ?? {};
+  const ventanaMs = (rl.windowMin ?? 15) * 60_000;
+  const mk = (maxIntentos: number) => new RateLimiter({ maxIntentos, ventanaMs, bloqueoMs: ventanaMs, ...(now ? { now } : {}) });
+  // Límite ESPECÍFICO por (email,IP): frena fuerza bruta contra una cuenta concreta.
+  const loginLimiter = mk(rl.loginMax ?? 5);
+  // Límite AGREGADO por IP (login+registro): frena password spraying (1 clave × N correos) desde una IP.
+  const ipLimiter = mk(rl.ipMax ?? 30);
+  // Límite de solicitudes de reset por IP.
+  const resetLimiter = mk(rl.resetMax ?? 5);
+
+  const bloqueado = (reply: import('fastify').FastifyReply, seg: number) =>
+    reply.code(429).header('retry-after', String(seg)).send({ error: 'DEMASIADOS_INTENTOS', message: 'demasiados intentos; intente más tarde' });
 
   app.post('/auth/register', async (req, reply) => {
     const b = (req.body ?? {}) as { email?: string; displayName?: string; password?: string };
     if (falta(b.email) || falta(b.displayName) || falta(b.password)) return reply.code(400).send({ error: 'ENTRADA_INVALIDA', message: 'email, displayName y password requeridos' });
+    const ip = ipDe(req);
+    const estadoIp = ipLimiter.revisar(ip);
+    if (!estadoIp.permitido) return bloqueado(reply, estadoIp.retryAfterSeg);
+    ipLimiter.registrarFallo(ip); // cada registro cuenta para el agregado por IP (anti-abuso)
     const user = await svc.registrar(b.email!, b.displayName!, b.password!);
     return reply.code(201).send({ user: userPublico(user) });
   });
@@ -43,17 +70,22 @@ export function registerAuthRoutes(app: FastifyInstance, svc: IdentityService, s
   app.post('/auth/login', async (req, reply) => {
     const b = (req.body ?? {}) as { email?: string; password?: string };
     if (falta(b.email) || falta(b.password)) return reply.code(400).send({ error: 'ENTRADA_INVALIDA', message: 'email y password requeridos' });
-    const clave = `${b.email!.trim().toLowerCase()}|${ipDe(req)}`;
-    const estado = loginLimiter.revisar(clave);
-    if (!estado.permitido) return reply.code(429).header('retry-after', String(estado.retryAfterSeg)).send({ error: 'DEMASIADOS_INTENTOS', message: 'demasiados intentos; intente más tarde' });
+    const ip = ipDe(req);
+    const clave = `${b.email!.trim().toLowerCase()}|${ip}`;
+    // Se revisan AMBOS límites: el específico por (email,IP) y el agregado por IP (anti-spraying).
+    const eEmail = loginLimiter.revisar(clave);
+    if (!eEmail.permitido) return bloqueado(reply, eEmail.retryAfterSeg);
+    const eIp = ipLimiter.revisar(ip);
+    if (!eIp.permitido) return bloqueado(reply, eIp.retryAfterSeg);
     try {
       // Rotación: si llega una cookie de sesión previa, se revoca al emitir la nueva.
       const { user, token } = await svc.login(b.email!, b.password!, { tokenSesionPrevio: tokenSesionDe(req) ?? '' });
-      loginLimiter.registrarExito(clave);
+      loginLimiter.registrarExito(clave); // el éxito limpia el contador específico; el agregado por IP persiste
       ponerCookieSesion(reply, token, secure);
       return reply.send({ user: userPublico(user) });
     } catch (err) {
       loginLimiter.registrarFallo(clave);
+      ipLimiter.registrarFallo(ip);
       throw err;
     }
   });

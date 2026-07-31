@@ -134,9 +134,10 @@ import { EvaluacionInvalidaError, EsquemaEvaluacionDesconocidoError } from '@soe
 import { type Clock, systemClock } from '@soec/event-store';
 import type { Pool } from 'pg';
 import { IdentityError, IdentityService } from '@soec/identity';
-import { registerAuthRoutes } from './auth-routes';
+import { registerAuthRoutes, type AuthRateLimitConfig } from './auth-routes';
 import { registerOrganizationsRoutes } from './organizations-routes';
 import { registrarVerticalesAutenticadas } from './vertical-gateway';
+import { registrarProteccionCsrf } from './csrf';
 
 export interface AppDeps {
   store: EventStore;
@@ -153,6 +154,10 @@ export interface AppDeps {
   legacyDemoAccess?: boolean;
   /** Cookies `Secure` (producción). */
   secureCookies?: boolean;
+  /** Orígenes permitidos para operaciones mutativas (protección CSRF F-01). Vacío = sin navegador. */
+  allowedOrigins?: readonly string[];
+  /** Configuración de rate limiting de autenticación (F-06). Usa defaults si se omite. */
+  rateLimit?: AuthRateLimitConfig;
 }
 
 function header(req: FastifyRequest, name: string): string | undefined {
@@ -202,6 +207,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (secure) reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     return payload;
   });
+
+  // ── Protección CSRF (F-01): valida Origin/Referer en métodos mutativos, global ────────────────
+  registrarProteccionCsrf(app, deps.allowedOrigins ?? []);
 
   app.setErrorHandler((err, _req, reply) => {
     // Errores de identidad: llevan su propio código HTTP (401/403/404/409/400).
@@ -397,7 +405,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // ── Plano PRODUCTIVO: autenticación y organizaciones (siempre; exige sesión) ──────────────────
   if (deps.pool) {
     const identity = new IdentityService(deps.pool);
-    registerAuthRoutes(app, identity, secure, { exposeResetToken: !secure });
+    registerAuthRoutes(app, identity, secure, { exposeResetToken: !secure, ...(deps.rateLimit ? { rateLimit: deps.rateLimit } : {}) });
     registerOrganizationsRoutes(app, identity, !secure); // devToken de invitación solo fuera de prod
 
     // CUTOVER (Macrobloque 1, incremento final): en condiciones normales (sin demo legacy), la

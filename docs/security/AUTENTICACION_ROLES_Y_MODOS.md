@@ -49,10 +49,16 @@ expone como `devToken` para pruebas. Nunca se registra el token en auditoría ni
 
 ## Rate limiting
 
-Limitador de intentos en memoria por identificador (login: email+IP; reset: IP): 5 intentos por
-ventana de 15 min → bloqueo temporal de 15 min (**429** con `Retry-After`). Alcance declarado: el
-estado vive en el proceso — efectivo en un despliegue de una instancia; multi-instancia requeriría un
-backend compartido (Redis), integración futura. No sustituye WAF ni protección de red.
+Limitador de intentos en memoria, configurable (`SOEC_RL_*`), con dos capas:
+- **Específica por `(email, IP)`** en login: 5/15 min → bloqueo 15 min (fuerza bruta contra una cuenta).
+- **Agregada por `IP`** en login y registro: 30/15 min → bloqueo 15 min (**frena password spraying**:
+  una contraseña contra muchos correos desde una misma IP).
+- **Reset por `IP`**: 5/15 min.
+
+Todas responden **429** con `Retry-After`. `X-Forwarded-For` **no** se confía (no hay `trustProxy`):
+`req.ip` es la IP del socket. Alcance declarado: el estado vive en el proceso — efectivo en un
+despliegue de **una instancia**; multi-instancia requerirá un backend compartido (Redis), integración
+futura. No sustituye WAF ni protección de red.
 
 ## Cabeceras de seguridad
 
@@ -76,9 +82,34 @@ tenant-a-tenant por experiencia es trabajo posterior.
 ## Contraseñas
 
 `scrypt` (node:crypto, memory-hard; alternativa justificada a Argon2id para evitar dependencia
-nativa). Sal aleatoria por contraseña (16 bytes), comparación en tiempo constante
-(`timingSafeEqual`), formato versionado `scrypt$N$r$p$salt$hash`, mínimo 8 caracteres. Nunca texto
-plano ni cifrado reversible; nunca se registra la contraseña ni el hash.
+nativa). Sal aleatoria por contraseña (16 bytes), comparación en tiempo constante (`timingSafeEqual`).
+Nunca texto plano ni cifrado reversible; nunca se registra la contraseña ni el hash.
+
+- **Parámetros (v2):** `N=2^17 (131072)`, `r=8`, `p=1`, `keylen=64` — piso OWASP vigente para scrypt
+  (≈0,2 s por operación). `maxmem` se eleva a 256 MB porque scrypt requiere ≈128·N·r bytes (~128 MB).
+- **Formato versionado:** `scrypt$v2$N$r$p$saltHex$hashHex`. Se mantiene **compatibilidad de
+  verificación** con hashes `v1` antiguos (`scrypt$N$r$p$salt$hash`, `N=2^14`). Tras un login correcto
+  con un hash desactualizado se hace **rehash oportunista** a v2 (best-effort; nunca bloquea el login).
+- **Límites de longitud:** mínimo 8, **máximo 128** caracteres, validados ANTES de derivar (evita DoS
+  de CPU por entradas enormes). Aplica a registro, cambio, confirmación de reset y bootstrap. Toda
+  contraseña inválida produce `EntradaInvalidaError → 400` (nunca 500) de forma uniforme.
+
+## Política de login (anti-enumeración)
+
+Respuesta y código genéricos (`401 credenciales inválidas`) para: usuario inexistente, contraseña
+incorrecta y cuenta inactiva. El login ejecuta **siempre** una verificación scrypt — contra el hash
+real o contra un **hash señuelo estable** cuando el usuario no existe/está inactivo — para no revelar
+por temporización si un correo está registrado. No se registra el correo intentado ni la contraseña.
+
+## Protección CSRF
+
+Defensa en profundidad además de `SameSite=Lax`. Un hook global valida, en métodos **mutativos**
+(POST/PUT/PATCH/DELETE), el `Origin` (o el `Referer` en su defecto) contra una **allowlist explícita**
+(`SOEC_ALLOWED_ORIGINS`). Reglas: origen permitido → continúa; origen ajeno → **403**; sin Origin ni
+Referer → continúa (cliente no-navegador: server-to-server, tests). Los métodos seguros (GET/HEAD) no
+se filtran. El origen permitido **jamás** se deriva del request (no se confía en `Host`/`X-Forwarded-Host`),
+no hay comodines, y la protección es global (cubre `/auth`, `/organizations` y `/experience`). En
+**producción la allowlist es obligatoria** (el arranque falla si está vacía).
 
 ## Roles y permisos
 

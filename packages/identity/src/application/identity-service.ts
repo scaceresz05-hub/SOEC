@@ -7,7 +7,7 @@ import type { Pool, PoolClient } from 'pg';
 import * as repo from '../pg/repositories';
 import type { AuditEvent, Membership, Organization, Session, User } from '../domain/entities';
 import { generarTokenSesion, hashToken, normalizarEmail, slugValido } from '../domain/entities';
-import { hashPassword, verifyPassword } from '../domain/password';
+import { HASH_SEÑUELO, hashPassword, necesitaRehash, validarLongitudPassword, verifyPassword } from '../domain/password';
 import { type Permission, esRol, permisosDeRol, rolTienePermiso } from '../domain/roles';
 import { esModo, modoActivable } from '../domain/modo';
 import { ConflictoError, EntradaInvalidaError, NoAutenticadoError, NoEncontradoError, PoliticaError, SinPermisoError } from '../domain/errors';
@@ -64,10 +64,21 @@ export class IdentityService {
   async login(email: string, password: string, opts?: { tokenSesionPrevio?: string }): Promise<{ user: User; token: string; session: Session }> {
     const e = normalizarEmail(email);
     const user = await repo.usuarioPorEmail(this.pool, e);
-    const ok = user && user.status === 'ACTIVE' && verifyPassword(password, user.passwordHash);
-    if (!user || !ok) {
+    // F-05: ejecutar SIEMPRE una verificación scrypt (contra el hash real o el señuelo estable) para
+    // no revelar por temporización si el correo existe o si la cuenta está activa.
+    const passwordOk = verifyPassword(password, user ? user.passwordHash : HASH_SEÑUELO);
+    const ok = !!user && user.status === 'ACTIVE' && passwordOk;
+    if (!ok) {
       await this.audit({ organizationId: null, actorUserId: user?.id ?? null, action: 'auth.login.failed', resourceType: 'user', resourceId: null, result: 'FAILED', metadata: {} });
       throw new NoAutenticadoError();
+    }
+    // F-02: rehash oportunista a la parametrización vigente (v2) tras un login correcto; nunca bloquea.
+    if (necesitaRehash(user.passwordHash)) {
+      try {
+        await repo.actualizarPasswordUsuario(this.pool, user.id, hashPassword(password));
+      } catch {
+        /* el rehash es best-effort; no debe impedir el login */
+      }
     }
     // Rotación: revocar la sesión presentada (si la hubiera) antes de crear la nueva.
     if (opts?.tokenSesionPrevio) {
@@ -139,7 +150,7 @@ export class IdentityService {
   /** Confirma el restablecimiento: valida token de un solo uso, fija la nueva contraseña y revoca
    * TODAS las sesiones del usuario (la credencial anterior queda inutilizable). */
   async confirmarResetPassword(token: string, nueva: string): Promise<void> {
-    if (typeof nueva !== 'string' || nueva.length < 8) throw new EntradaInvalidaError('la contraseña debe tener al menos 8 caracteres');
+    validarLongitudPassword(nueva); // F-03/F-04: 400 uniforme, antes de consumir el token
     const r = await repo.passwordResetVigentePorHash(this.pool, hashToken(token));
     if (!r) throw new NoEncontradoError('token de restablecimiento inválido o expirado');
     await enTransaccion(this.pool, async (c) => {
