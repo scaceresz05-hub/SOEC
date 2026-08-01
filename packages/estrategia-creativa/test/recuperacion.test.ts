@@ -106,4 +106,51 @@ describe('@soec/estrategia-creativa · Tramo I · recuperación ante fallos parc
     const ab = await new VariantesABService(store).cargar(ctx(), pieza);
     expect(ab.variantes).toHaveLength(2); // exactamente 2, no duplicadas
   });
+
+  it('A-4: falla la transición a PUBLICADO_SIMULADO en EJECUCIÓN; el reintento reconcilia sin duplicar y no deja EVALUADO inconsistente', async () => {
+    const inner = new InMemoryEventStore();
+    await sembrar(inner);
+    // Tienda que falla el PRIMER append que transiciona un contenido a PUBLICADO_SIMULADO (fase de ejecución).
+    const store = new TiendaQueFallaPublicacion(inner, 1);
+    const orq = new OrquestadorProgramaGenerativo(store);
+    // 1.ª corrida: la ejecución se persiste pero la transición del contenido falla.
+    await expect(orq.generarPrograma(ctx(), 'prog1', PARAMS, attr, O)).rejects.toThrow(/fallo simulado de publicación/);
+    const parcial = await new ProgramaService(store).cargar(ctx(), 'prog1');
+    expect(parcial.estado).not.toBe('EVALUADO'); // NO se marcó EVALUADO con una etapa pendiente
+    expect(parcial.estado).toBe('EN_EJECUCION'); // queda reintentable
+    // 2.ª corrida: reconcilia desde la etapa incompleta y cierra EVALUADO.
+    const res = await orq.generarPrograma(ctx(), 'prog1', PARAMS, attr, O);
+    expect(res.tipo).toBe('PROPUESTA');
+    if (res.tipo === 'PROPUESTA') {
+      expect(res.vista.estadoPrograma).toBe('EVALUADO');
+      // Sin doble publicación: 2 piezas, 1 ejecución simulada cada una.
+      const totalEjec = res.vista.campanias.reduce((s, c) => s + c.ejecuciones.length, 0);
+      expect(totalEjec).toBe(2);
+      expect(res.vista.aprendizajes.length).toBe(1); // aprendizaje único
+    }
+  });
 });
+
+/** Tienda que falla las primeras N veces el append que lleva un contenido a PUBLICADO_SIMULADO. */
+class TiendaQueFallaPublicacion implements EventStore {
+  private restantes: number;
+  constructor(private readonly inner: EventStore, veces: number) {
+    this.restantes = veces;
+  }
+  async append(ctx: RequestContext, streamId: string, expectedVersion: number, events: readonly EventInput[]): Promise<AppendResult> {
+    if (this.restantes > 0 && events.some((e) => JSON.stringify(e.payload).includes('PUBLICADO_SIMULADO'))) {
+      this.restantes -= 1;
+      throw new Error('fallo simulado de publicación (transición a PUBLICADO_SIMULADO)');
+    }
+    return this.inner.append(ctx, streamId, expectedVersion, events);
+  }
+  readStream(ctx: RequestContext, streamId: string): Promise<readonly RecordedEvent[]> {
+    return this.inner.readStream(ctx, streamId);
+  }
+  reconstructAt(ctx: RequestContext, streamId: string, asOf: string): Promise<readonly RecordedEvent[]> {
+    return this.inner.reconstructAt(ctx, streamId, asOf);
+  }
+  currentVersion(ctx: RequestContext, streamId: string): Promise<number> {
+    return this.inner.currentVersion(ctx, streamId);
+  }
+}
