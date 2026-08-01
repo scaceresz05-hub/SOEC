@@ -11,10 +11,9 @@
  *   - Trazabilidad/auditoría por event-sourcing: cada acción persiste eventos con Attribution + actor.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { randomUUID } from 'node:crypto';
-import { ActorId, OrganizationId, type Attribution, type EventStore, type RequestContext } from '@soec/contracts';
+import { type Attribution, type EventStore, type RequestContext } from '@soec/contracts';
 import type { Clock } from '@soec/event-store';
-import { SinPermisoError, type Permission } from '@soec/identity';
+import { contextoDe, exigir } from './superficie-auth';
 import {
   AprobacionService,
   CalendarioEditorialService,
@@ -41,30 +40,6 @@ const ATRIBUCION: Attribution = {
   uncertainty: 'media',
 };
 
-function header(req: FastifyRequest, name: string): string | undefined {
-  const v = req.headers[name];
-  return Array.isArray(v) ? v[0] : v;
-}
-
-/** Contexto autenticado (org/actor/scope) desde las cabeceras autoritativas que inyectó el gateway. */
-function contextoDe(req: FastifyRequest): RequestContext {
-  const org = header(req, 'x-organization-id');
-  const actor = header(req, 'x-actor-id');
-  if (!org || !actor) throw new SinPermisoError('contexto de organización ausente');
-  const organizationId = OrganizationId(org);
-  const permissions = (header(req, 'x-scope') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-  return { organizationId, actor: ActorId(actor), scope: { organizationId, permissions }, correlationId: header(req, 'x-correlation-id') ?? randomUUID() };
-}
-
-/** Permisos comerciales EFECTIVOS del rol (autoritativos). Vacío ⇒ sin autorización. */
-function permisosDe(req: FastifyRequest): ReadonlySet<string> {
-  return new Set((header(req, 'x-permissions') ?? '').split(',').map((s) => s.trim()).filter(Boolean));
-}
-
-/** Exige un permiso atómico del modelo canónico; lanza SinPermisoError (→ 403) si falta. */
-function exigir(req: FastifyRequest, permiso: Permission): void {
-  if (!permisosDe(req).has(permiso)) throw new SinPermisoError(`falta el permiso ${permiso}`);
-}
 
 function paramsDe(body: Record<string, unknown>): ParametrosCampania {
   const s = (k: string, def = ''): string => (typeof body[k] === 'string' ? (body[k] as string) : def);

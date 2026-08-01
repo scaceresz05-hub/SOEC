@@ -118,8 +118,9 @@ export default function GeneracionPage() {
       <h1>Motor de Generación · {programaId || '—'}</h1>
       <p className="muted">
         Genera y opera la estrategia creativa, campañas, contenido, variantes A/B y calendario del
-        programa, con aprobación humana antes de ejecutar. Configura el programa en{' '}
-        <Link href="/director-autonomo/programas">Director Autónomo · Programas</Link>.
+        programa, con aprobación humana antes de ejecutar. Si el motor se abstiene por falta de datos,
+        completa el cerebro comercial en{' '}
+        <Link href={`/director-autonomo/programas/${encodeURIComponent(programaId)}/generacion/preparacion`}>Preparación del conocimiento</Link>.
       </p>
       <div className="aviso" style={{ marginBottom: 8 }}>
         Todo lo que ves es <Nat n="SIMULADO" />: sin proveedores externos, sin gasto ni publicación real.

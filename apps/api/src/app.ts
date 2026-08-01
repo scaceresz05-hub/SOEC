@@ -102,7 +102,9 @@ import { registerDirectorAutonomoRoutes } from './director-autonomo-routes';
 import { registerDirectorAutonomoProgramasRoutes } from './director-autonomo-programas-routes';
 import { registerEvaluacionRoutes } from './evaluacion-routes';
 import { registerGeneracionRoutes } from './generacion-routes';
+import { registerCommercialKnowledgeRoutes } from './commercial-knowledge-routes';
 import { EstrategiaCreativaInvalidaError } from '@soec/estrategia-creativa';
+import { ComandoCrmInvalidoError, HipotesisNoEncontradaError } from '@soec/crm-comercial';
 import {
   NegocioInvalidoError,
   ProgramaInvalidoError,
@@ -283,6 +285,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (err instanceof EstrategiaCreativaInvalidaError) {
       return reply.code(422).send({ error: err.name, message: err.message });
     }
+    if (err instanceof ComandoCrmInvalidoError) {
+      return reply.code(400).send({ error: err.name, message: err.message });
+    }
+    if (err instanceof HipotesisNoEncontradaError) {
+      return reply.code(404).send({ error: err.name, message: err.message });
+    }
     if (
       err instanceof DecisionMktInvalidaError ||
       err instanceof TransicionDecMktInvalidaError ||
@@ -378,6 +386,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerDirectorAutonomoProgramasRoutes(target, deps.store, clock);
     registerEvaluacionRoutes(target, deps.store, clock);
     registerGeneracionRoutes(target, deps.store, clock, deps.generationRateLimit); // Motor de Generación (M3, Tramo J)
+    registerCommercialKnowledgeRoutes(target, deps.store, clock); // Conocimiento comercial / CRM (M3, A-1)
 
     target.post('/events', async (req, reply) => {
       const ctx = contextFrom(req);

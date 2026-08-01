@@ -53,6 +53,9 @@ importers:
       '@soec/control':
         specifier: workspace:*
         version: link:../../packages/control
+      '@soec/crm-comercial':
+        specifier: workspace:*
+        version: link:../../packages/crm-comercial
       '@soec/decision':
         specifier: workspace:*
         version: link:../../packages/decision
@@ -92,6 +95,9 @@ importers:
       '@soec/models':
         specifier: workspace:*
         version: link:../../packages/models
+      '@soec/negocio':
+        specifier: workspace:*
+        version: link:../../packages/negocio
       '@soec/operacional':
         specifier: workspace:*
         version: link:../../packages/operacional
@@ -117,9 +123,6 @@ importers:
         specifier: ^8.13.1
         version: 8.22.0
     devDependencies:
-      '@soec/crm-comercial':
-        specifier: workspace:*
-        version: link:../../packages/crm-comercial
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0

@@ -37,7 +37,12 @@ export type Permission =
   | 'content.read'
   | 'experiment.read'
   | 'calendar.read'
-  | 'calendar.manage';
+  | 'calendar.manage'
+  // Conocimiento comercial (CRM) — superficie mínima para alimentar el motor de generación (A-1).
+  | 'commercial_knowledge.read'
+  | 'commercial_knowledge.manage'
+  | 'commercial_hypothesis.read'
+  | 'commercial_hypothesis.manage';
 
 export type Role = 'OWNER' | 'ADMIN' | 'MARKETING_MANAGER' | 'MARKETING_OPERATOR' | 'ANALYST' | 'VIEWER';
 
@@ -46,12 +51,16 @@ export const ROLES: readonly Role[] = ['OWNER', 'ADMIN', 'MARKETING_MANAGER', 'M
 const LECTURA: readonly Permission[] = [
   'organization.read', 'members.read', 'business.read', 'program.read', 'campaign.read', 'budget.read',
   'execution.read', 'analytics.read',
-  // Lecturas de la superficie de generación (todos los roles pueden observar el estado generado).
+  // Lecturas de la superficie de generación y del CRM (todos los roles pueden observar).
   'generation.read', 'creative.read', 'content.read', 'experiment.read', 'calendar.read',
+  'commercial_knowledge.read', 'commercial_hypothesis.read',
 ];
 
-/** Acciones del motor de generación reservadas a quien opera campañas (no a los roles de solo lectura). */
-const GENERACION_OPERAR: readonly Permission[] = ['generation.start', 'generation.retry', 'calendar.manage'];
+/** Acciones del motor de generación / CRM reservadas a quien opera (no a los roles de solo lectura). */
+const GENERACION_OPERAR: readonly Permission[] = [
+  'generation.start', 'generation.retry', 'calendar.manage',
+  'commercial_knowledge.manage', 'commercial_hypothesis.manage',
+];
 
 /** Mapa rol → permisos. Único punto de expansión. */
 const MAPA: Readonly<Record<Role, readonly Permission[]>> = {
