@@ -5,7 +5,7 @@
  * (auditable) y NO produce pieza aprobable.
  */
 import type { RecordedEvent } from '@soec/contracts';
-import type { ResultadoValidacion } from './validador-contenido';
+import type { CategoriaRechazo, ResultadoValidacion } from './validador-contenido';
 
 export interface RegistroValidacion {
   readonly referencia: string; // estrategiaCreativaId + formato
@@ -14,6 +14,7 @@ export interface RegistroValidacion {
   readonly politicaVersion: string;
   readonly resultado: ResultadoValidacion;
   readonly razones: readonly string[];
+  readonly categorias: readonly CategoriaRechazo[];
   readonly afirmacionesNoRespaldadas: readonly string[];
   readonly longitudCuerpo: number;
   readonly naturaleza: 'SIMULADO';

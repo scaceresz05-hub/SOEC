@@ -17,6 +17,7 @@ import { CalendarioEditorialService } from './calendario-service';
 import { AprobacionService } from './aprobacion-service';
 import type { TipoRecurso } from '../domain/aprobacion';
 import { ValidacionContenidoService } from './validacion-contenido-service';
+import type { CifraPermitida } from '../domain/validador-contenido';
 import { derivarContenidoArtefacto, estrategiaCreativaId } from '../domain/artefacto-creativo';
 import { type ParametrosCampania, SEGMENTO_NO_DETERMINADO } from '../domain/conexion';
 import type { BriefComercial, EstrategiaCreativa } from '../domain/estrategia-creativa';
@@ -153,7 +154,9 @@ export class OrquestadorProgramaGenerativo {
       // falten, reusando las ya persistidas ante un reintento tras un fallo parcial).
       const ref = versionPorHipotesis.get(h.id);
       const estrategiaRef = ref ? `${ref.id}@v${ref.version}` : `estrategia:${programaId}`;
-      const politica = { afirmacionesPermitidas: ref?.afirmacionesPermitidas ?? [], restricciones: ref?.restricciones ?? [], pruebaSocialPermitida: ref?.pruebaSocialPermitida ?? false };
+      // A-3: en modo simulado NO hay integraciones ni cifras de clientes respaldadas → listas vacías, por lo
+      // que cualquier afirmación de integración/compatibilidad/cifra queda rechazada por el validador.
+      const politica = { afirmacionesPermitidas: ref?.afirmacionesPermitidas ?? [], restricciones: ref?.restricciones ?? [], pruebaSocialPermitida: ref?.pruebaSocialPermitida ?? false, integracionesPermitidas: [] as readonly string[], cifrasPermitidas: [] as readonly CifraPermitida[] };
       let piezas = [...campania.contenidoIds];
       for (let f = piezas.length; f < PIEZAS_POR_CAMPANIA; f++) {
         const formato = FORMATOS[f] ?? `f${f}`;
@@ -268,7 +271,7 @@ export class OrquestadorProgramaGenerativo {
     estrategia: EstrategiaCreativa,
     idioma: string,
     estrategiaRef: string,
-    politica: { afirmacionesPermitidas: readonly string[]; restricciones: readonly string[]; pruebaSocialPermitida: boolean },
+    politica: { afirmacionesPermitidas: readonly string[]; restricciones: readonly string[]; pruebaSocialPermitida: boolean; integracionesPermitidas: readonly string[]; cifrasPermitidas: readonly CifraPermitida[] },
     meta: { referencia: string; politicaVersion: string },
     a: Attribution,
     o: string,
@@ -276,6 +279,13 @@ export class OrquestadorProgramaGenerativo {
   ): Promise<string | null> {
     const mensajePrincipal = formato ? `${brief.mensajePrincipal} [formato: ${formato}]` : brief.mensajePrincipal;
     const promptRef = 'prompt:pieza-comercial@v1';
+    // A-3 · doble defensa: además de las restricciones, se instruye explícitamente al proveedor a NO afirmar
+    // integraciones/compatibilidades ni cifras de clientes que no estén respaldadas.
+    const guardas = [
+      ...politica.restricciones,
+      ...(politica.integracionesPermitidas.length === 0 ? ['no afirmar integraciones ni compatibilidades con sistemas externos'] : []),
+      ...(politica.cifrasPermitidas.length === 0 ? ['no inventar cifras de clientes, pacientes, clínicas o empresas'] : []),
+    ];
     const solicitud: SolicitudGenerativa = {
       tarea: 'pieza_fuente',
       contexto: {
@@ -289,7 +299,7 @@ export class OrquestadorProgramaGenerativo {
       esquemaSalida: ['cuerpo'],
       idioma,
       limiteCaracteres: 0,
-      evitar: [...politica.restricciones], // A-3: ya no es [] — las restricciones reales van al proveedor
+      evitar: guardas, // A-3: restricciones + guardas de integración/cifras (defensa en el prompt/brief)
       promptRef,
       trazabilidad: `${estrategiaRef}|brief:${brief.empresa}:${brief.producto}`,
     };
@@ -298,10 +308,11 @@ export class OrquestadorProgramaGenerativo {
     if (!val.valida || !r.salida) return null;
     const cuerpo = r.salida.campos['cuerpo'];
     if (!cuerpo || !cuerpo.trim()) return null;
-    // A-3: validación SEMÁNTICA comercial + registro auditable del veredicto.
+    // A-3: validación SEMÁNTICA comercial (afirmaciones/restricciones/prueba social/integraciones/cifras) +
+    // registro auditable del veredicto. Segunda mitad de la defensa doble.
     const veredicto = await this.validacion.validarYRegistrar(
       ctx,
-      { cuerpo, afirmacionesPermitidas: politica.afirmacionesPermitidas, restricciones: politica.restricciones, pruebaSocialPermitida: politica.pruebaSocialPermitida },
+      { cuerpo, afirmacionesPermitidas: politica.afirmacionesPermitidas, restricciones: politica.restricciones, pruebaSocialPermitida: politica.pruebaSocialPermitida, integracionesPermitidas: politica.integracionesPermitidas, cifrasPermitidas: politica.cifrasPermitidas },
       { referencia: meta.referencia, promptRef, estrategiaRef, politicaVersion: meta.politicaVersion },
       a,
       o,

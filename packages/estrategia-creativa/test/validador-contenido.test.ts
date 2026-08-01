@@ -49,6 +49,49 @@ describe('@soec/estrategia-creativa · A-3 · validador de contenido (unidad)', 
   });
 });
 
+describe('@soec/estrategia-creativa · A-3 · integraciones', () => {
+  const base = { afirmacionesPermitidas: [] as string[], restricciones: [] as string[], pruebaSocialPermitida: false };
+  it('integración no respaldada → INVALIDO (categoría INTEGRACION_NO_RESPALDADA)', () => {
+    const v = validarContenidoComercial({ cuerpo: 'Nos integramos con Google Calendar.', ...base, integracionesPermitidas: [] });
+    expect(v.resultado).toBe('INVALIDO');
+    expect(v.categorias).toContain('INTEGRACION_NO_RESPALDADA');
+  });
+  it('integración respaldada (en integracionesPermitidas) → VALIDO', () => {
+    expect(validarContenidoComercial({ cuerpo: 'Se integra con Google Calendar para tu agenda.', ...base, integracionesPermitidas: ['Google Calendar'] }).resultado).toBe('VALIDO');
+  });
+  it('compatibilidad universal → INVALIDO siempre (COMPATIBILIDAD_UNIVERSAL)', () => {
+    expect(validarContenidoComercial({ cuerpo: 'Compatible con todos los sistemas del mercado.', ...base, integracionesPermitidas: ['Google Calendar'] }).categorias).toContain('COMPATIBILIDAD_UNIVERSAL');
+    expect(validarContenidoComercial({ cuerpo: 'Funciona con cualquier software.', ...base }).resultado).toBe('INVALIDO');
+  });
+  it('no es falso positivo: "integra tu estrategia" / "compatible con tu identidad visual"', () => {
+    expect(validarContenidoComercial({ cuerpo: 'Integra tu estrategia comercial en un solo lugar.', ...base }).resultado).toBe('VALIDO');
+    expect(validarContenidoComercial({ cuerpo: 'Contenido compatible con tu identidad visual.', ...base }).resultado).toBe('VALIDO');
+  });
+});
+
+describe('@soec/estrategia-creativa · A-3 · cifras comerciales', () => {
+  const base = { afirmacionesPermitidas: [] as string[], restricciones: [] as string[], pruebaSocialPermitida: false };
+  it('cifra sin evidencia → INVALIDO (CIFRA_NO_RESPALDADA)', () => {
+    const v = validarContenidoComercial({ cuerpo: 'Más de 500 clínicas activas usan la plataforma.', ...base, cifrasPermitidas: [] });
+    expect(v.resultado).toBe('INVALIDO');
+    expect(v.categorias).toContain('CIFRA_NO_RESPALDADA');
+  });
+  it('cifra que contradice la evidencia → INVALIDO (CIFRA_CONTRADICTORIA)', () => {
+    const v = validarContenidoComercial({ cuerpo: '500 clientes confían en nosotros.', ...base, cifrasPermitidas: [{ tipo: 'CLIENTES', valor: 20, evidenciaId: 'ev-1' }] });
+    expect(v.resultado).toBe('INVALIDO');
+    expect(v.categorias).toContain('CIFRA_CONTRADICTORIA');
+  });
+  it('cifra exacta respaldada → VALIDO', () => {
+    expect(validarContenidoComercial({ cuerpo: '20 clínicas usan la plataforma.', ...base, cifrasPermitidas: [{ tipo: 'CLINICAS', valor: 20, evidenciaId: 'ev-1' }] }).resultado).toBe('VALIDO');
+  });
+  it('aproximado "más de N" con evidencia exacta N → INVALIDO (no se admiten aproximados)', () => {
+    expect(validarContenidoComercial({ cuerpo: 'Más de 20 clínicas nos eligen.', ...base, cifrasPermitidas: [{ tipo: 'CLINICAS', valor: 20, evidenciaId: 'ev-1' }] }).resultado).toBe('INVALIDO');
+  });
+  it('no es falso positivo cuantitativo: "Mejora la gestión de tu clínica"', () => {
+    expect(validarContenidoComercial({ cuerpo: 'Mejora la gestión de tu clínica dental.', ...base }).resultado).toBe('VALIDO');
+  });
+});
+
 /** Proveedor MALICIOSO: su salida (estructuralmente válida) contiene afirmaciones no respaldadas. */
 class ProveedorMalicioso implements ProveedorGenerativo {
   readonly nombre = 'malicioso';
@@ -77,6 +120,19 @@ async function sembrar(store: InMemoryEventStore) {
   await hip.agregarEvidencia(c, 'h1', 'e1', 'ICP responde a email', 'DATO_IMPORTADO', true, attr, O);
 }
 
+/** Proveedor que SOLO afirma integración + cifra de clientes (sin precio/garantía/testimonio). */
+class ProveedorIntegracionCifra implements ProveedorGenerativo {
+  readonly nombre = 'int-cifra';
+  readonly version = '1';
+  async generar(): Promise<RespuestaGenerativa> {
+    return {
+      estado: 'valida',
+      salida: { campos: { cuerpo: 'Nos integramos con Salesforce sin problemas. Más de 500 clínicas activas nos eligen.' }, listas: {} },
+      proveedorLogico: 'int-cifra', modeloLogico: 'm1', generadoEn: O, uso: { unidades: 1, costoEstimado: 0 }, advertencias: [], promptRef: 'x',
+    };
+  }
+}
+
 describe('@soec/estrategia-creativa · A-3 · el orquestador rechaza contenido malicioso', () => {
   it('con un proveedor que afirma precio/garantía/testimonio, ABSTIENE y no crea pieza; registra el veredicto', async () => {
     const store = new InMemoryEventStore();
@@ -93,5 +149,19 @@ describe('@soec/estrategia-creativa · A-3 · el orquestador rechaza contenido m
     expect(reg.ultimo?.resultado).toBe('INVALIDO');
     expect(reg.ultimo?.afirmacionesNoRespaldadas.length).toBeGreaterThan(0);
     expect(reg.ultimo?.naturaleza).toBe('SIMULADO');
+  });
+
+  it('A-3: integración/cifra no respaldada también bloquea el flujo (sin pieza/variante/calendario/ejecución)', async () => {
+    const store = new InMemoryEventStore();
+    await sembrar(store);
+    const orq = new OrquestadorProgramaGenerativo(store, { proveedor: new ProveedorIntegracionCifra() });
+    const res = await orq.generarPrograma(ctx(), 'progIC', PARAMS, attr, O);
+    expect(res.tipo).toBe('ABSTENCION');
+    const prog = await new ProgramaService(store).cargar(ctx(), 'progIC');
+    expect(prog.campanias.flatMap((c) => c.contenidoIds)).toHaveLength(0); // pieza NO
+    expect(prog.estado).not.toBe('EVALUADO'); // ejecución NO
+    const reg = await new ValidacionContenidoService(store).cargar(ctx(), 'estcr-progIC-h1:correo');
+    expect(reg.ultimo?.resultado).toBe('INVALIDO');
+    expect(reg.ultimo?.categorias).toEqual(expect.arrayContaining(['INTEGRACION_NO_RESPALDADA', 'CIFRA_NO_RESPALDADA']));
   });
 });

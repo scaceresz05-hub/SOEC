@@ -10,16 +10,46 @@
 
 export type ResultadoValidacion = 'VALIDO' | 'INVALIDO' | 'REQUIERE_REVISION';
 
+export type TipoCifra = 'CLIENTES' | 'CLINICAS' | 'PACIENTES' | 'EMPRESAS' | 'PROFESIONALES';
+
+/** Una cifra comercial respaldada por evidencia (A-3): tipo + valor EXACTO + id de evidencia. */
+export interface CifraPermitida {
+  readonly tipo: TipoCifra;
+  readonly valor: number;
+  readonly evidenciaId: string;
+}
+
 export interface EntradaValidacionContenido {
   readonly cuerpo: string;
   readonly afirmacionesPermitidas: readonly string[];
   readonly restricciones: readonly string[];
   readonly pruebaSocialPermitida: boolean;
+  /** Integraciones REALMENTE respaldadas (A-3). Vacío ⇒ cualquier afirmación de integración es inválida. */
+  readonly integracionesPermitidas?: readonly string[];
+  /** Cifras comerciales respaldadas por evidencia (A-3). Vacío ⇒ cualquier cifra de clientes es inválida. */
+  readonly cifrasPermitidas?: readonly CifraPermitida[];
 }
+
+/** Categorías de rechazo (A-3), para trazabilidad del veredicto. */
+export type CategoriaRechazo =
+  | 'PRECIO'
+  | 'DESCUENTO'
+  | 'GARANTIA'
+  | 'SUPERLATIVO'
+  | 'PRUEBA_SOCIAL'
+  | 'CERTIFICACION'
+  | 'PROMESA_CLINICA'
+  | 'PROMESA_FINANCIERA'
+  | 'RESTRICCION_VIOLADA'
+  | 'INTEGRACION_NO_RESPALDADA'
+  | 'COMPATIBILIDAD_UNIVERSAL'
+  | 'CIFRA_NO_RESPALDADA'
+  | 'CIFRA_CONTRADICTORIA';
 
 export interface VeredictoContenido {
   readonly resultado: ResultadoValidacion;
   readonly razones: readonly string[];
+  readonly categorias: readonly CategoriaRechazo[];
   readonly afirmacionesDetectadas: readonly string[];
   readonly afirmacionesNoRespaldadas: readonly string[];
   readonly restriccionesVioladas: readonly string[];
@@ -62,6 +92,27 @@ function estaPermitida(fragmento: string, permitidas: readonly string[]): boolea
   });
 }
 
+const CATEGORIA_DE_CLASE: Record<string, CategoriaRechazo> = {
+  precio: 'PRECIO', descuento: 'DESCUENTO', garantia: 'GARANTIA', superlativo: 'SUPERLATIVO',
+  prueba_social: 'PRUEBA_SOCIAL', certificacion: 'CERTIFICACION', promesa_clinica: 'PROMESA_CLINICA',
+  promesa_financiera: 'PROMESA_FINANCIERA',
+};
+
+/** Verbos que implican INTEGRACIÓN con un sistema/proveedor externo (A-3). Captura el objetivo tras "con". */
+const RE_INTEGRACION = /\b(nos integramos con|se integra con|integraci[oó]n con|compatible con|funciona con|conecta con|sincroniza con)\s+([^.,;:!?\n]+)/gi;
+/** El objetivo es una COMPATIBILIDAD UNIVERSAL (siempre inválida). */
+const RE_UNIVERSAL = /^(todos?|todas?|cualquier\w*|cada)\b|\b(todo\s+el\s+mercado|del\s+mercado)\b/i;
+/** El objetivo es un ACTIVO PROPIO del usuario (no un sistema externo) → no es afirmación de integración. */
+const RE_ACTIVO_PROPIO = /^(tu|su|mi|nuestra|nuestro|esta|este|esa|ese|la\s+propia|el\s+propio)\b/i;
+/** Cifras comerciales de clientes/pacientes/clínicas/empresas/profesionales (A-3). */
+const RE_CIFRA = /\b(\+|m[aá]s\s+de|mas\s+de|sobre|hasta|cerca\s+de|over)?\s*(\d[\d.,]*)\s+(clientes|cl[ií]nicas|pacientes|empresas|profesionales)\b/gi;
+
+const TIPO_DE_SUSTANTIVO: Record<string, TipoCifra> = { clientes: 'CLIENTES', clinicas: 'CLINICAS', pacientes: 'PACIENTES', empresas: 'EMPRESAS', profesionales: 'PROFESIONALES' };
+
+function aNumero(s: string): number {
+  return parseInt(s.replace(/[.,]/g, ''), 10);
+}
+
 /**
  * Valida el cuerpo generado. INVALIDO si contiene una afirmación de riesgo no respaldada (o prueba social
  * cuando no está permitida, o viola una restricción explícita). REQUIERE_REVISION si el cuerpo es vacío/
@@ -72,10 +123,13 @@ export function validarContenidoComercial(e: EntradaValidacionContenido): Veredi
   const detectadas: string[] = [];
   const noRespaldadas: string[] = [];
   const restriccionesVioladas: string[] = [];
+  const categorias: CategoriaRechazo[] = [];
   const cuerpo = e.cuerpo ?? '';
+  const integracionesPermitidas = e.integracionesPermitidas ?? [];
+  const cifrasPermitidas = e.cifrasPermitidas ?? [];
 
   if (!cuerpo.trim()) {
-    return { resultado: 'REQUIERE_REVISION', razones: ['el cuerpo está vacío'], afirmacionesDetectadas: [], afirmacionesNoRespaldadas: [], restriccionesVioladas: [], evidenciaFaltante: ['cuerpo'] };
+    return { resultado: 'REQUIERE_REVISION', razones: ['el cuerpo está vacío'], categorias: [], afirmacionesDetectadas: [], afirmacionesNoRespaldadas: [], restriccionesVioladas: [], evidenciaFaltante: ['cuerpo'] };
   }
 
   for (const p of PATRONES) {
@@ -86,13 +140,52 @@ export function validarContenidoComercial(e: EntradaValidacionContenido): Veredi
     if (p.requierePruebaSocial && !e.pruebaSocialPermitida) {
       noRespaldadas.push(`${p.clase}: "${fragmento}"`);
       razones.push(`prueba social no permitida (sin evidencia): "${fragmento}"`);
+      categorias.push('PRUEBA_SOCIAL');
       continue;
     }
-    // Precio/descuento/garantía/superlativo/certificación/promesa: sólo admisible si está explícitamente
-    // en las afirmaciones permitidas (con procedencia). En modo simulado no lo están → no respaldada.
     if (!estaPermitida(fragmento, e.afirmacionesPermitidas)) {
       noRespaldadas.push(`${p.clase}: "${fragmento}"`);
       razones.push(`afirmación de ${p.clase} sin respaldo: "${fragmento}"`);
+      const cat = CATEGORIA_DE_CLASE[p.clase];
+      if (cat) categorias.push(cat);
+    }
+  }
+
+  // A-3 · INTEGRACIONES: cada afirmación de integración con un sistema externo debe estar respaldada;
+  // la compatibilidad universal se rechaza siempre; los activos propios del usuario no cuentan.
+  for (const m of cuerpo.matchAll(RE_INTEGRACION)) {
+    const objetivo = (m[2] ?? '').trim();
+    if (!objetivo || RE_ACTIVO_PROPIO.test(objetivo)) continue; // "compatible con tu identidad visual" → no es sistema
+    const frag = m[0].trim();
+    if (RE_UNIVERSAL.test(objetivo)) {
+      noRespaldadas.push(`compatibilidad_universal: "${frag}"`);
+      razones.push(`compatibilidad universal no admisible: "${frag}"`);
+      categorias.push('COMPATIBILIDAD_UNIVERSAL');
+    } else if (!estaPermitida(objetivo, integracionesPermitidas)) {
+      noRespaldadas.push(`integracion_no_respaldada: "${frag}"`);
+      razones.push(`integración no respaldada (no está en integracionesPermitidas): "${frag}"`);
+      categorias.push('INTEGRACION_NO_RESPALDADA');
+    }
+  }
+
+  // A-3 · CIFRAS: cifras de clientes/pacientes/clínicas/empresas/profesionales sólo admisibles con evidencia
+  // del MISMO tipo y valor EXACTO (los aproximados "más de N" nunca se admiten automáticamente).
+  for (const m of cuerpo.matchAll(RE_CIFRA)) {
+    const aproximador = (m[1] ?? '').trim();
+    const valor = aNumero(m[2] ?? '0');
+    const sustantivo = normalizar(m[3] ?? '');
+    const tipo = TIPO_DE_SUSTANTIVO[sustantivo];
+    if (!tipo || !Number.isFinite(valor)) continue;
+    const frag = m[0].trim();
+    const permitida = cifrasPermitidas.find((c) => c.tipo === tipo);
+    if (!permitida) {
+      noRespaldadas.push(`cifra_no_respaldada: "${frag}"`);
+      razones.push(`cifra de ${tipo} sin evidencia respaldada: "${frag}"`);
+      categorias.push('CIFRA_NO_RESPALDADA');
+    } else if (aproximador !== '' || valor !== permitida.valor) {
+      noRespaldadas.push(`cifra_contradictoria: "${frag}"`);
+      razones.push(`cifra de ${tipo} contradice la evidencia (respaldado: ${permitida.valor}${aproximador ? '; no se admiten aproximados' : ''}): "${frag}"`);
+      categorias.push('CIFRA_CONTRADICTORIA');
     }
   }
 
@@ -102,9 +195,10 @@ export function validarContenidoComercial(e: EntradaValidacionContenido): Veredi
     if (nr && normalizar(cuerpo).includes(nr)) {
       restriccionesVioladas.push(r);
       razones.push(`el cuerpo toca una restricción declarada: "${r}"`);
+      categorias.push('RESTRICCION_VIOLADA');
     }
   }
 
   const resultado: ResultadoValidacion = noRespaldadas.length > 0 || restriccionesVioladas.length > 0 ? 'INVALIDO' : 'VALIDO';
-  return { resultado, razones, afirmacionesDetectadas: detectadas, afirmacionesNoRespaldadas: noRespaldadas, restriccionesVioladas, evidenciaFaltante: [] };
+  return { resultado, razones, categorias, afirmacionesDetectadas: detectadas, afirmacionesNoRespaldadas: noRespaldadas, restriccionesVioladas, evidenciaFaltante: [] };
 }

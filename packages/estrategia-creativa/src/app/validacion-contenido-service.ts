@@ -47,6 +47,7 @@ export class ValidacionContenidoService {
       politicaVersion: meta.politicaVersion,
       resultado: veredicto.resultado,
       razones: veredicto.razones,
+      categorias: veredicto.categorias,
       afirmacionesNoRespaldadas: veredicto.afirmacionesNoRespaldadas,
       longitudCuerpo: entrada.cuerpo.length,
       naturaleza: 'SIMULADO',
