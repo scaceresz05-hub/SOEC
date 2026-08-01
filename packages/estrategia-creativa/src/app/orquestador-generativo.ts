@@ -15,6 +15,7 @@ import { EstrategiaCreativaArtefactoService } from './artefacto-creativo-service
 import { VariantesABService } from './variantes-ab-service';
 import { CalendarioEditorialService } from './calendario-service';
 import { AprobacionService } from './aprobacion-service';
+import type { TipoRecurso } from '../domain/aprobacion';
 import { ValidacionContenidoService } from './validacion-contenido-service';
 import { derivarContenidoArtefacto, estrategiaCreativaId } from '../domain/artefacto-creativo';
 import { type ParametrosCampania, SEGMENTO_NO_DETERMINADO } from '../domain/conexion';
@@ -23,12 +24,16 @@ import type { Programa } from '@soec/programas';
 
 const DIA_MS = 86_400_000;
 
-/** Versión de las piezas creadas por el orquestador: se emiten una vez (contenido inmutable en este flujo). */
-const VERSION_PIEZA = 1;
-
 /** Piezas generadas por campaña (formatos distintos del mismo mensaje). */
 const PIEZAS_POR_CAMPANIA = 2;
 const FORMATOS = ['correo', 'anuncio_corto', 'publicacion_educativa'] as const;
+
+/** Recurso que exige aprobación humana antes de ejecutar, ligado a su versión REAL (B-4/B-5). */
+export interface RecursoAprobable {
+  readonly tipo: TipoRecurso;
+  readonly resourceId: string;
+  readonly version: number;
+}
 
 export type ResultadoOrquestacion =
   | { readonly tipo: 'PROPUESTA'; readonly vista: VistaPrograma }
@@ -73,7 +78,7 @@ export class OrquestadorProgramaGenerativo {
   async generarPrograma(ctx: RequestContext, programaId: string, params: ParametrosCampania, a: Attribution, o: string): Promise<ResultadoOrquestacion> {
     const prep = await this.prepararPrograma(ctx, programaId, params, a, o);
     if (prep.tipo === 'ABSTENCION') return prep;
-    await this.aprobarComoPilotoHumano(ctx, prep.piezas, a, o);
+    await this.aprobarComoPilotoHumano(ctx, programaId, a, o);
     return this.ejecutarSimulado(ctx, programaId, a, o);
   }
 
@@ -184,9 +189,47 @@ export class OrquestadorProgramaGenerativo {
   }
 
   /**
-   * ETAPA 2 (Tramo H) — EJECUTA el ciclo simulado (aprobación gobernada → ejecución simulada → medición →
-   * aprendizaje) SOLO si cada pieza tiene aprobación humana vigente para su versión. Si falta alguna,
-   * NO ejecuta y devuelve `PENDIENTE_APROBACION` con las piezas pendientes. Nunca se autoaprueba aquí.
+   * B-5: versión de aprobación de una pieza = versión REAL del artefacto de estrategia de su hipótesis
+   * (ya no una constante). Si el artefacto cambia (por un cambio real de conocimiento/estrategia, B-1),
+   * su versión sube y las aprobaciones ligadas a la versión anterior dejan de valer.
+   */
+  private async versionArtefacto(ctx: RequestContext, programaId: string, hipotesisId: string): Promise<number> {
+    const art = await this.artefactos.cargar(ctx, estrategiaCreativaId(programaId, hipotesisId));
+    return art.artefacto?.version ?? 1;
+  }
+
+  /**
+   * B-4/B-5: TODOS los recursos que exigen aprobación humana antes de ejecutar (piezas, variantes A/B y
+   * entradas de calendario), cada uno ligado a la versión REAL del artefacto de su hipótesis. Es la lista
+   * canónica que consulta el gate y que aprueba el piloto/humano. Público para que la API/UI la usen.
+   */
+  async recursosParaAprobar(ctx: RequestContext, programaId: string): Promise<readonly RecursoAprobable[]> {
+    const prog = await this.programas.cargar(ctx, programaId);
+    if (!prog.existe) return [];
+    const recursos: RecursoAprobable[] = [];
+    const versionPorCampania = new Map<string, number>();
+    for (const camp of prog.campanias) {
+      const v = await this.versionArtefacto(ctx, programaId, camp.hipotesisId);
+      versionPorCampania.set(camp.campaignId, v);
+      for (const pieza of camp.contenidoIds) {
+        recursos.push({ tipo: 'PIEZA', resourceId: pieza, version: v });
+        const ab = await this.ab.cargar(ctx, pieza);
+        for (const variante of ab.variantes) recursos.push({ tipo: 'VARIANTE', resourceId: variante.varianteId, version: v });
+      }
+    }
+    const cal = await this.calendario.cargar(ctx, programaId);
+    for (const e of cal.entradas) {
+      const camp = prog.campanias.find((c) => c.contenidoIds.includes(e.piezaId));
+      const v = camp ? (versionPorCampania.get(camp.campaignId) ?? 1) : 1;
+      recursos.push({ tipo: 'ENTRADA_CALENDARIO', resourceId: e.entradaId, version: v });
+    }
+    return recursos;
+  }
+
+  /**
+   * ETAPA 2 (Tramo H) — EJECUTA el ciclo simulado SOLO si TODOS los recursos (piezas, variantes y entradas
+   * de calendario) tienen aprobación humana vigente para su versión REAL. Si falta alguna, NO ejecuta y
+   * devuelve `PENDIENTE_APROBACION`. Nunca se autoaprueba aquí.
    */
   async ejecutarSimulado(ctx: RequestContext, programaId: string, a: Attribution, o: string): Promise<ResultadoOrquestacion> {
     const prog = await this.programas.cargar(ctx, programaId);
@@ -194,22 +237,22 @@ export class OrquestadorProgramaGenerativo {
     if (prog.estado === 'EN_EJECUCION' || prog.estado === 'EVALUADO') {
       return { tipo: 'PROPUESTA', vista: await this.ciclo.ejecutarCiclo(ctx, programaId, a, o) };
     }
-    const piezas = this.piezasDe(prog);
-    if (piezas.length === 0) return { tipo: 'ABSTENCION', faltantes: ['no hay piezas generadas para ejecutar'] };
+    if (this.piezasDe(prog).length === 0) return { tipo: 'ABSTENCION', faltantes: ['no hay piezas generadas para ejecutar'] };
+    const recursos = await this.recursosParaAprobar(ctx, programaId);
     const pendientes: string[] = [];
-    for (const p of piezas) if (!(await this.aprobacion.estaAprobada(ctx, 'PIEZA', p, VERSION_PIEZA))) pendientes.push(p);
-    if (pendientes.length > 0) return { tipo: 'PENDIENTE_APROBACION', faltantes: pendientes.map((p) => `pieza sin aprobación humana vigente: ${p}`) };
+    for (const r of recursos) if (!(await this.aprobacion.estaAprobada(ctx, r.tipo, r.resourceId, r.version))) pendientes.push(`${r.tipo} ${r.resourceId} (v${r.version})`);
+    if (pendientes.length > 0) return { tipo: 'PENDIENTE_APROBACION', faltantes: pendientes.map((p) => `recurso sin aprobación humana vigente: ${p}`) };
     return { tipo: 'PROPUESTA', vista: await this.ciclo.ejecutarCiclo(ctx, programaId, a, o) };
   }
 
   /**
-   * PILOTO: firma como un director humano (actor tomado del contexto autenticado) todas las piezas dadas.
-   * Está deliberadamente separado del flujo automático y jamás se llama desde `ejecutarSimulado`: existe
-   * solo para el atajo `generarPrograma`. Cada decisión queda registrada y auditable con su actor.
+   * PILOTO: firma como un director humano (actor del contexto) TODOS los recursos aprobables del programa,
+   * en su versión real. Deliberadamente separado del flujo automático y jamás llamado desde
+   * `ejecutarSimulado`: existe solo para el atajo `generarPrograma`. Cada decisión queda auditable.
    */
-  private async aprobarComoPilotoHumano(ctx: RequestContext, piezas: readonly string[], a: Attribution, o: string): Promise<void> {
-    for (const p of piezas) {
-      await this.aprobacion.decidir(ctx, { resourceType: 'PIEZA', resourceId: p, resourceVersion: VERSION_PIEZA, decision: 'APROBADA', comment: 'aprobación de piloto (director humano simulado)', scope: 'PIEZA' }, a, o);
+  private async aprobarComoPilotoHumano(ctx: RequestContext, programaId: string, a: Attribution, o: string): Promise<void> {
+    for (const r of await this.recursosParaAprobar(ctx, programaId)) {
+      await this.aprobacion.decidir(ctx, { resourceType: r.tipo, resourceId: r.resourceId, resourceVersion: r.version, decision: 'APROBADA', comment: 'aprobación de piloto (director humano simulado)', scope: r.tipo }, a, o);
     }
   }
 

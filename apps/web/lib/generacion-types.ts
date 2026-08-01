@@ -82,5 +82,7 @@ export interface DecisionAprobacionGen {
 export interface AprobacionGen {
   resourceType: string;
   resourceId: string;
+  resourceVersion: number;
+  aprobado: boolean;
   ultima: DecisionAprobacionGen | null;
 }

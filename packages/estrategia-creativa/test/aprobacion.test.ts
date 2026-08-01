@@ -87,17 +87,38 @@ describe('@soec/estrategia-creativa · Tramo H · gate de aprobación en el cicl
     expect((await new ProgramaService(store).cargar(ctx(), 'prog1')).estado).not.toBe('EVALUADO');
   });
 
-  it('con aprobación humana de todas las piezas, ejecutar corre el ciclo hasta EVALUADO', async () => {
+  it('con aprobación humana de TODOS los recursos (piezas+variantes+calendario), ejecutar corre hasta EVALUADO', async () => {
     const store = new InMemoryEventStore();
     await sembrar(store);
     const orq = new OrquestadorProgramaGenerativo(store);
     const apr = new AprobacionService(store);
     const prep = await orq.prepararPrograma(ctx(), 'prog1', PARAMS, attr, O);
     if (prep.tipo !== 'PREPARADO') throw new Error('no preparó');
-    for (const p of prep.piezas) await apr.decidir(ctx(), { resourceType: 'PIEZA', resourceId: p, resourceVersion: 1, decision: 'APROBADA' }, attr, O);
+    // Aprobar SÓLO las piezas no alcanza: el gate exige también variantes y entradas de calendario.
+    const recursos = await orq.recursosParaAprobar(ctx(), 'prog1');
+    expect(recursos.some((r) => r.tipo === 'VARIANTE')).toBe(true);
+    expect(recursos.some((r) => r.tipo === 'ENTRADA_CALENDARIO')).toBe(true);
+    for (const p of recursos.filter((r) => r.tipo === 'PIEZA')) await apr.decidir(ctx(), { resourceType: 'PIEZA', resourceId: p.resourceId, resourceVersion: p.version, decision: 'APROBADA' }, attr, O);
+    expect((await orq.ejecutarSimulado(ctx(), 'prog1', attr, O)).tipo).toBe('PENDIENTE_APROBACION'); // faltan variantes/calendario
+    for (const r of recursos) await apr.decidir(ctx(), { resourceType: r.tipo, resourceId: r.resourceId, resourceVersion: r.version, decision: 'APROBADA' }, attr, O);
     const res = await orq.ejecutarSimulado(ctx(), 'prog1', attr, O);
     expect(res.tipo).toBe('PROPUESTA');
     const { ProgramaService } = await import('@soec/programas');
     expect((await new ProgramaService(store).cargar(ctx(), 'prog1')).estado).toBe('EVALUADO');
+  });
+
+  it('B-5: la aprobación se liga a la versión REAL del artefacto; una versión nueva no hereda', async () => {
+    const store = new InMemoryEventStore();
+    await sembrar(store);
+    const orq = new OrquestadorProgramaGenerativo(store);
+    const apr = new AprobacionService(store);
+    await orq.prepararPrograma(ctx(), 'prog1', PARAMS, attr, O);
+    const recursos = await orq.recursosParaAprobar(ctx(), 'prog1');
+    const pieza = recursos.find((r) => r.tipo === 'PIEZA')!;
+    expect(pieza.version).toBe(1);
+    // Aprobar en v1 y verificar; luego una v2 (simulada) del mismo recurso no está aprobada.
+    await apr.decidir(ctx(), { resourceType: 'PIEZA', resourceId: pieza.resourceId, resourceVersion: 1, decision: 'APROBADA' }, attr, O);
+    expect(await apr.estaAprobada(ctx(), 'PIEZA', pieza.resourceId, 1)).toBe(true);
+    expect(await apr.estaAprobada(ctx(), 'PIEZA', pieza.resourceId, 2)).toBe(false); // v2 no hereda
   });
 });

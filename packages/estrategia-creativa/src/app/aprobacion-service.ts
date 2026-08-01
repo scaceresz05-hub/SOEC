@@ -69,4 +69,13 @@ export class AprobacionService {
   async estaAprobada(ctx: RequestContext, tipo: TipoRecurso, resourceId: string, resourceVersion: number): Promise<boolean> {
     return estaAprobada(await this.cargar(ctx, tipo, resourceId), resourceVersion);
   }
+
+  /**
+   * ¿La ÚLTIMA decisión del recurso es APROBADA (en cualquier versión)? Cross-check coarso para consumidores
+   * que no conocen la versión exacta (p. ej. el calendario, B-4): rechaza si nunca se aprobó o si la última
+   * decisión fue RECHAZADA/CAMBIOS_SOLICITADOS. El gate estricto por versión sigue siendo `estaAprobada`.
+   */
+  async aprobadaVigente(ctx: RequestContext, tipo: TipoRecurso, resourceId: string): Promise<boolean> {
+    return (await this.cargar(ctx, tipo, resourceId)).ultima?.decision === 'APROBADA';
+  }
 }

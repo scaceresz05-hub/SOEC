@@ -228,15 +228,18 @@ export function registerGeneracionRoutes(app: FastifyInstance, store: EventStore
     return reply.send({ entradas: cal.entradas, naturaleza: 'SIMULADO' });
   });
 
+  // Lista TODOS los recursos que exigen aprobación (piezas + variantes + entradas de calendario), cada uno
+  // con su versión REAL y su última decisión, para que la UI apruebe lo que falte antes de ejecutar (B-4/B-5).
   app.get(`${BASE}/:programaId/approvals`, async (req, reply) => {
     const ctx = contextoDe(req);
     exigir(req, 'generation.read');
     const { programaId } = req.params as { programaId: string };
-    const prog = await programas.cargar(ctx, programaId);
+    const recursos = await orquestador.recursosParaAprobar(ctx, programaId);
     const items = [] as unknown[];
-    for (const pieza of prog.campanias.flatMap((c) => c.contenidoIds)) {
-      const st = await aprobaciones.cargar(ctx, 'PIEZA', pieza);
-      items.push({ resourceType: 'PIEZA', resourceId: pieza, ultima: st.ultima });
+    for (const r of recursos) {
+      const st = await aprobaciones.cargar(ctx, r.tipo, r.resourceId);
+      const aprobado = st.ultima?.decision === 'APROBADA' && st.ultima.resourceVersion === r.version;
+      items.push({ resourceType: r.tipo, resourceId: r.resourceId, resourceVersion: r.version, aprobado, ultima: st.ultima });
     }
     return reply.send({ aprobaciones: items, naturaleza: 'SIMULADO' });
   });

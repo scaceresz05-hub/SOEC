@@ -5,6 +5,7 @@
  */
 import type { Attribution, EventInput, EventStore, RequestContext } from '@soec/contracts';
 import { EstrategiaCreativaInvalidaError } from '../domain/errors';
+import { AprobacionService } from './aprobacion-service';
 import {
   type CalendarioState,
   EVENTOS_CAL,
@@ -27,7 +28,10 @@ export interface EntradaNuevaCalendario {
 }
 
 export class CalendarioEditorialService {
-  constructor(private readonly store: EventStore) {}
+  private readonly aprobacion: AprobacionService;
+  constructor(private readonly store: EventStore, aprobacion?: AprobacionService) {
+    this.aprobacion = aprobacion ?? new AprobacionService(store);
+  }
 
   private org(ctx: RequestContext): string {
     return String(ctx.organizationId);
@@ -50,10 +54,16 @@ export class CalendarioEditorialService {
     return this.cargar(ctx, programaId);
   }
 
-  /** Agrega una entrada en estado BORRADOR (aún no programada). No se admiten fechas inválidas. */
-  async agregarEntrada(ctx: RequestContext, programaId: string, e: EntradaNuevaCalendario, a: Attribution, o: string): Promise<CalendarioState> {
+  /**
+   * Agrega una entrada en estado BORRADOR (aún no programada). No admite fechas inválidas ni (C-4) fechas
+   * PASADAS respecto del instante del comando, salvo import histórico explícito (`opts.permitirHistorico`).
+   */
+  async agregarEntrada(ctx: RequestContext, programaId: string, e: EntradaNuevaCalendario, a: Attribution, o: string, opts?: { permitirHistorico?: boolean }): Promise<CalendarioState> {
     if (!e.entradaId?.trim() || !e.canal?.trim() || !e.piezaId?.trim()) throw new EstrategiaCreativaInvalidaError('entradaId, canal y piezaId son obligatorios');
     if (!Number.isFinite(Date.parse(e.fechaHora))) throw new EstrategiaCreativaInvalidaError('fechaHora inválida');
+    if (!opts?.permitirHistorico && Number.isFinite(Date.parse(o)) && Date.parse(e.fechaHora) < Date.parse(o)) {
+      throw new EstrategiaCreativaInvalidaError('fechaHora en el pasado: use import histórico explícito si es intencional');
+    }
     const st = await this.cargar(ctx, programaId);
     if (!st.existe) throw new EstrategiaCreativaInvalidaError('el calendario no existe (crear primero)');
     if (st.entradas.some((x) => x.entradaId === e.entradaId)) return st; // idempotente
@@ -72,25 +82,46 @@ export class CalendarioEditorialService {
     return this.cargar(ctx, programaId);
   }
 
-  /** Transición gobernada. Al PROGRAMAR (PROGRAMADA_SIMULADA) exige estar APROBADA y sin solape. */
+  /**
+   * Transición gobernada. Al PROGRAMAR (PROGRAMADA_SIMULADA) exige: transición válida, sin solape, y
+   * (B-4) que la PIEZA de la entrada esté APROBADA en el gate CANÓNICO (`AprobacionService`) — no basta
+   * el estado interno de la entrada. Además, si se aprueba una VARIANTE de la entrada, también se exige.
+   */
   async transicionar(ctx: RequestContext, programaId: string, entradaId: string, estado: EstadoEntrada, a: Attribution, o: string): Promise<CalendarioState> {
     const st = await this.cargar(ctx, programaId);
     const ent = st.entradas.find((x) => x.entradaId === entradaId);
     if (!ent) throw new EstrategiaCreativaInvalidaError(`entrada ${entradaId} no encontrada`);
-    if (!transicionCalValida(ent.estado, estado)) throw new EstrategiaCreativaInvalidaError(`transición inválida ${ent.estado}→${estado} (no se programa contenido no aprobado)`);
-    if (estado === 'PROGRAMADA_SIMULADA' && haySolape(st.entradas, ent.canal, ent.fechaHora, entradaId)) {
-      throw new EstrategiaCreativaInvalidaError('solape: ya hay una pieza programada en ese canal e instante');
+    if (!transicionCalValida(ent.estado, estado)) throw new EstrategiaCreativaInvalidaError(`transición inválida ${ent.estado}→${estado}`);
+    if (estado === 'PROGRAMADA_SIMULADA') {
+      if (!(await this.aprobacion.aprobadaVigente(ctx, 'PIEZA', ent.piezaId))) {
+        throw new EstrategiaCreativaInvalidaError(`no se puede programar: la pieza ${ent.piezaId} no está aprobada en el gate canónico`);
+      }
+      if (ent.varianteId && !(await this.aprobacion.aprobadaVigente(ctx, 'VARIANTE', ent.varianteId))) {
+        throw new EstrategiaCreativaInvalidaError(`no se puede programar: la variante ${ent.varianteId} no está aprobada`);
+      }
+      if (haySolape(st.entradas, ent.canal, ent.fechaHora, entradaId)) {
+        throw new EstrategiaCreativaInvalidaError('solape: ya hay una pieza programada en ese canal e instante');
+      }
     }
     await this.append(ctx, programaId, st.version, EVENTOS_CAL.transicion, { entradaId, estado }, a, o);
     return this.cargar(ctx, programaId);
   }
 
-  /** Reprogramación trazable: vuelve la entrada a APROBADA con nueva fecha (historial conservado). */
-  async reprogramar(ctx: RequestContext, programaId: string, entradaId: string, nuevaFechaHora: string, a: Attribution, o: string): Promise<CalendarioState> {
+  /**
+   * Reprogramación trazable: nueva fecha conservando historial. C-3: respeta la máquina de estados — no
+   * resucita entradas TERMINALES (CANCELADA/PUBLICADA_SIMULADA). No admite fechas pasadas (C-4).
+   */
+  async reprogramar(ctx: RequestContext, programaId: string, entradaId: string, nuevaFechaHora: string, a: Attribution, o: string, opts?: { permitirHistorico?: boolean }): Promise<CalendarioState> {
     if (!Number.isFinite(Date.parse(nuevaFechaHora))) throw new EstrategiaCreativaInvalidaError('fechaHora inválida');
+    if (!opts?.permitirHistorico && Number.isFinite(Date.parse(o)) && Date.parse(nuevaFechaHora) < Date.parse(o)) {
+      throw new EstrategiaCreativaInvalidaError('fechaHora en el pasado: use import histórico explícito si es intencional');
+    }
     const st = await this.cargar(ctx, programaId);
     const ent = st.entradas.find((x) => x.entradaId === entradaId);
     if (!ent) throw new EstrategiaCreativaInvalidaError(`entrada ${entradaId} no encontrada`);
+    if (ent.estado === 'CANCELADA' || ent.estado === 'PUBLICADA_SIMULADA') {
+      throw new EstrategiaCreativaInvalidaError(`no se puede reprogramar una entrada ${ent.estado} (estado terminal)`);
+    }
     await this.append(ctx, programaId, st.version, EVENTOS_CAL.transicion, { entradaId, estado: 'APROBADA', fechaHora: nuevaFechaHora }, a, o);
     return this.cargar(ctx, programaId);
   }

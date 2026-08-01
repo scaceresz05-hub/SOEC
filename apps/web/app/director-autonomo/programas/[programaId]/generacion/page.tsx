@@ -12,7 +12,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { yo } from '../../../../../lib/auth-client';
 import {
-  aprobarPieza,
+  aprobarRecurso,
   ejecutarSimulado,
   estadoGeneracion,
   iniciarGeneracion,
@@ -110,8 +110,8 @@ export default function GeneracionPage() {
     }
   }
 
-  const piezasSinAprobar = aprobaciones.filter((a) => a.ultima?.decision !== 'APROBADA');
-  const todasAprobadas = aprobaciones.length > 0 && piezasSinAprobar.length === 0;
+  const recursosSinAprobar = aprobaciones.filter((a) => !a.aprobado);
+  const todasAprobadas = aprobaciones.length > 0 && recursosSinAprobar.length === 0;
 
   return (
     <div>
@@ -138,7 +138,7 @@ export default function GeneracionPage() {
           <button className="btn" disabled={cargando || !org} onClick={() => void accion(() => reintentarGeneracion(org, programaId, PARAMS_DEMO), 'Reintento completado.')}>Reintentar</button>{' '}
           <button className="btn" disabled={cargando || !org || !todasAprobadas} onClick={() => void accion(() => ejecutarSimulado(org, programaId), 'Ciclo simulado ejecutado.')}>Ejecutar simulado</button>
         </div>
-        {!todasAprobadas && aprobaciones.length > 0 && <p className="muted small" style={{ marginTop: 8 }}>Faltan {piezasSinAprobar.length} aprobación(es) humana(s) antes de poder ejecutar.</p>}
+        {!todasAprobadas && aprobaciones.length > 0 && <p className="muted small" style={{ marginTop: 8 }}>Faltan {recursosSinAprobar.length} aprobación(es) humana(s) (piezas/variantes/calendario) antes de poder ejecutar.</p>}
       </div>
 
       {mensaje && <div className="aviso" style={{ marginBottom: 12 }}><strong>{mensaje}</strong></div>}
@@ -197,15 +197,16 @@ export default function GeneracionPage() {
 
       <div className="card">
         <h2>Aprobaciones humanas ({aprobaciones.length})</h2>
-        {aprobaciones.length === 0 ? <p className="muted">Sin piezas para aprobar aún.</p> : aprobaciones.map((a) => (
-          <div key={a.resourceId} className="small" style={{ marginBottom: 6 }}>
-            {a.resourceId} —{' '}
-            {a.ultima?.decision === 'APROBADA'
-              ? <><span className="chip">APROBADA</span> por {a.ultima.actorUserId}</>
+        <p className="muted small">Se exige aprobación humana de cada pieza, variante A/B y entrada de calendario (en su versión), antes de ejecutar.</p>
+        {aprobaciones.length === 0 ? <p className="muted">Sin recursos para aprobar aún.</p> : aprobaciones.map((a) => (
+          <div key={`${a.resourceType}:${a.resourceId}`} className="small" style={{ marginBottom: 6 }}>
+            <span className="chip">{a.resourceType}</span> {a.resourceId} <span className="chip">v{a.resourceVersion}</span> —{' '}
+            {a.aprobado
+              ? <><span className="chip">APROBADA</span> por {a.ultima?.actorUserId}</>
               : (
                 <>
                   <span className="chip">pendiente</span>{' '}
-                  <button className="btn" disabled={cargando || !org} onClick={() => void accion(() => aprobarPieza(org, programaId, a.resourceId, 1), 'Pieza aprobada.')}>Aprobar (como humano)</button>
+                  <button className="btn" disabled={cargando || !org} onClick={() => void accion(() => aprobarRecurso(org, programaId, a.resourceType, a.resourceId, a.resourceVersion), 'Recurso aprobado.')}>Aprobar (como humano)</button>
                 </>
               )}
           </div>

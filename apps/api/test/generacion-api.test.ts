@@ -103,9 +103,13 @@ describe('Motor de Generación · API autenticada (Tramo J)', () => {
     expect(pendiente.statusCode).toBe(409);
     expect(pendiente.json().estado).toBe('PENDIENTE_APROBACION');
 
-    // Aprobación humana granular de cada pieza (version 1).
-    for (const pieza of piezas) {
-      const apr = await app.inject({ method: 'POST', url: '/generation/programas/prog1/approvals', headers: auth(cookie, slug), payload: { resourceType: 'PIEZA', resourceId: pieza, resourceVersion: 1, decision: 'APROBADA' } });
+    // Aprobación humana granular de TODOS los recursos (piezas + variantes + calendario), en su versión real.
+    const listado = await app.inject({ method: 'GET', url: '/generation/programas/prog1/approvals', headers: auth(cookie, slug) });
+    const recursos = listado.json().aprobaciones as { resourceType: string; resourceId: string; resourceVersion: number }[];
+    expect(recursos.some((r) => r.resourceType === 'VARIANTE')).toBe(true);
+    expect(recursos.some((r) => r.resourceType === 'ENTRADA_CALENDARIO')).toBe(true);
+    for (const r of recursos) {
+      const apr = await app.inject({ method: 'POST', url: '/generation/programas/prog1/approvals', headers: auth(cookie, slug), payload: { resourceType: r.resourceType, resourceId: r.resourceId, resourceVersion: r.resourceVersion, decision: 'APROBADA' } });
       expect(apr.statusCode).toBe(201);
     }
 

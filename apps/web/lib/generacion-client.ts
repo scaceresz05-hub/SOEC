@@ -46,8 +46,8 @@ const p = (programaId: string) => `${BASE}/${encodeURIComponent(programaId)}`;
 export const iniciarGeneracion = (org: string, programaId: string, params: Record<string, unknown>): Promise<ResultadoStart> => jpost(org, `${p(programaId)}/start`, params);
 export const reintentarGeneracion = (org: string, programaId: string, params: Record<string, unknown>): Promise<ResultadoStart> => jpost(org, `${p(programaId)}/retry`, params);
 export const ejecutarSimulado = (org: string, programaId: string): Promise<{ estado: string; naturaleza: string }> => jpost(org, `${p(programaId)}/run-simulated`, { modo: 'PILOT' });
-export const aprobarPieza = (org: string, programaId: string, piezaId: string, version: number): Promise<unknown> =>
-  jpost(org, `${p(programaId)}/approvals`, { resourceType: 'PIEZA', resourceId: piezaId, resourceVersion: version, decision: 'APROBADA' });
+export const aprobarRecurso = (org: string, programaId: string, resourceType: string, resourceId: string, resourceVersion: number): Promise<unknown> =>
+  jpost(org, `${p(programaId)}/approvals`, { resourceType, resourceId, resourceVersion, decision: 'APROBADA' });
 
 export const estadoGeneracion = (org: string, programaId: string): Promise<EstadoGeneracion> => jget(org, p(programaId));
 export const listarEstrategias = (org: string, programaId: string): Promise<{ estrategias: ArtefactoEstrategia[] }> => jget(org, `${p(programaId)}/creative-strategies`);
