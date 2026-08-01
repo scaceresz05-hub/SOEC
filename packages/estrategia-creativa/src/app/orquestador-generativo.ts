@@ -15,6 +15,7 @@ import { EstrategiaCreativaArtefactoService } from './artefacto-creativo-service
 import { VariantesABService } from './variantes-ab-service';
 import { CalendarioEditorialService } from './calendario-service';
 import { AprobacionService } from './aprobacion-service';
+import { ValidacionContenidoService } from './validacion-contenido-service';
 import { derivarContenidoArtefacto, estrategiaCreativaId } from '../domain/artefacto-creativo';
 import { type ParametrosCampania, SEGMENTO_NO_DETERMINADO } from '../domain/conexion';
 import type { BriefComercial, EstrategiaCreativa } from '../domain/estrategia-creativa';
@@ -47,6 +48,7 @@ export class OrquestadorProgramaGenerativo {
   private readonly ab: VariantesABService;
   private readonly calendario: CalendarioEditorialService;
   private readonly aprobacion: AprobacionService;
+  private readonly validacion: ValidacionContenidoService;
   constructor(store: EventStore, opts?: { proveedor?: ProveedorGenerativo; estrategia?: EstrategiaCreativaService }) {
     this.estrategia = opts?.estrategia ?? new EstrategiaCreativaService(store);
     this.programas = new ProgramaService(store);
@@ -56,6 +58,7 @@ export class OrquestadorProgramaGenerativo {
     this.ab = new VariantesABService(store);
     this.calendario = new CalendarioEditorialService(store);
     this.aprobacion = new AprobacionService(store);
+    this.validacion = new ValidacionContenidoService(store);
   }
 
   private piezasDe(prog: Programa): readonly string[] {
@@ -102,14 +105,14 @@ export class OrquestadorProgramaGenerativo {
     // Tramo D: persistir un artefacto de estrategia creativa de 1.ª clase por hipótesis (versionado,
     // con afirmaciones ligadas a evidencia). El contenido registrará qué versión de estrategia usó.
     const { state, hips } = await this.estrategia.contextoComercial(ctx);
-    const versionPorHipotesis = new Map<string, { id: string; version: number }>();
+    const versionPorHipotesis = new Map<string, { id: string; version: number; afirmacionesPermitidas: readonly string[]; restricciones: readonly string[]; pruebaSocialPermitida: boolean }>();
     for (const h of hipotesis) {
       const hipState = hips.find((x) => x.hipotesisId === h.id);
       if (!hipState) continue;
       const contenido = derivarContenidoArtefacto(state, brief, estrategia, hipState, { programaId, objetivoId, segmentoId: h.segmentoId, briefId, politicaVersion: 'creativa-v1' });
       const estId = estrategiaCreativaId(programaId, h.id);
       const art = await this.artefactos.establecer(ctx, estId, contenido, a, o);
-      versionPorHipotesis.set(h.id, { id: estId, version: art.artefacto?.version ?? 1 });
+      versionPorHipotesis.set(h.id, { id: estId, version: art.artefacto?.version ?? 1, afirmacionesPermitidas: contenido.afirmacionesPermitidas, restricciones: contenido.restricciones, pruebaSocialPermitida: contenido.pruebaSocialPermitida });
     }
 
     await this.calendario.crear(ctx, programaId, 'UTC', a, o); // Tramo F: calendario editorial
@@ -145,10 +148,12 @@ export class OrquestadorProgramaGenerativo {
       // falten, reusando las ya persistidas ante un reintento tras un fallo parcial).
       const ref = versionPorHipotesis.get(h.id);
       const estrategiaRef = ref ? `${ref.id}@v${ref.version}` : `estrategia:${programaId}`;
+      const politica = { afirmacionesPermitidas: ref?.afirmacionesPermitidas ?? [], restricciones: ref?.restricciones ?? [], pruebaSocialPermitida: ref?.pruebaSocialPermitida ?? false };
       let piezas = [...campania.contenidoIds];
       for (let f = piezas.length; f < PIEZAS_POR_CAMPANIA; f++) {
-        const cuerpo = await this.generarCuerpo(ctx, brief, estrategia, params.idioma, `${estrategiaRef}|formato:${FORMATOS[f] ?? `f${f}`}`, FORMATOS[f]);
-        if (cuerpo === null) return { tipo: 'ABSTENCION', faltantes: ['la generación de contenido no produjo una salida válida (rechazada por validación)'] };
+        const formato = FORMATOS[f] ?? `f${f}`;
+        const cuerpo = await this.generarCuerpo(ctx, brief, estrategia, params.idioma, `${estrategiaRef}|formato:${formato}`, politica, { referencia: `${ref?.id ?? programaId}:${formato}`, politicaVersion: 'creativa-v1' }, a, o, FORMATOS[f]);
+        if (cuerpo === null) return { tipo: 'ABSTENCION', faltantes: [`la generación de contenido para "${h.id}" no pasó la validación comercial (afirmación no respaldada o restricción); ver registro de validación`] };
         const conContenido = await this.programas.vincularContenido(
           ctx,
           programaId,
@@ -208,9 +213,26 @@ export class OrquestadorProgramaGenerativo {
     }
   }
 
-  /** Tramo C: genera el cuerpo por el puerto neutral y lo VALIDA; devuelve null si es inválido. */
-  private async generarCuerpo(ctx: RequestContext, brief: BriefComercial, estrategia: EstrategiaCreativa, idioma: string, estrategiaRef: string, formato?: string): Promise<string | null> {
+  /**
+   * Tramo C + A-3: genera el cuerpo por el puerto neutral, lo valida ESTRUCTURAL y SEMÁNTICAMENTE (contra
+   * afirmaciones permitidas/restricciones/prueba social) y registra el veredicto. Devuelve null si es
+   * inválido — nunca "confía" en la salida del proveedor: sólo pasa contenido sin afirmaciones no
+   * respaldadas. Pasa las restricciones al proveedor como `evitar` (defensa en profundidad).
+   */
+  private async generarCuerpo(
+    ctx: RequestContext,
+    brief: BriefComercial,
+    estrategia: EstrategiaCreativa,
+    idioma: string,
+    estrategiaRef: string,
+    politica: { afirmacionesPermitidas: readonly string[]; restricciones: readonly string[]; pruebaSocialPermitida: boolean },
+    meta: { referencia: string; politicaVersion: string },
+    a: Attribution,
+    o: string,
+    formato?: string,
+  ): Promise<string | null> {
     const mensajePrincipal = formato ? `${brief.mensajePrincipal} [formato: ${formato}]` : brief.mensajePrincipal;
+    const promptRef = 'prompt:pieza-comercial@v1';
     const solicitud: SolicitudGenerativa = {
       tarea: 'pieza_fuente',
       contexto: {
@@ -224,14 +246,23 @@ export class OrquestadorProgramaGenerativo {
       esquemaSalida: ['cuerpo'],
       idioma,
       limiteCaracteres: 0,
-      evitar: [],
-      promptRef: 'prompt:pieza-comercial@v1',
+      evitar: [...politica.restricciones], // A-3: ya no es [] — las restricciones reales van al proveedor
+      promptRef,
       trazabilidad: `${estrategiaRef}|brief:${brief.empresa}:${brief.producto}`,
     };
     const r = await this.proveedor.generar(ctx, solicitud);
     const val = validarRespuesta(r, ['cuerpo'], 0);
     if (!val.valida || !r.salida) return null;
     const cuerpo = r.salida.campos['cuerpo'];
-    return cuerpo && cuerpo.trim() ? cuerpo : null;
+    if (!cuerpo || !cuerpo.trim()) return null;
+    // A-3: validación SEMÁNTICA comercial + registro auditable del veredicto.
+    const veredicto = await this.validacion.validarYRegistrar(
+      ctx,
+      { cuerpo, afirmacionesPermitidas: politica.afirmacionesPermitidas, restricciones: politica.restricciones, pruebaSocialPermitida: politica.pruebaSocialPermitida },
+      { referencia: meta.referencia, promptRef, estrategiaRef, politicaVersion: meta.politicaVersion },
+      a,
+      o,
+    );
+    return veredicto.resultado === 'VALIDO' ? cuerpo : null; // INVALIDO/REQUIERE_REVISION → no publica
   }
 }

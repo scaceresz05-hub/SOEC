@@ -17,4 +17,7 @@ export * from './domain/artefacto-creativo';
 export * from './app/artefacto-creativo-service';
 export * from './domain/aprobacion';
 export * from './app/aprobacion-service';
+export * from './domain/validador-contenido';
+export * from './domain/validacion-registro';
+export * from './app/validacion-contenido-service';
 export * from './app/orquestador-generativo';
