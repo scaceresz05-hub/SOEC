@@ -77,6 +77,36 @@ Tests unitarios (derivación pura), integración (servicio event-sourced), aisla
 explicabilidad/evaluabilidad (abstención con faltantes), y test de arquitectura (SDK de proveedores
 prohibidos). Sin push/PR/merge hasta autorización.
 
+## Decisiones arquitectónicas de la corrección post-auditoría
+
+### B-2 — SSOT de aprobación
+
+Coexisten dos mecanismos: el nuevo `AprobacionService` (`domain/aprobacion.ts`) y los estados de
+`@soec/contenido-gobernado` (`APROBADO/RECHAZADO`). **Decisión:** son capas distintas, no dos autoridades
+en conflicto.
+
+- **`AprobacionService` = SSOT de la DECISIÓN HUMANA transversal y versionada** sobre cualquier recurso del
+  motor (estrategia/campaña/pieza/variante/entrada de calendario), ligada a `recurso + versión`, con actor
+  registrado. Es el **gate** que consulta el orquestador antes de ejecutar y el calendario antes de programar.
+- **`@soec/contenido-gobernado` = estado LOCAL del contenido** en su máquina editorial (BORRADOR→…→
+  PUBLICADO_SIMULADO), derivado del avance del ciclo, NO la autoridad de la decisión humana.
+
+Regla de no-duplicación: ninguna etapa ejecuta/publica consultando únicamente el estado local; el gate
+canónico (`AprobacionService.estaAprobada`/`aprobadaVigente`) es condición necesaria (ver B-4). Unificar
+completamente ambos (derivar el estado local de la decisión canónica) queda como deuda declarada, no forzada.
+
+### B-3 — Frontera de calendario
+
+Coexisten `@soec/marketing.Calendario` (planificación estratégica de actividades) y el nuevo calendario
+editorial de M3 (`domain/calendario.ts`). **Decisión — frontera explícita:**
+
+- **`@soec/marketing.Calendario` = planificación estratégica** (actividades del plan de marketing).
+- **Calendario editorial de M3 = programación OPERATIVA de piezas/variantes generadas** por el motor, con su
+  gate de aprobación canónico (B-4) y naturaleza SIMULADO.
+
+No representan la misma entidad; no se fusionan. Si en el futuro la frontera se difumina, se converge; por
+ahora se mantienen separados con esta frontera documentada.
+
 ## Estado de entrega (tramos D–L)
 
 Cerrado end-to-end sobre datos reales (sin fixtures en el flujo nuevo), todo SIMULADO:
