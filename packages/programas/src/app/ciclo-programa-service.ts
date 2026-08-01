@@ -4,7 +4,7 @@
  * (autorización + PAUSA a nivel de organización en esta V1). Reutiliza los servicios A–J; no los
  * duplica. Ejecución SIMULADA; idempotente; se detiene si la organización está en modo seguro.
  */
-import type { Attribution, EventInput, EventStore, RequestContext } from '@soec/contracts';
+import type { Attribution, EventStore, RequestContext } from '@soec/contracts';
 import { AutonomiaService, AutonomiaInvalidaError } from '@soec/autonomia';
 import { ContenidoGobernadoService } from '@soec/contenido-gobernado';
 import { AdaptadorSimuladoDeterminista, EjecucionService } from '@soec/ejecucion-simulada';
