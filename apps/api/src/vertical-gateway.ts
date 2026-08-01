@@ -68,6 +68,9 @@ export function guardarVerticales(identity: IdentityService) {
     req.headers['x-organization-id'] = ctx.organization.slug;
     req.headers['x-actor-id'] = ctx.user.id;
     req.headers['x-scope'] = scopeEventStore(ctx.permisos).join(',');
+    // Permisos comerciales EFECTIVOS del rol, para autorización fina de las rutas que la exijan
+    // (p. ej. la superficie de generación). Autoritativo: lo que envíe el cliente se descarta.
+    req.headers['x-permissions'] = [...ctx.permisos].join(',');
   };
 }
 

@@ -101,6 +101,10 @@ import { registerDirectorWorkspaceRoutes } from './director-workspace-routes';
 import { registerDirectorAutonomoRoutes } from './director-autonomo-routes';
 import { registerDirectorAutonomoProgramasRoutes } from './director-autonomo-programas-routes';
 import { registerEvaluacionRoutes } from './evaluacion-routes';
+import { registerGeneracionRoutes } from './generacion-routes';
+import { registerCommercialKnowledgeRoutes } from './commercial-knowledge-routes';
+import { EstrategiaCreativaInvalidaError } from '@soec/estrategia-creativa';
+import { ComandoCrmInvalidoError, HipotesisNoEncontradaError } from '@soec/crm-comercial';
 import {
   NegocioInvalidoError,
   ProgramaInvalidoError,
@@ -135,6 +139,7 @@ import { type Clock, systemClock } from '@soec/event-store';
 import type { Pool } from 'pg';
 import { IdentityError, IdentityService } from '@soec/identity';
 import { registerAuthRoutes, type AuthRateLimitConfig } from './auth-routes';
+import { RateLimiter } from './rate-limit';
 import { registerOrganizationsRoutes } from './organizations-routes';
 import { registrarVerticalesAutenticadas } from './vertical-gateway';
 import { registrarProteccionCsrf } from './csrf';
@@ -158,6 +163,8 @@ export interface AppDeps {
   allowedOrigins?: readonly string[];
   /** Configuración de rate limiting de autenticación (F-06). Usa defaults si se omite. */
   rateLimit?: AuthRateLimitConfig;
+  /** Limitador de acciones de generación (Tramo J). Inyectable en tests; default generoso si se omite. */
+  generationRateLimit?: RateLimiter;
 }
 
 function header(req: FastifyRequest, name: string): string | undefined {
@@ -275,6 +282,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (err instanceof NegocioInvalidoError || err instanceof ProgramaInvalidoError || err instanceof ProgramaNoEjecutableError) {
       return reply.code(422).send({ error: err.name, message: err.message });
     }
+    if (err instanceof EstrategiaCreativaInvalidaError) {
+      return reply.code(422).send({ error: err.name, message: err.message });
+    }
+    if (err instanceof ComandoCrmInvalidoError) {
+      return reply.code(400).send({ error: err.name, message: err.message });
+    }
+    if (err instanceof HipotesisNoEncontradaError) {
+      return reply.code(404).send({ error: err.name, message: err.message });
+    }
     if (
       err instanceof DecisionMktInvalidaError ||
       err instanceof TransicionDecMktInvalidaError ||
@@ -369,6 +385,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerDirectorAutonomoRoutes(target, deps.store, clock);
     registerDirectorAutonomoProgramasRoutes(target, deps.store, clock);
     registerEvaluacionRoutes(target, deps.store, clock);
+    registerGeneracionRoutes(target, deps.store, clock, deps.generationRateLimit); // Motor de Generación (M3, Tramo J)
+    registerCommercialKnowledgeRoutes(target, deps.store, clock); // Conocimiento comercial / CRM (M3, A-1)
 
     target.post('/events', async (req, reply) => {
       const ctx = contextFrom(req);

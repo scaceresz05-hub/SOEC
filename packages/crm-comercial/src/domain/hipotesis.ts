@@ -43,6 +43,12 @@ export interface HipotesisState {
    * hipótesis NO embebe el contenido del aprendizaje; solo lo enlaza por id.
    */
   readonly aprendizajeId: string | null;
+  /**
+   * Segmento/ICP al que apunta la hipótesis (A-2). Asociación EXPLÍCITA y trazable: nunca se infiere por
+   * posición ni por nombre. `null` = segmento no determinado (no genera campaña segmentada). Debe referir
+   * a un CLIENTE_IDEAL real de la MISMA organización; el servicio lo valida al asociar.
+   */
+  readonly segmentoId: string | null;
 }
 
 export const EVENTOS_HIPOTESIS = {
@@ -51,6 +57,7 @@ export const EVENTOS_HIPOTESIS = {
   transicionada: 'hip.transicionada',
   resultado: 'hip.resultado_registrado',
   aprendizajeVinculado: 'hip.aprendizaje_vinculado',
+  segmentoAsociado: 'hip.segmento_asociado',
 } as const;
 
 export function hipotesisStreamId(organizacionId: string, hipotesisId: string): string {
@@ -58,7 +65,7 @@ export function hipotesisStreamId(organizacionId: string, hipotesisId: string): 
 }
 
 export function estadoInicialHipotesis(organizacionId: string, hipotesisId: string): HipotesisState {
-  return { organizacionId, hipotesisId, version: 0, existe: false, enunciado: '', contexto: '', estado: 'ABIERTA', evidencias: [], resultado: null, aprendizajeId: null };
+  return { organizacionId, hipotesisId, version: 0, existe: false, enunciado: '', contexto: '', estado: 'ABIERTA', evidencias: [], resultado: null, aprendizajeId: null, segmentoId: null };
 }
 
 /** Transiciones válidas de la máquina de estados de una hipótesis. */
@@ -94,8 +101,9 @@ export function aplicarHipotesis(state: HipotesisState, event: RecordedEvent): H
   const next = { ...state, version: state.version + 1 };
   switch (event.type) {
     case EVENTOS_HIPOTESIS.registrada: {
-      const p = event.payload as { enunciado: string; contexto: string };
-      return { ...next, existe: true, enunciado: p.enunciado, contexto: p.contexto };
+      const p = event.payload as { enunciado: string; contexto: string; segmentoId?: string | null };
+      // Compatibilidad: eventos antiguos sin segmentoId → null (segmento no determinado).
+      return { ...next, existe: true, enunciado: p.enunciado, contexto: p.contexto, segmentoId: p.segmentoId ?? null };
     }
     case EVENTOS_HIPOTESIS.evidencia: {
       const p = event.payload as EvidenciaHipotesis;
@@ -112,6 +120,10 @@ export function aplicarHipotesis(state: HipotesisState, event: RecordedEvent): H
     case EVENTOS_HIPOTESIS.aprendizajeVinculado: {
       const p = event.payload as { aprendizajeId: string };
       return { ...next, aprendizajeId: p.aprendizajeId };
+    }
+    case EVENTOS_HIPOTESIS.segmentoAsociado: {
+      const p = event.payload as { segmentoId: string };
+      return { ...next, segmentoId: p.segmentoId };
     }
     default:
       // Eventos desconocidos (p. ej. de una versión anterior): se ignoran sin romper el replay.

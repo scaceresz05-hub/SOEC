@@ -4,7 +4,7 @@
  * (autorización + PAUSA a nivel de organización en esta V1). Reutiliza los servicios A–J; no los
  * duplica. Ejecución SIMULADA; idempotente; se detiene si la organización está en modo seguro.
  */
-import type { Attribution, EventInput, EventStore, RequestContext } from '@soec/contracts';
+import type { Attribution, EventStore, RequestContext } from '@soec/contracts';
 import { AutonomiaService, AutonomiaInvalidaError } from '@soec/autonomia';
 import { ContenidoGobernadoService } from '@soec/contenido-gobernado';
 import { AdaptadorSimuladoDeterminista, EjecucionService } from '@soec/ejecucion-simulada';
@@ -44,22 +44,31 @@ export class CicloProgramaService {
     const programa = await this.cargarPrograma(ctx, programaId);
     if (!programa.existe) throw new ProgramaInvalidoError(`el programa ${programaId} no existe`);
 
-    // Idempotencia: si el ciclo ya corrió (programa EN_EJECUCION/EVALUADO), se reconstruye.
-    if (programa.estado === 'EN_EJECUCION' || programa.estado === 'EVALUADO') {
+    // Idempotencia: un programa YA EVALUADO (ciclo completo y consistente) se reconstruye sin re-escribir.
+    if (programa.estado === 'EVALUADO') {
       return (await reconstruirVistaPrograma(this.store, ctx, programaId))!;
     }
 
-    const ej = programaEjecutable(programa);
-    if (!ej.ok) throw new ProgramaNoEjecutableError(ej.motivo);
-
-    // MODO SEGURO: la organización en PAUSA no ejecuta (respuesta gobernada, antes de escribir nada).
+    // MODO SEGURO: la organización en PAUSA no ejecuta NI reconcilia (respuesta gobernada, sin escribir).
     const autonomiaEstado = await this.autonomia.cargar(ctx);
     if (autonomiaEstado.pausado) {
       throw new AutonomiaInvalidaError('en modo seguro (PAUSA): el ciclo del programa no puede ejecutarse; reanude primero');
     }
-    if (autonomiaEstado.nivel === 0) await this.autonomia.establecerPolitica(ctx, 2, a, o);
 
-    // Ejecuta cada campaña: autoriza, publica (simulado) cada contenido, gobernado por autonomía.
+    // Primera corrida (no EN_EJECUCION): validar ejecutabilidad, fijar política y marcar EN_EJECUCION ANTES
+    // de escribir efectos — así, si una etapa falla, el programa NO queda EVALUADO y un reintento reconcilia.
+    if (programa.estado !== 'EN_EJECUCION') {
+      const ej = programaEjecutable(programa);
+      if (!ej.ok) throw new ProgramaNoEjecutableError(ej.motivo);
+      if (autonomiaEstado.nivel === 0) await this.autonomia.establecerPolitica(ctx, 2, a, o);
+      const p0 = await this.cargarPrograma(ctx, programaId);
+      await this.store.append(ctx, programaStreamId(org, programaId), p0.version, [{ type: EVENTOS_PROGRAMA.transicionado, payload: { estado: 'EN_EJECUCION' }, attribution: a, occurredAt: o }]);
+    }
+
+    // Ejecuta/RECONCILIA cada campaña. Cada etapa es idempotente y la decisión de avanzar se basa en el
+    // estado PERSISTIDO (no en el resultado de esta llamada): un reintento continúa desde la 1.ª etapa
+    // incompleta sin duplicar (A-4). Se acumulan las piezas que aún no queden consistentes.
+    const pendientes: string[] = [];
     for (const ref of programa.campanias) {
       for (const contenidoId of ref.contenidoIds) {
         await this.autonomia.otorgarAutorizacion(ctx, { accion: 'PROGRAMAR', entidadRef: contenidoId, actorHumano: 'director-humano', otorgadaEn: o, expiraEn: EXPIRA_LEJANA }, a, o);
@@ -70,24 +79,45 @@ export class CicloProgramaService {
           await this.contenidos.transicionar(ctx, contenidoId, 'EN_REVISION', a, o);
           await this.contenidos.transicionar(ctx, contenidoId, 'APROBADO', a, o);
           await this.contenidos.transicionar(ctx, contenidoId, 'PROGRAMADO', a, o);
+        } else if (cont.estado === 'EN_REVISION') {
+          await this.contenidos.transicionar(ctx, contenidoId, 'APROBADO', a, o);
+          await this.contenidos.transicionar(ctx, contenidoId, 'PROGRAMADO', a, o);
+        } else if (cont.estado === 'APROBADO') {
+          await this.contenidos.transicionar(ctx, contenidoId, 'PROGRAMADO', a, o);
         }
 
         const accionId = `acc-${contenidoId}`;
-        await this.autonomia.iniciarAccion(ctx, accionId, 'PUBLICAR_SIMULADO', contenidoId, o, a, o);
-        const ejec = await this.ejecuciones.ejecutar(ctx, { organizacionId: org, contenidoId, campaniaId: ref.campaignId, canal: cont.canal, idempotencyKey: `pub:${contenidoId}`, escenario: 'SUCCESS' }, a, o);
-        const seguir = await this.autonomia.puedeContinuar(ctx, accionId);
-        if (seguir.permitida && ejec.registro.resultado === 'PUBLICADA_SIMULADA') {
-          await this.autonomia.finalizarAccion(ctx, accionId, a, o);
+        // Idempotencia a nivel de ciclo (A-4): sólo publicar si aún no hay publicación simulada. Un reintento
+        // NO re-ejecuta (evita registros DUPLICADA que ensucian la auditoría) ni re-emite accionIniciada.
+        const yaEjec = await this.ejecuciones.cargar(ctx, contenidoId);
+        if (yaEjec.publicacionesSimuladas === 0) {
+          const preAuto = await this.autonomia.cargar(ctx);
+          if (!preAuto.accionesIniciadas.some((x) => x.accionId === accionId)) {
+            await this.autonomia.iniciarAccion(ctx, accionId, 'PUBLICAR_SIMULADO', contenidoId, o, a, o);
+          }
+          await this.ejecuciones.ejecutar(ctx, { organizacionId: org, contenidoId, campaniaId: ref.campaignId, canal: cont.canal, idempotencyKey: `pub:${contenidoId}`, escenario: 'SUCCESS' }, a, o);
+        }
+
+        // RECONCILIACIÓN por estado PERSISTIDO: si hay publicación simulada exitosa y el contenido sigue
+        // PROGRAMADO, completar su transición (aunque una corrida anterior fallara tras publicar).
+        const ejecEstado = await this.ejecuciones.cargar(ctx, contenidoId);
+        if (ejecEstado.publicacionesSimuladas > 0) {
+          const auto = await this.autonomia.cargar(ctx);
+          const acc = auto.accionesIniciadas.find((x) => x.accionId === accionId);
+          if (acc && !acc.finalizada) await this.autonomia.finalizarAccion(ctx, accionId, a, o);
           const actual = await this.contenidos.cargar(ctx, contenidoId);
           if (actual.estado === 'PROGRAMADO') await this.contenidos.transicionar(ctx, contenidoId, 'PUBLICADO_SIMULADO', a, o);
         }
+        // Consistencia final de la pieza: debe quedar PUBLICADO_SIMULADO.
+        const fin = await this.contenidos.cargar(ctx, contenidoId);
+        if (fin.estado !== 'PUBLICADO_SIMULADO') pendientes.push(contenidoId);
       }
     }
 
-    // Aprendizaje del programa (estructurado sobre un experimento simulado).
+    // Aprendizaje del programa (idempotente por learningId). Sólo si el ciclo quedó consistente.
     const learningId = `apr-${programaId}`;
     const aprendizajePrevio = await this.aprendizajes.cargar(ctx, learningId);
-    if (!aprendizajePrevio.existe) {
+    if (pendientes.length === 0 && !aprendizajePrevio.existe) {
       const exp: Experimento = { experimentoId: `exp-${programaId}`, hipotesis: 'segmentos con dolor administrativo responden mejor', metricaPrincipal: 'leads_simulados', control: { actividadId: 'c1', publicationId: 'p1' }, variante: { actividadId: 'c2', publicationId: 'p2' }, minimoObservaciones: 100, margenMinimo: 0.1 };
       const resultadoExp = evaluarExperimento(exp, 40, 500, 60, 500);
       await this.aprendizajes.registrar(ctx, learningId, {
@@ -98,10 +128,12 @@ export class CicloProgramaService {
       }, a, o);
     }
 
-    // Cierra el ciclo: programa EVALUADO.
+    // Cierre A-4: EVALUADO SÓLO si TODAS las piezas quedaron consistentes; si no, permanece EN_EJECUCION
+    // (reintentable): un nuevo ejecutarCiclo reconcilia. Nunca se marca EVALUADO con una etapa pendiente.
     const tras = await this.cargarPrograma(ctx, programaId);
-    const input: EventInput = { type: EVENTOS_PROGRAMA.transicionado, payload: { estado: 'EVALUADO' }, attribution: a, occurredAt: o };
-    await this.store.append(ctx, programaStreamId(org, programaId), tras.version, [input]);
+    if (pendientes.length === 0 && tras.estado !== 'EVALUADO') {
+      await this.store.append(ctx, programaStreamId(org, programaId), tras.version, [{ type: EVENTOS_PROGRAMA.transicionado, payload: { estado: 'EVALUADO' }, attribution: a, occurredAt: o }]);
+    }
 
     return (await reconstruirVistaPrograma(this.store, ctx, programaId))!;
   }

@@ -24,36 +24,64 @@ export type Permission =
   | 'budget.manage'
   | 'execution.read'
   | 'execution.approve'
+  | 'execution.simulate'
   | 'analytics.read'
   | 'audit.read'
-  | 'operational_mode.manage';
+  | 'operational_mode.manage'
+  // Motor de Generación Autónoma de Marketing (Macrobloque 3): permisos atómicos de la superficie de
+  // generación gobernada. Las lecturas son transversales; start/retry/simulate/approve/manage son acciones.
+  | 'generation.read'
+  | 'generation.start'
+  | 'generation.retry'
+  | 'creative.read'
+  | 'content.read'
+  | 'experiment.read'
+  | 'calendar.read'
+  | 'calendar.manage'
+  // Conocimiento comercial (CRM) — superficie mínima para alimentar el motor de generación (A-1).
+  | 'commercial_knowledge.read'
+  | 'commercial_knowledge.manage'
+  | 'commercial_hypothesis.read'
+  | 'commercial_hypothesis.manage';
 
 export type Role = 'OWNER' | 'ADMIN' | 'MARKETING_MANAGER' | 'MARKETING_OPERATOR' | 'ANALYST' | 'VIEWER';
 
 export const ROLES: readonly Role[] = ['OWNER', 'ADMIN', 'MARKETING_MANAGER', 'MARKETING_OPERATOR', 'ANALYST', 'VIEWER'];
 
-const LECTURA: readonly Permission[] = ['organization.read', 'members.read', 'business.read', 'program.read', 'campaign.read', 'budget.read', 'execution.read', 'analytics.read'];
+const LECTURA: readonly Permission[] = [
+  'organization.read', 'members.read', 'business.read', 'program.read', 'campaign.read', 'budget.read',
+  'execution.read', 'analytics.read',
+  // Lecturas de la superficie de generación y del CRM (todos los roles pueden observar).
+  'generation.read', 'creative.read', 'content.read', 'experiment.read', 'calendar.read',
+  'commercial_knowledge.read', 'commercial_hypothesis.read',
+];
+
+/** Acciones del motor de generación / CRM reservadas a quien opera (no a los roles de solo lectura). */
+const GENERACION_OPERAR: readonly Permission[] = [
+  'generation.start', 'generation.retry', 'calendar.manage',
+  'commercial_knowledge.manage', 'commercial_hypothesis.manage',
+];
 
 /** Mapa rol → permisos. Único punto de expansión. */
 const MAPA: Readonly<Record<Role, readonly Permission[]>> = {
   OWNER: [
-    ...LECTURA,
+    ...LECTURA, ...GENERACION_OPERAR,
     'organization.manage', 'members.invite', 'members.manage', 'business.manage', 'program.manage',
-    'campaign.manage', 'content.review', 'content.approve', 'budget.manage', 'execution.approve',
+    'campaign.manage', 'content.review', 'content.approve', 'budget.manage', 'execution.approve', 'execution.simulate',
     'audit.read', 'operational_mode.manage',
   ],
   ADMIN: [
-    ...LECTURA,
+    ...LECTURA, ...GENERACION_OPERAR,
     'organization.manage', 'members.invite', 'members.manage', 'business.manage', 'program.manage',
-    'campaign.manage', 'content.review', 'content.approve', 'budget.manage', 'execution.approve',
+    'campaign.manage', 'content.review', 'content.approve', 'budget.manage', 'execution.approve', 'execution.simulate',
     'audit.read',
   ],
   MARKETING_MANAGER: [
-    ...LECTURA,
+    ...LECTURA, ...GENERACION_OPERAR,
     'business.manage', 'program.manage', 'campaign.manage', 'content.review', 'content.approve',
-    'budget.manage', 'execution.approve',
+    'budget.manage', 'execution.approve', 'execution.simulate',
   ],
-  MARKETING_OPERATOR: [...LECTURA, 'program.manage', 'campaign.manage', 'content.review'],
+  MARKETING_OPERATOR: [...LECTURA, ...GENERACION_OPERAR, 'program.manage', 'campaign.manage', 'content.review'],
   ANALYST: [...LECTURA, 'audit.read'],
   VIEWER: [...LECTURA],
 };

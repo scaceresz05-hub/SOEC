@@ -53,6 +53,9 @@ importers:
       '@soec/control':
         specifier: workspace:*
         version: link:../../packages/control
+      '@soec/crm-comercial':
+        specifier: workspace:*
+        version: link:../../packages/crm-comercial
       '@soec/decision':
         specifier: workspace:*
         version: link:../../packages/decision
@@ -65,6 +68,9 @@ importers:
       '@soec/estrategia':
         specifier: workspace:*
         version: link:../../packages/estrategia
+      '@soec/estrategia-creativa':
+        specifier: workspace:*
+        version: link:../../packages/estrategia-creativa
       '@soec/evaluacion':
         specifier: workspace:*
         version: link:../../packages/evaluacion
@@ -89,6 +95,9 @@ importers:
       '@soec/models':
         specifier: workspace:*
         version: link:../../packages/models
+      '@soec/negocio':
+        specifier: workspace:*
+        version: link:../../packages/negocio
       '@soec/operacional':
         specifier: workspace:*
         version: link:../../packages/operacional
@@ -536,6 +545,31 @@ importers:
       '@soec/rubros':
         specifier: workspace:*
         version: link:../rubros
+
+  packages/estrategia-creativa:
+    dependencies:
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../contenido
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/crm-comercial':
+        specifier: workspace:*
+        version: link:../crm-comercial
+      '@soec/marketing':
+        specifier: workspace:*
+        version: link:../marketing
+      '@soec/negocio':
+        specifier: workspace:*
+        version: link:../negocio
+      '@soec/programas':
+        specifier: workspace:*
+        version: link:../programas
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
 
   packages/evaluacion:
     dependencies:
