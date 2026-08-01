@@ -17,14 +17,20 @@ const O = '2026-07-31T00:00:00.000Z';
 
 describe('Tramo 4 · variantes A/B con control experimental', () => {
   const ab = () => new VariantesABService(new InMemoryEventStore());
-  const base = { hipotesisQuePrueba: 'la prueba social sube la conversión', elementosConstantes: ['gancho', 'cta', 'oferta'], criterioExito: 'CTR > control' };
+  // Constantes SIN la variable que los tests modifican (C-5: la variable modificada no puede ser constante).
+  const base = { hipotesisQuePrueba: 'la prueba social sube la conversión', elementosConstantes: ['gancho', 'oferta', 'audiencia'], criterioExito: 'CTR > control' };
 
   it('dos variantes comparten constantes y difieren en la variable declarada', async () => {
     const s = ab();
     await s.agregarVariante(ctx(), 'p1', { ...base, varianteId: 'A', elementoModificado: 'prueba_social', diferenciaControlada: 'con testimonio' }, attr, O);
     const st = await s.agregarVariante(ctx(), 'p1', { ...base, varianteId: 'B', elementoModificado: 'prueba_social', diferenciaControlada: 'sin testimonio' }, attr, O);
     expect(st.variantes).toHaveLength(2);
-    expect(st.variantes.every((v) => v.elementosConstantes.join() === 'gancho,cta,oferta')).toBe(true);
+    expect(st.variantes.every((v) => v.elementosConstantes.join() === 'gancho,oferta,audiencia')).toBe(true);
+  });
+
+  it('C-5: rechaza si el elemento modificado también se declara constante', async () => {
+    const s = ab();
+    await expect(s.agregarVariante(ctx(), 'p1', { ...base, elementosConstantes: ['gancho', 'cta'], varianteId: 'A', elementoModificado: 'cta', diferenciaControlada: 'x' }, attr, O)).rejects.toBeInstanceOf(EstrategiaCreativaInvalidaError);
   });
 
   it('variante sin hipótesis → error; constantes distintas (dos piezas) → error', async () => {

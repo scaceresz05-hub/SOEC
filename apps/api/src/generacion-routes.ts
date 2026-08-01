@@ -115,6 +115,7 @@ export function registerGeneracionRoutes(app: FastifyInstance, store: EventStore
   app.post(`${BASE}/:programaId/approvals`, opts, async (req, reply) => {
     const ctx = contextoDe(req);
     exigir(req, 'content.approve');
+    if (!limitar(req, reply, ctx, 'approvals')) return; // C-2
     const { programaId } = req.params as { programaId: string };
     const b = (req.body ?? {}) as { resourceType?: string; resourceId?: string; resourceVersion?: number; decision?: string; comment?: string; scope?: string };
     const tipos: TipoRecurso[] = ['ESTRATEGIA_CREATIVA', 'CAMPANIA', 'PIEZA', 'VARIANTE', 'ENTRADA_CALENDARIO'];
@@ -131,6 +132,7 @@ export function registerGeneracionRoutes(app: FastifyInstance, store: EventStore
   app.post(`${BASE}/:programaId/run-simulated`, opts, async (req, reply) => {
     const ctx = contextoDe(req);
     exigir(req, 'execution.simulate');
+    if (!limitar(req, reply, ctx, 'run')) return; // C-2: el ciclo simulado es costoso; se limita
     const { programaId } = req.params as { programaId: string };
     const b = (req.body ?? {}) as { modo?: string; real?: boolean };
     if ((b.modo && b.modo !== 'PILOT' && b.modo !== 'SIMULADO') || b.real === true) {

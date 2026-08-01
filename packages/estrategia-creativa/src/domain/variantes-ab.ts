@@ -63,14 +63,15 @@ export function validarVariante(state: ExperimentoABState, v: EntradaVariante): 
   if (!v.hipotesisQuePrueba?.trim()) return { ok: false, motivo: 'una variante A/B debe declarar la hipótesis que prueba' };
   if (!v.diferenciaControlada?.trim()) return { ok: false, motivo: 'la variante debe declarar su diferencia controlada' };
   if (v.elementosConstantes.length === 0) return { ok: false, motivo: 'debe declarar los elementos constantes (control)' };
+  // C-5: la variable modificada NO puede declararse también como constante (contradicción del control).
+  if (v.elementosConstantes.includes(v.elementoModificado)) {
+    return { ok: false, motivo: `el elemento modificado '${v.elementoModificado}' no puede estar entre los constantes` };
+  }
   const otra = state.variantes[0];
   if (otra) {
     const a = [...otra.elementosConstantes].sort().join('|');
     const b = [...v.elementosConstantes].sort().join('|');
     if (a !== b) return { ok: false, motivo: 'las variantes deben compartir los mismos elementos constantes (control experimental)' };
-    if (otra.elementoModificado === v.elementoModificado && state.variantes.length >= 1 && state.variantes.every((x) => x.elementoModificado === v.elementoModificado)) {
-      // permitido: varias variantes que cambian la MISMA dimensión con distinto valor.
-    }
   }
   return { ok: true, motivo: '' };
 }
