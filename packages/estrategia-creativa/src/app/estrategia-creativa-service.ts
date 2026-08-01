@@ -16,7 +16,7 @@ import {
   estrategiaCreativaStreamId,
   reconstruirEstrategiaCreativa,
 } from '../domain/estrategia-creativa';
-import { type ParametrosCampania, type ResultadoConexion, derivarConexion } from '../domain/conexion';
+import { type ParametrosCampania, type ResultadoConexion, SEGMENTO_NO_DETERMINADO, derivarConexion } from '../domain/conexion';
 
 export class EstrategiaCreativaService {
   private readonly conocimiento: ConocimientoComercialService;
@@ -78,7 +78,10 @@ export class EstrategiaCreativaService {
     const segPresentes = new Set(programa.segmentos.map((s) => s.id));
     for (const seg of paquete.segmentos) if (!segPresentes.has(seg.id)) await this.programas.agregarSegmento(ctx, programaId, seg, a, occurredAt);
     const hipPresentes = new Set(programa.hipotesis.map((h) => h.id));
-    for (const hip of paquete.hipotesis) if (!hipPresentes.has(hip.id)) await this.programas.agregarHipotesis(ctx, programaId, hip, a, occurredAt);
+    // A-2: sólo se agregan hipótesis con un segmento DETERMINADO y existente. Las no determinadas no
+    // producen hipótesis/campaña segmentada (no se inventa asociación); quedan como faltantes evaluables.
+    const conSegmento = paquete.hipotesis.filter((h) => h.segmentoId !== SEGMENTO_NO_DETERMINADO);
+    for (const hip of conSegmento) if (!hipPresentes.has(hip.id)) await this.programas.agregarHipotesis(ctx, programaId, hip, a, occurredAt);
     return { tipo: 'PROPUESTA', programa: await this.programas.cargar(ctx, programaId) };
   }
 

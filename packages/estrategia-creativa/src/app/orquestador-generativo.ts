@@ -16,7 +16,7 @@ import { VariantesABService } from './variantes-ab-service';
 import { CalendarioEditorialService } from './calendario-service';
 import { AprobacionService } from './aprobacion-service';
 import { derivarContenidoArtefacto, estrategiaCreativaId } from '../domain/artefacto-creativo';
-import type { ParametrosCampania } from '../domain/conexion';
+import { type ParametrosCampania, SEGMENTO_NO_DETERMINADO } from '../domain/conexion';
 import type { BriefComercial, EstrategiaCreativa } from '../domain/estrategia-creativa';
 import type { Programa } from '@soec/programas';
 
@@ -89,7 +89,11 @@ export class OrquestadorProgramaGenerativo {
     if (pob.tipo === 'ABSTENCION') return pob;
     const con = await this.estrategia.derivarConexion(ctx, params);
     if (con.tipo === 'ABSTENCION') return con;
-    const { brief, estrategia, hipotesis } = con.paquete;
+    const { brief, estrategia } = con.paquete;
+    // A-2: sólo se opera sobre hipótesis con segmento DETERMINADO (cada campaña apunta a SU segmento real).
+    // Las no determinadas no generan campaña segmentada (no se inventa asociación).
+    const hipotesis = con.paquete.hipotesis.filter((h) => h.segmentoId !== SEGMENTO_NO_DETERMINADO);
+    if (hipotesis.length === 0) return { tipo: 'ABSTENCION', faltantes: ['ninguna hipótesis tiene un segmento/ICP asociado; asócielas antes de generar'] };
     const canal = params.canales[0] ?? 'correo';
     const presupuestoPorCampania = Math.max(1, Math.floor(params.presupuestoTotal / Math.max(1, hipotesis.length)));
     const objetivoId = `obj-${programaId}`;

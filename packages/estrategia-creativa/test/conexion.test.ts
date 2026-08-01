@@ -45,7 +45,7 @@ async function sembrar(con: ConocimientoComercialService, hip: HipotesisComercia
   await con.establecerCampo(c, 'icp1', 'motivaciones', 'verse mejor en el trabajo', DECL, attr, O);
   await con.registrarEntidad(c, 'mkt', 'MERCADO', 'Odontología estética urbana', attr, O);
   // Una hipótesis comercial con evidencia (para derivar la hipótesis de programa).
-  await hip.registrar(c, 'h1', 'Instagram convierte mejor para el ICP joven', 'canales', attr, O);
+  await hip.registrar(c, 'h1', 'Instagram convierte mejor para el ICP joven', 'canales', attr, O, { segmentoId: 'icp1' });
   await hip.agregarEvidencia(c, 'h1', 'e1', 'ICP joven activo en IG', 'DATO_IMPORTADO', true, attr, O);
 }
 
@@ -72,6 +72,34 @@ describe('@soec/estrategia-creativa · paquete de conexión', () => {
       expect(p.objetivo.canales).toContain('instagram');
       expect(p.estrategia.concepto).toBeTruthy();
     }
+  });
+
+  it('A-2: una hipótesis SIN segmento asociado no genera hipótesis de programa segmentada', async () => {
+    const store = new InMemoryEventStore();
+    const con = new ConocimientoComercialService(store);
+    const hip = new HipotesisComercialService(store);
+    await sembrar(con, hip); // h1 → icp1 (con segmento)
+    const c = ctx();
+    // Segunda hipótesis SIN asociar segmento.
+    await hip.registrar(c, 'h2', 'Algo convierte pero no sé para quién', 'canales', attr, O);
+    await hip.agregarEvidencia(c, 'h2', 'e2', 'señal difusa', 'DATO_IMPORTADO', true, attr, O);
+    const s = new EstrategiaCreativaService(store, con, hip);
+    const res = await s.poblarPrograma(ctx(), 'progX', PARAMS, attr, O);
+    expect(res.tipo).toBe('PROPUESTA');
+    if (res.tipo === 'PROPUESTA') {
+      // Sólo h1 (con segmento) entra al programa; h2 (sin segmento) NO.
+      expect(res.programa.hipotesis.map((h) => h.id)).toEqual(['h1']);
+    }
+  });
+
+  it('A-2: asociar una hipótesis a un ICP inexistente es rechazado', async () => {
+    const store = new InMemoryEventStore();
+    const con = new ConocimientoComercialService(store);
+    const hip = new HipotesisComercialService(store);
+    await sembrar(con, hip);
+    await expect(hip.registrar(ctx(), 'h9', 'x', 'canales', attr, O, { segmentoId: 'icp-inexistente' })).rejects.toThrow();
+    await hip.registrar(ctx(), 'h9', 'x', 'canales', attr, O); // sin segmento sí se registra
+    await expect(hip.asociarSegmento(ctx(), 'h9', 'p1', attr, O)).rejects.toThrow(); // p1 es PRODUCTO, no ICP
   });
 
   it('sin conocimiento suficiente → ABSTENCION (no arma un paquete inventado)', async () => {

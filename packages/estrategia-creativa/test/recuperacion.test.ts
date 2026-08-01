@@ -34,7 +34,7 @@ async function sembrar(store: EventStore, org = 'org-a') {
   await con.establecerCampo(c, 'p1', 'beneficios', 'sonrisa alineada discreta', DECL, attr, O);
   await con.registrarEntidad(c, 'icp1', 'CLIENTE_IDEAL', 'Adultos jóvenes profesionales', attr, O);
   await con.establecerCampo(c, 'icp1', 'dolores', 'vergüenza por dientes torcidos', DECL, attr, O);
-  await hip.registrar(c, 'h1', 'Correo convierte para el ICP joven', 'canales', attr, O);
+  await hip.registrar(c, 'h1', 'Correo convierte para el ICP joven', 'canales', attr, O, { segmentoId: 'icp1' });
   await hip.agregarEvidencia(c, 'h1', 'e1', 'ICP responde a email', 'DATO_IMPORTADO', true, attr, O);
 }
 

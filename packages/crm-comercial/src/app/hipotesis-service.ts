@@ -23,6 +23,7 @@ import {
 } from '../domain/hipotesis';
 import { EVENTOS_HIPINDICE, type HipIndice, hipIndiceStreamId, reconstruirHipIndice } from '../domain/indices';
 import { LIMITES, exigirBajoLimite, validarTexto } from '../domain/validacion';
+import { ConocimientoComercialService } from './conocimiento-service';
 
 function aConfianzaAprendizaje(c: Confianza): 'baja' | 'media' | 'alta' {
   return c === 'ALTA' ? 'alta' : c === 'MEDIA' ? 'media' : 'baja';
@@ -30,8 +31,23 @@ function aConfianzaAprendizaje(c: Confianza): 'baja' | 'media' | 'alta' {
 
 export class HipotesisComercialService {
   private readonly aprendizaje: AprendizajeService;
-  constructor(private readonly store: EventStore, aprendizaje?: AprendizajeService) {
+  private readonly conocimiento: ConocimientoComercialService;
+  constructor(private readonly store: EventStore, aprendizaje?: AprendizajeService, conocimiento?: ConocimientoComercialService) {
     this.aprendizaje = aprendizaje ?? new AprendizajeService(store);
+    this.conocimiento = conocimiento ?? new ConocimientoComercialService(store);
+  }
+
+  /**
+   * A-2: valida que `segmentoId` refiera a un CLIENTE_IDEAL (ICP) REAL de la MISMA organización. Nunca se
+   * infiere ni se acepta un ICP inexistente. Lanza si no existe o no es un cliente ideal.
+   */
+  private async validarSegmento(ctx: RequestContext, segmentoId: string): Promise<void> {
+    if (!segmentoId?.trim()) throw new ComandoCrmInvalidoError('segmentoId es obligatorio');
+    const conocimiento = await this.conocimiento.cargar(ctx);
+    const ent = conocimiento.entidades[segmentoId];
+    if (!ent || ent.tipo !== 'CLIENTE_IDEAL') {
+      throw new ComandoCrmInvalidoError(`el segmento ${segmentoId} no es un cliente ideal (ICP) de la organización`);
+    }
   }
 
   private org(ctx: RequestContext): string {
@@ -58,17 +74,32 @@ export class HipotesisComercialService {
     return st;
   }
 
-  /** Registra una hipótesis. H-6: asegura el agregado y LUEGO el índice (autorreparable). */
-  async registrar(ctx: RequestContext, hipotesisId: string, enunciado: string, contexto: string, a: Attribution, o: string): Promise<void> {
+  /**
+   * Registra una hipótesis. H-6: asegura el agregado y LUEGO el índice (autorreparable). A-2: opcionalmente
+   * asocia un segmento/ICP en el registro; si se provee, se valida contra un CLIENTE_IDEAL real de la org.
+   */
+  async registrar(ctx: RequestContext, hipotesisId: string, enunciado: string, contexto: string, a: Attribution, o: string, opts?: { segmentoId?: string }): Promise<void> {
     if (!hipotesisId?.trim()) throw new ComandoCrmInvalidoError('hipotesisId es obligatorio');
     const st = await this.cargar(ctx, hipotesisId);
     if (!st.existe) {
       if (!enunciado?.trim()) throw new ComandoCrmInvalidoError('enunciado es obligatorio');
       validarTexto(enunciado.trim(), LIMITES.enunciadoHipotesis, 'enunciado');
       validarTexto(contexto ?? '', LIMITES.contextoHipotesis, 'contexto'); // N-2
-      await this.append(ctx, hipotesisId, st.version, EVENTOS_HIPOTESIS.registrada, { enunciado: enunciado.trim(), contexto }, a, o);
+      if (opts?.segmentoId) await this.validarSegmento(ctx, opts.segmentoId);
+      await this.append(ctx, hipotesisId, st.version, EVENTOS_HIPOTESIS.registrada, { enunciado: enunciado.trim(), contexto, ...(opts?.segmentoId ? { segmentoId: opts.segmentoId } : {}) }, a, o);
     }
     await this.asegurarEnIndice(ctx, hipotesisId, (enunciado || st.enunciado).trim(), a, o);
+  }
+
+  /**
+   * A-2: asocia (o reasigna) EXPLÍCITAMENTE un segmento/ICP a una hipótesis existente. Valida que el ICP
+   * exista en la organización. Idempotente: si ya apunta a ese segmento, no emite evento.
+   */
+  async asociarSegmento(ctx: RequestContext, hipotesisId: string, segmentoId: string, a: Attribution, o: string): Promise<void> {
+    const st = await this.exigir(ctx, hipotesisId);
+    await this.validarSegmento(ctx, segmentoId);
+    if (st.segmentoId === segmentoId) return; // idempotente
+    await this.append(ctx, hipotesisId, st.version, EVENTOS_HIPOTESIS.segmentoAsociado, { segmentoId }, a, o);
   }
 
   async agregarEvidencia(ctx: RequestContext, hipotesisId: string, evidenciaId: string, descripcion: string, origen: TipoEvidencia, aFavor: boolean, a: Attribution, o: string): Promise<void> {

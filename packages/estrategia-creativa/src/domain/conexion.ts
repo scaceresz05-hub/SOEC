@@ -78,12 +78,22 @@ const MAPA_ESTADO: Record<HipotesisState['estado'], HipotesisPrograma['estado']>
   INCONCLUSA: 'RETENIDA',
 };
 
-/** Hipótesis de programa desde las hipótesis comerciales (evidencia/confianza/estado gobernados). */
-export function derivarHipotesisPrograma(hips: readonly HipotesisState[], segmentoId: string, brief: BriefComercial): HipotesisPrograma[] {
+/** Centinela para una hipótesis cuya asociación a segmento no está determinada (A-2). No genera campaña. */
+export const SEGMENTO_NO_DETERMINADO = 'SEGMENTO_NO_DETERMINADO';
+
+/**
+ * Hipótesis de programa desde las hipótesis comerciales (evidencia/confianza/estado gobernados). A-2: cada
+ * hipótesis usa su PROPIO `segmentoId` (asociación explícita del CRM), validado contra los segmentos
+ * derivados; si falta o apunta a un ICP inexistente, se marca `SEGMENTO_NO_DETERMINADO` (nunca se infiere).
+ */
+export function derivarHipotesisPrograma(hips: readonly HipotesisState[], segmentos: readonly Segmento[], brief: BriefComercial): HipotesisPrograma[] {
+  const validos = new Set(segmentos.map((s) => s.id));
   return hips
     .filter((h) => h.existe)
     .map((h) => {
       const ev = evaluarHipotesis(h);
+      const segmentoId = h.segmentoId && validos.has(h.segmentoId) ? h.segmentoId : SEGMENTO_NO_DETERMINADO;
+      const faltaSeg = segmentoId === SEGMENTO_NO_DETERMINADO ? ['segmento no determinado: asocie la hipótesis a un ICP existente'] : [];
       return {
         id: h.hipotesisId,
         segmentoId,
@@ -93,7 +103,7 @@ export function derivarHipotesisPrograma(hips: readonly HipotesisState[], segmen
         canalSimulado: 'organico',
         accionEsperada: 'conversion',
         evidencia: h.evidencias.map((e) => e.descripcion),
-        informacionFaltante: [...ev.faltantes],
+        informacionFaltante: [...ev.faltantes, ...faltaSeg],
         confianza: ev.confianza ?? 'BAJA',
         estado: MAPA_ESTADO[h.estado],
         criterioContinuacion: 'revisar con evidencia suficiente antes de escalar',
@@ -134,8 +144,7 @@ export function derivarConexion(state: ConocimientoComercialState, hips: readonl
   const creativa: DerivacionCreativa = derivarCreativa(state);
   if (creativa.tipo === 'ABSTENCION') return { tipo: 'ABSTENCION', faltantes: creativa.faltantes };
   const segmentos = derivarSegmentos(state);
-  const segmentoId = segmentos[0]?.id ?? 'segmento-principal';
-  const hipotesis = derivarHipotesisPrograma(hips, segmentoId, creativa.brief);
+  const hipotesis = derivarHipotesisPrograma(hips, segmentos, creativa.brief);
   const objetivo = derivarObjetivo(state, creativa.brief, params);
   return { tipo: 'PROPUESTA', paquete: { brief: creativa.brief, estrategia: creativa.estrategia, segmentos, hipotesis, objetivo } };
 }

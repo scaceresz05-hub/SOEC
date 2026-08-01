@@ -105,7 +105,7 @@ const CLAVES_CONTENIDO: readonly (keyof ContenidoArtefacto)[] = [
  * (version/timestamps/naturaleza) — de modo que re-derivar un contenido idéntico compara igual (B-1).
  */
 export function contenidoArtefactoCanonico(x: ContenidoArtefacto | ArtefactoEstrategiaCreativa): string {
-  return JSON.stringify(CLAVES_CONTENIDO.map((k) => (x as Record<string, unknown>)[k] ?? null));
+  return JSON.stringify(CLAVES_CONTENIDO.map((k) => (x as unknown as Record<string, unknown>)[k] ?? null));
 }
 
 /**

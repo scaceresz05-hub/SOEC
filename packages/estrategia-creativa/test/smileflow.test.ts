@@ -54,13 +54,14 @@ async function sembrarSmileFlow(store: EventStore): Promise<void> {
     await con.registrarEntidad(c, id, 'CLIENTE_IDEAL', nombre, attr, O);
     await con.establecerCampo(c, id, 'dolores', dolor, DECL, attr, O);
   }
-  const hips: [string, string][] = [
-    ['h-agenda', 'El correo convierte para clínicas con agenda desordenada'],
-    ['h-control', 'La visibilidad integrada convierte para clínicas en crecimiento'],
-    ['h-crecer', 'La operación multi-sede convierte para centros que crecen'],
+  // A-2: cada hipótesis se asocia EXPLÍCITAMENTE a su propio segmento/ICP (HA→A, HB→B, HC→C).
+  const hips: [string, string, string][] = [
+    ['h-agenda', 'El correo convierte para clínicas con agenda desordenada', 'icp-pequena'],
+    ['h-control', 'La visibilidad integrada convierte para clínicas en crecimiento', 'icp-crecimiento'],
+    ['h-crecer', 'La operación multi-sede convierte para centros que crecen', 'icp-multisede'],
   ];
-  for (const [id, enunciado] of hips) {
-    await hip.registrar(c, id, enunciado, 'canales', attr, O);
+  for (const [id, enunciado, segmentoId] of hips) {
+    await hip.registrar(c, id, enunciado, 'canales', attr, O, { segmentoId });
     await hip.agregarEvidencia(c, id, `${id}-e1`, 'segmento responde a correo', 'DATO_IMPORTADO', true, attr, O);
   }
 }
@@ -88,6 +89,16 @@ describe('@soec/estrategia-creativa · Tramo L · caso SmileFlow reproducible', 
     const piezas = prog.campanias.flatMap((c) => c.contenidoIds);
     expect(piezas.length).toBeGreaterThanOrEqual(6);
     expect(prog.campanias.every((c) => c.contenidoIds.length === 2)).toBe(true); // 2 piezas por campaña
+
+    // A-2: las 3 campañas apuntan a 3 segmentos DISTINTOS (HA→A, HB→B, HC→C), no todas al principal.
+    const segmentosCampanias = prog.campanias.map((c) => c.segmentoId).sort();
+    expect(new Set(segmentosCampanias).size).toBe(3);
+    expect(segmentosCampanias).toEqual(['icp-crecimiento', 'icp-multisede', 'icp-pequena']);
+    // Cada hipótesis usa su propio segmento (no el principal para todas).
+    const porHip = new Map(prog.campanias.map((c) => [c.hipotesisId, c.segmentoId]));
+    expect(porHip.get('h-agenda')).toBe('icp-pequena');
+    expect(porHip.get('h-control')).toBe('icp-crecimiento');
+    expect(porHip.get('h-crecer')).toBe('icp-multisede');
 
     // 3 estrategias creativas persistidas (una por hipótesis), SIMULADO y con afirmaciones con procedencia.
     const artSvc = new EstrategiaCreativaArtefactoService(store);
