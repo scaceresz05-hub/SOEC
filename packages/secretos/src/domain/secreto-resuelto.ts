@@ -6,6 +6,8 @@
  * representación (toString/toJSON/inspect) está REDACTADA. El dominio recibe, a lo sumo, esta caja opaca —
  * jamás el valor. Campo privado (`#valor`) para que no sea enumerable ni serializable.
  */
+import { FugaDeSecretoError } from './errors';
+
 export class SecretoResuelto {
   readonly #valor: string;
   /** La referencia (segura para registrar/loggear). El VALOR nunca se expone. */
@@ -21,7 +23,14 @@ export class SecretoResuelto {
    * resultado NO secreto. El valor no escapa de este ámbito. No copiar ni retornar el valor desde `fn`.
    */
   usar<T>(fn: (valor: string) => T): T {
-    return fn(this.#valor);
+    const resultado = fn(this.#valor);
+    // Defensa de frontera (F-5): rechaza el caso identidad — devolver el propio secreto en claro.
+    // Sólo cubre la igualdad exacta con un string; NO detecta exfiltración indirecta (objetos,
+    // codificaciones, excepciones): eso es responsabilidad del callback de frontera y su revisión.
+    if (typeof resultado === 'string' && resultado === this.#valor) {
+      throw new FugaDeSecretoError('usar(fn) devolvió el propio valor en claro: el resultado nunca debe ser el secreto');
+    }
+    return resultado;
   }
 
   toString(): string {
