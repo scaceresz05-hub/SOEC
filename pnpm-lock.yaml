@@ -877,6 +877,19 @@ importers:
 
   packages/rubros: {}
 
+  packages/secretos:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/plataforma-capacidades':
+        specifier: workspace:*
+        version: link:../plataforma-capacidades
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
 packages:
 
   '@adobe/css-tools@4.5.0':
