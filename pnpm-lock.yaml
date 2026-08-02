@@ -200,6 +200,22 @@ importers:
         specifier: workspace:*
         version: link:../../packages/piloto
 
+  packages/adaptadores:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/plataforma-capacidades':
+        specifier: workspace:*
+        version: link:../plataforma-capacidades
+      '@soec/secretos':
+        specifier: workspace:*
+        version: link:../secretos
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
   packages/aprendizaje:
     dependencies:
       '@soec/contracts':
