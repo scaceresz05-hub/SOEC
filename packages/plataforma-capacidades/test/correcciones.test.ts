@@ -9,6 +9,7 @@ import { InMemoryEventStore } from '@soec/event-store';
 import {
   CapacidadExternaInvalidaError,
   CapacidadesExternasService,
+  ESQUEMAS_REF,
   esConsumible,
   esReferenciaSecreto,
   esIdentificadorLogico,
@@ -43,6 +44,25 @@ describe('M4A-1 · referencia opaca real (Art. 4)', () => {
     await rej(s.configurar(ctx(), 'g', { proveedorRef: 'sk-REALTOKEN-1234567890abcdefghij', secretRef: 'env:OK', politicaDegradacion: 'SIMULAR' }, attr, O));
     await s.configurar(ctx(), 'g', { proveedorRef: 'p1', secretRef: 'vault://org-a/gen', politicaDegradacion: 'SIMULAR' }, attr, O); // válida
     expect((await s.cargar(ctx(), 'g')).secretRef).toBe('vault://org-a/gen');
+  });
+
+  it('R-1: rechaza tokens medianos/prefijos camuflados; permite referencias estructuradas', () => {
+    for (const v of ['vault:tokenABCDEF1234567890abcdef', 'vault:secretABC1234567890XYZ', 'env:abcdefghijklmnopqrst1234', 'ref:BearerABCDEF1234567890', 'secretstore:apikeyABCDEF1234567890']) {
+      expect(esReferenciaSecreto(v), `debe rechazar ${v}`).toBe(false);
+    }
+    for (const v of ['vault:org-a/generation/main', 'vault:org-123/generation/main', 'secretstore:capacidad-123', 'env:SOEC_GEN_PRIMARY', 'ref:integration-primary']) {
+      expect(esReferenciaSecreto(v), `debe permitir ${v}`).toBe(true);
+    }
+  });
+
+  it('R-2: esquema secretstore admitido sólo con referencia válida', () => {
+    expect(esReferenciaSecreto('secretstore:capacidad-123')).toBe(true);
+    expect(esReferenciaSecreto('secretstore:org-a/generation-primary')).toBe(true);
+    expect(esReferenciaSecreto('secretstore:')).toBe(false); // path vacío
+    expect(esReferenciaSecreto('secretstore:sk-1234567890abcdef')).toBe(false);
+    expect(esReferenciaSecreto('secretstore:tokenABCDEF1234567890')).toBe(false);
+    expect(esReferenciaSecreto('secretstore:api_key=x')).toBe(false); // '='
+    expect(ESQUEMAS_REF).toContain('secretstore');
   });
 });
 
