@@ -12,12 +12,15 @@ import {
   type ModoCapacidad,
   type PoliticaDegradacion,
   type SaludCapacidad,
+  type VeredictoConsumo,
   EVENTOS_CAPACIDAD,
   capacidadStreamId,
+  esConsumible,
   puedeActivarReal,
   reconstruirCapacidad,
   transicionCicloValida,
 } from '../domain/capacidad';
+import { esIdentificadorLogico, esReferenciaSecreto } from '../domain/referencias';
 import {
   type CapacidadIndice,
   EVENTOS_CAP_INDICE,
@@ -76,24 +79,61 @@ export class CapacidadesExternasService {
    * proveedor concreto) + política de degradación. Versiona la configuración (Art. 7). No admite valores que
    * parezcan un secreto en claro (guardarraíl del Art. 4).
    */
-  async configurar(ctx: RequestContext, capacidadId: string, cfg: { proveedorRef: string; secretRef: string; politicaDegradacion: PoliticaDegradacion }, a: Attribution, o: string): Promise<void> {
+  async configurar(ctx: RequestContext, capacidadId: string, cfg: { proveedorRef: string; secretRef: string; politicaDegradacion: PoliticaDegradacion; alternativaCapacidadId?: string; cacheRef?: string }, a: Attribution, o: string): Promise<void> {
     const st = await this.exigir(ctx, capacidadId);
-    if (!cfg.proveedorRef?.trim() || !cfg.secretRef?.trim()) throw new CapacidadExternaInvalidaError('proveedorRef y secretRef (referencias) son obligatorios');
     if (!POLITICAS.includes(cfg.politicaDegradacion)) throw new CapacidadExternaInvalidaError('politicaDegradacion inválida');
-    if (!esReferencia(cfg.secretRef)) throw new CapacidadExternaInvalidaError('secretRef debe ser una REFERENCIA (p. ej. env:… / vault:…), nunca el valor del secreto (Art. 4)');
-    await this.append(ctx, capacidadId, st.version, EVENTOS_CAPACIDAD.configurada, { proveedorRef: cfg.proveedorRef.trim(), secretRef: cfg.secretRef.trim(), politicaDegradacion: cfg.politicaDegradacion, configVersion: st.configVersion + 1 }, a, o);
+    // M4A-1 (Art. 4): el secretRef debe ser una REFERENCIA opaca; se rechaza cualquier valor con forma de
+    // secreto (env:sk-…, tokens largos, "Bearer …", claves con "="). El proveedorRef es un id lógico, no texto libre.
+    if (!esReferenciaSecreto(cfg.secretRef?.trim() ?? '')) throw new CapacidadExternaInvalidaError('secretRef debe ser una REFERENCIA de una allowlist (env:/vault:/aws-sm:…) y NO puede tener forma de secreto (Art. 4)');
+    if (!esIdentificadorLogico(cfg.proveedorRef?.trim() ?? '')) throw new CapacidadExternaInvalidaError('proveedorRef debe ser un identificador lógico acotado (no un secreto ni texto libre)');
+    // M4A-4 (Art. 11): la política de degradación debe traer su objetivo cuando lo requiere.
+    const alternativaCapacidadId = cfg.alternativaCapacidadId?.trim() || null;
+    const cacheRef = cfg.cacheRef?.trim() || null;
+    if (cfg.politicaDegradacion === 'ALTERNATIVA') {
+      if (!alternativaCapacidadId) throw new CapacidadExternaInvalidaError('la política ALTERNATIVA requiere alternativaCapacidadId');
+      if (alternativaCapacidadId === capacidadId) throw new CapacidadExternaInvalidaError('la alternativa no puede ser la propia capacidad (ciclo)');
+    }
+    if (cfg.politicaDegradacion === 'CACHE' && !cacheRef) throw new CapacidadExternaInvalidaError('la política CACHE requiere cacheRef');
+    // M4A-3 (Art. 7): re-configurar con contenido IDÉNTICO no versiona (evita inflación en replay/auditoría).
+    if (st.proveedorRef === cfg.proveedorRef.trim() && st.secretRef === cfg.secretRef.trim() && st.politicaDegradacion === cfg.politicaDegradacion && st.alternativaCapacidadId === alternativaCapacidadId && st.cacheRef === cacheRef) return;
+    await this.append(ctx, capacidadId, st.version, EVENTOS_CAPACIDAD.configurada, { proveedorRef: cfg.proveedorRef.trim(), secretRef: cfg.secretRef.trim(), politicaDegradacion: cfg.politicaDegradacion, alternativaCapacidadId, cacheRef, configVersion: st.configVersion + 1 }, a, o);
   }
 
   /** Avanza el ciclo de vida (Art. 3). `autorizar`/`ponerEnUso` son actos humanos gobernados. */
-  async transicionar(ctx: RequestContext, capacidadId: string, hacia: EstadoCapacidad, opts: { actorHumano?: string; reemplazadaPor?: string } = {}, a: Attribution, o: string): Promise<CapacidadState> {
+  async transicionar(ctx: RequestContext, capacidadId: string, hacia: EstadoCapacidad, opts: { actorHumano?: string } = {}, a: Attribution, o: string): Promise<CapacidadState> {
+    if (hacia === 'REEMPLAZADA') throw new CapacidadExternaInvalidaError('use reemplazar() para un reemplazo gobernado (M4A-5)');
     const st = await this.exigir(ctx, capacidadId);
     if (!transicionCicloValida(st.estado, hacia)) throw new CapacidadExternaInvalidaError(`transición inválida ${st.estado}→${hacia}`);
     if ((hacia === 'AUTORIZADA' || hacia === 'EN_USO') && !opts.actorHumano?.trim()) {
       throw new CapacidadExternaInvalidaError(`${hacia} requiere un actor humano (soberanía humana, Art. 8)`);
     }
     if (hacia === 'HABILITADA' && !st.proveedorRef) throw new CapacidadExternaInvalidaError('no se puede HABILITAR sin configurar (proveedorRef/secretRef)');
-    await this.append(ctx, capacidadId, st.version, EVENTOS_CAPACIDAD.transicionada, { estado: hacia, ...(opts.reemplazadaPor ? { reemplazadaPor: opts.reemplazadaPor } : {}) }, a, o);
+    await this.append(ctx, capacidadId, st.version, EVENTOS_CAPACIDAD.transicionada, { estado: hacia }, a, o);
     return this.cargar(ctx, capacidadId);
+  }
+
+  /**
+   * Reemplazo GOBERNADO (M4A-5): la capacidad `capacidadId` se reemplaza por `porCapacidadId`. Acto humano.
+   * Valida que el reemplazo exista en la MISMA organización, sea del MISMO tipo (compatibilidad), no sea la
+   * propia capacidad (ciclo trivial) ni una capacidad terminal, y no genere reemplazo recíproco directo.
+   */
+  async reemplazar(ctx: RequestContext, capacidadId: string, porCapacidadId: string, actorHumano: string, a: Attribution, o: string): Promise<CapacidadState> {
+    const st = await this.exigir(ctx, capacidadId);
+    if (!actorHumano?.trim()) throw new CapacidadExternaInvalidaError('el reemplazo requiere un actor humano (Art. 8)');
+    if (!porCapacidadId?.trim()) throw new CapacidadExternaInvalidaError('porCapacidadId es obligatorio');
+    if (porCapacidadId === capacidadId) throw new CapacidadExternaInvalidaError('una capacidad no puede reemplazarse a sí misma (ciclo)');
+    const destino = await this.cargar(ctx, porCapacidadId); // misma org (contexto)
+    if (!destino.existe) throw new CapacidadExternaInvalidaError(`la capacidad de reemplazo ${porCapacidadId} no existe en la organización`);
+    if (destino.terminada) throw new CapacidadExternaInvalidaError(`la capacidad de reemplazo ${porCapacidadId} está ${destino.estado} (terminal)`);
+    if (destino.tipo !== st.tipo) throw new CapacidadExternaInvalidaError(`incompatibles: ${capacidadId} es '${st.tipo}' y ${porCapacidadId} es '${destino.tipo}'`);
+    if (destino.reemplazadaPor === capacidadId) throw new CapacidadExternaInvalidaError('reemplazo recíproco (ciclo A↔B)');
+    await this.append(ctx, capacidadId, st.version, EVENTOS_CAPACIDAD.transicionada, { estado: 'REEMPLAZADA', reemplazadaPor: porCapacidadId }, a, o);
+    return this.cargar(ctx, capacidadId);
+  }
+
+  /** AUTORIDAD ÚNICA de consumibilidad (M4A-2): todo consumidor debe usar esto (no re-derivar). */
+  async puedeConsumir(ctx: RequestContext, capacidadId: string): Promise<VeredictoConsumo> {
+    return esConsumible(await this.cargar(ctx, capacidadId));
   }
 
   /**
@@ -133,9 +173,4 @@ export class CapacidadesExternasService {
     const ev: EventInput = { type: EVENTOS_CAP_INDICE.registrada, payload: { capacidadId, tipo }, attribution: a, occurredAt: o };
     await this.store.append(ctx, capacidadIndiceStreamId(org), idx.version, [ev]);
   }
-}
-
-/** Un secretRef es una REFERENCIA (esquema:…), no un valor. Guardarraíl del Art. 4. */
-function esReferencia(v: string): boolean {
-  return /^[a-z][a-z0-9+.-]*:/i.test(v.trim());
 }

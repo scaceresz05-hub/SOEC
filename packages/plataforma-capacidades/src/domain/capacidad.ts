@@ -47,6 +47,8 @@ export interface CapacidadState {
   readonly politicaDegradacion: PoliticaDegradacion | null;
   readonly proveedorRef: string | null; // REFERENCIA opaca (Art. 2). No es el proveedor concreto.
   readonly secretRef: string | null; // REFERENCIA (Art. 4). NUNCA el valor del secreto.
+  readonly alternativaCapacidadId: string | null; // objetivo de degradación ALTERNATIVA (Art. 11)
+  readonly cacheRef: string | null; // referencia de caché para degradación CACHE (Art. 11)
   readonly configVersion: number; // versión de configuración (Art. 7)
   readonly reemplazadaPor: string | null;
   readonly terminada: boolean; // ELIMINADA o REEMPLAZADA
@@ -77,6 +79,8 @@ export function estadoInicialCapacidad(org: string, capacidadId: string): Capaci
     politicaDegradacion: null,
     proveedorRef: null,
     secretRef: null,
+    alternativaCapacidadId: null,
+    cacheRef: null,
     configVersion: 0,
     reemplazadaPor: null,
     terminada: false,
@@ -109,8 +113,8 @@ export function aplicarCapacidad(state: CapacidadState, ev: RecordedEvent): Capa
       return { ...next, existe: true, tipo: p.tipo, estado: 'REGISTRADA', modo: 'SIMULADA', salud: 'SALUDABLE', politicaDegradacion: p.politicaDegradacion };
     }
     case EVENTOS_CAPACIDAD.configurada: {
-      const p = ev.payload as { proveedorRef: string; secretRef: string; politicaDegradacion: PoliticaDegradacion; configVersion: number };
-      return { ...next, proveedorRef: p.proveedorRef, secretRef: p.secretRef, politicaDegradacion: p.politicaDegradacion, configVersion: p.configVersion, estado: state.estado === 'REGISTRADA' || state.estado === 'PAUSADA' || state.estado === 'DESHABILITADA' ? 'CONFIGURADA' : state.estado };
+      const p = ev.payload as { proveedorRef: string; secretRef: string; politicaDegradacion: PoliticaDegradacion; configVersion: number; alternativaCapacidadId?: string | null; cacheRef?: string | null };
+      return { ...next, proveedorRef: p.proveedorRef, secretRef: p.secretRef, politicaDegradacion: p.politicaDegradacion, alternativaCapacidadId: p.alternativaCapacidadId ?? null, cacheRef: p.cacheRef ?? null, configVersion: p.configVersion, estado: state.estado === 'REGISTRADA' || state.estado === 'PAUSADA' || state.estado === 'DESHABILITADA' ? 'CONFIGURADA' : state.estado };
     }
     case EVENTOS_CAPACIDAD.transicionada: {
       const p = ev.payload as { estado: EstadoCapacidad; reemplazadaPor?: string };
@@ -144,4 +148,28 @@ export function puedeActivarReal(state: CapacidadState): { ok: boolean; motivo: 
   if (!state.proveedorRef || !state.secretRef) return { ok: false, motivo: 'faltan referencias de proveedor/secreto (configurar primero)' };
   if (state.salud !== 'SALUDABLE') return { ok: false, motivo: `la salud es ${state.salud}; sólo una capacidad SALUDABLE puede ir a REAL` };
   return { ok: true, motivo: '' };
+}
+
+/** Veredicto de consumibilidad. Si no es consumible, `degradacion` indica la política a aplicar (Art. 11). */
+export interface VeredictoConsumo {
+  readonly consumible: boolean;
+  readonly motivo: string;
+  readonly modo: ModoCapacidad;
+  readonly degradada: boolean;
+  readonly degradacion: PoliticaDegradacion | null;
+}
+
+/**
+ * AUTORIDAD ÚNICA de consumibilidad (M4A-2, Art. 3/13). Todo consumidor (M4-C/D/M5…) DEBE usar esto en
+ * lugar de re-derivar `estado === EN_USO && salud === …`. Consumible sólo si existe, no terminal, EN_USO y
+ * salud ≠ NO_CONFIABLE. DEGRADADA es consumible pero con degradación declarada. En cualquier otro caso, no
+ * es consumible y devuelve la política de degradación aplicable.
+ */
+export function esConsumible(state: CapacidadState): VeredictoConsumo {
+  const base = { modo: state.modo, degradacion: state.politicaDegradacion } as const;
+  if (!state.existe) return { consumible: false, motivo: 'la capacidad no existe', degradada: false, ...base };
+  if (state.terminada) return { consumible: false, motivo: `capacidad ${state.estado} (terminal)`, degradada: false, ...base };
+  if (state.estado !== 'EN_USO') return { consumible: false, motivo: `no está EN_USO (${state.estado})`, degradada: false, ...base };
+  if (state.salud === 'NO_CONFIABLE') return { consumible: false, motivo: 'salud NO_CONFIABLE', degradada: true, ...base };
+  return { consumible: true, motivo: '', degradada: state.salud === 'DEGRADADA', ...base };
 }

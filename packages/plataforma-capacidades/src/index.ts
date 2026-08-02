@@ -5,6 +5,7 @@
  * versión y modo simulado/real), event-sourced, multi-tenant, determinista y NEUTRAL (sin SDKs/red/env).
  */
 export * from './domain/capacidad';
+export * from './domain/referencias';
 export * from './domain/indice';
 export * from './domain/errors';
 export * from './app/capacidades-service';

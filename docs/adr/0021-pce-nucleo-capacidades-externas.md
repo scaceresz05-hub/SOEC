@@ -27,6 +27,18 @@ Agregado **CapacidadExterna** (`capacidad-externa:<org>:<capacidadId>`) + índic
 - (+) Las invariantes constitucionales quedan codificadas y verificadas por tests (ciclo de vida, kill-switch, fail-safe, referencias, versión, multi-tenant, neutralidad).
 - (−) Aún no hay consumo real (ningún adaptador ni motor lo usa todavía): `INTEGRADO_SOLO_EN_NUCLEO` hasta M4-C/M4-D.
 
+## Correcciones post-auditoría de M4-A
+
+Tras la auditoría local del núcleo se aplicaron:
+
+- **M4A-1 (ALTO) — referencia opaca real (Art. 4):** `secretRef` debe ser una referencia de una allowlist de esquemas (`env/vault/aws-sm/gcp-sm/azure-kv/file/ref`) **y** no puede tener forma de secreto (`sk-…`, `AKIA…`, `Bearer …`, valores con `=`, espacios o tokens largos de alta entropía). `proveedorRef` se valida como identificador lógico acotado. Un secreto camuflado como referencia queda rechazado (`domain/referencias.ts`).
+- **M4A-2 (MEDIO) — autoridad única de consumibilidad:** `esConsumible(state)` es la única fuente que responde "¿puede consumirse ahora?" (EN_USO + salud ≠ NO_CONFIABLE); devuelve la política de degradación cuando no. Todo consumidor (M4-C/D) debe usarla en vez de re-derivar.
+- **M4A-3 (MEDIO) — versionado idempotente (Art. 7):** reconfigurar con contenido idéntico no incrementa `configVersion`.
+- **M4A-4 (MEDIO) — target de degradación (Art. 11):** `ALTERNATIVA` exige `alternativaCapacidadId` (≠ la propia capacidad); `CACHE` exige `cacheRef`. **Deuda documentada (no bloqueante):** la existencia/compatibilidad del target de la ALTERNATIVA se valida en el **punto de consumo (M4-D)**, no al configurar (la alternativa puede configurarse después).
+- **M4A-5 (MEDIO) — reemplazo gobernado:** `reemplazar(ctx, id, porId, actorHumano)` valida acto humano + existencia + misma organización + mismo tipo (compatibilidad) + no self + no reciprocidad directa. `transicionar(REEMPLAZADA)` queda bloqueado (forza el camino gobernado).
+
+**Deuda declarada NO bloqueante** (a abordar cuando haya consumo real): **M4A-6** kill-switch sólo por-capacidad (no org-wide/global) — alcance documentado aquí; **M4A-7** test de arquitectura por substring (guardarraíl, evadible por strings construidos); **M4A-8** faltan tests de concurrencia optimista, reparación del índice ante fallo y replay explícito.
+
 ## Fuera de alcance (tramos siguientes)
 
 Secret store real (M4-B), adaptadores de proveedor real detrás del puerto (M4-C), costeo/selección/fallback y motor supervisado (M4-D), observabilidad (M4-E). Sin publicación/gasto/envío; `AUTONOMOUS_REAL` bloqueado.
