@@ -831,6 +831,16 @@ importers:
         specifier: workspace:*
         version: link:../medicion
 
+  packages/plataforma-capacidades:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
   packages/programas:
     dependencies:
       '@soec/aprendizaje':
