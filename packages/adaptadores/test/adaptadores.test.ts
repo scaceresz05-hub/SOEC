@@ -1,72 +1,55 @@
 /**
- * @soec/adaptadores · M4-C-A · adaptadores fake y grabado (deterministas). Estructura de respuesta,
- * fallos normalizados, salud, cancelación y evidencia por clave.
+ * @soec/adaptadores · M4-C-A-H · adaptadores fake y grabado bajo el contrato NO autoritativo. Sólo aportan
+ * salida funcional (estado/salida/error); no fijan modo, identidad ni instante. Grabado scoped por tenant.
  */
 import { describe, expect, it } from 'vitest';
-import { ActorId, OrganizationId, type RequestContext } from '@soec/contracts';
-import { AdaptadorFake, AdaptadorGrabado, claveEvidencia, errorNormalizado } from '../src/index';
+import { AdaptadorFake, AdaptadorGrabado, claveGrabacion, errorNormalizado } from '../src/index';
+import { ctx, solicitud } from './helpers';
 
-const O = '2026-08-02T00:00:00.000Z';
-const ctx = (): RequestContext => {
-  const o = OrganizationId('org-a');
-  return { organizationId: o, actor: ActorId('sistema'), scope: { organizationId: o, permissions: ['events:read'] }, correlationId: 't' };
-};
-
-describe('@soec/adaptadores · AdaptadorFake', () => {
-  it('responde OK con la salida configurada por operación', async () => {
-    const fake = new AdaptadorFake({ capacidad: 'generacion', respuestas: { generar: { titulo: 'Hola' } } });
-    const r = await fake.ejecutar(ctx(), { operacion: 'generar', parametros: {} }, O);
-    expect(r.estado).toBe('OK');
-    expect(r.salida).toEqual({ titulo: 'Hola' });
-    expect(r.modo).toBe('SIMULADO');
-    expect(r.observadoEn).toBe(O);
+describe('@soec/adaptadores · AdaptadorFake (no autoritativo)', () => {
+  it('responde OK con la salida configurada; no expone campos autoritativos', async () => {
+    const fake = new AdaptadorFake({ respuestas: { generar: { titulo: 'Hola' } } });
+    const s = await fake.ejecutar(ctx(), solicitud());
+    expect(s.estado).toBe('OK');
+    expect(s.salida).toEqual({ titulo: 'Hola' });
+    expect('modo' in s).toBe(false);
+    expect('observadoEn' in s).toBe(false);
+    expect('adaptador' in s).toBe(false);
   });
 
   it('operación no soportada → INVALIDO', async () => {
     const fake = new AdaptadorFake({ respuestas: {} });
-    const r = await fake.ejecutar(ctx(), { operacion: 'x', parametros: {} }, O);
-    expect(r.estado).toBe('ERROR');
-    expect(r.error?.clase).toBe('INVALIDO');
+    const s = await fake.ejecutar(ctx(), solicitud({ peticion: { operacion: 'x', parametros: {} } }));
+    expect(s.error?.clase).toBe('INVALIDO');
   });
 
-  it('errorForzado se devuelve normalizado', async () => {
+  it('errorForzado normalizado', async () => {
     const fake = new AdaptadorFake({ errorForzado: errorNormalizado('LIMITE', 'cuota') });
-    const r = await fake.ejecutar(ctx(), { operacion: 'generar', parametros: {} }, O);
-    expect(r.error?.clase).toBe('LIMITE');
-    expect(r.error?.reintentable).toBe(true);
+    const s = await fake.ejecutar(ctx(), solicitud());
+    expect(s.error?.clase).toBe('LIMITE');
+    expect(s.error?.reintentable).toBe(true);
   });
 
-  it('respeta cancelación (AbortSignal) → CANCELADO / TIMEOUT según razón', async () => {
-    const fake = new AdaptadorFake({ respuestas: { generar: {} } });
-    const c1 = new AbortController();
-    c1.abort('cancel');
-    expect((await fake.ejecutar(ctx(), { operacion: 'generar', parametros: {} }, O, c1.signal)).error?.clase).toBe('CANCELADO');
-    const c2 = new AbortController();
-    c2.abort('timeout');
-    expect((await fake.ejecutar(ctx(), { operacion: 'generar', parametros: {} }, O, c2.signal)).error?.clase).toBe('TIMEOUT');
-  });
-
-  it('salud reporta el estado configurado con el instante inyectado', async () => {
+  it('salud sin instante (lo estampa el sandbox)', async () => {
     const fake = new AdaptadorFake({ salud: 'DEGRADADO' });
-    expect(await fake.salud(ctx(), O)).toEqual({ estado: 'DEGRADADO', detalle: 'fake', observadoEn: O });
+    expect(await fake.salud()).toEqual({ estado: 'DEGRADADO', detalle: 'fake' });
   });
 });
 
-describe('@soec/adaptadores · AdaptadorGrabado', () => {
-  it('reproduce por clave determinista de la petición', async () => {
-    const peticion = { operacion: 'consultar', parametros: { rut: '11', tipo: 'A' } };
-    const clave = claveEvidencia(peticion);
-    const grabado = new AdaptadorGrabado({ [clave]: { ok: 'sí' } });
-    const r = await grabado.ejecutar(ctx(), peticion, O);
-    expect(r.estado).toBe('OK');
-    expect(r.salida).toEqual({ ok: 'sí' });
-    // Clave estable: los parámetros se ordenan.
-    expect(clave).toBe('consultar(rut=11&tipo=A)');
+describe('@soec/adaptadores · AdaptadorGrabado (scoped por tenant/capacidad/versión)', () => {
+  it('reproduce por la clave scoped', async () => {
+    const sol = solicitud({ peticion: { operacion: 'consultar', parametros: { folio: '9' } } });
+    const clave = claveGrabacion('org-a', 'gen', '1.0.0', sol.peticion);
+    const grabado = new AdaptadorGrabado({ [clave]: { ok: 'sí' } }, { version: '1.0.0' });
+    const s = await grabado.ejecutar(ctx('org-a'), sol);
+    expect(s.estado).toBe('OK');
+    expect(s.salida).toEqual({ ok: 'sí' });
+    expect(clave).toBe('org-a::gen::1.0.0::consultar(folio=9)');
   });
 
-  it('sin grabación → NO_DISPONIBLE', async () => {
-    const grabado = new AdaptadorGrabado({});
-    const r = await grabado.ejecutar(ctx(), { operacion: 'consultar', parametros: {} }, O);
-    expect(r.error?.clase).toBe('NO_DISPONIBLE');
+  it('sin grabación para el scope → NO_DISPONIBLE', async () => {
+    const grabado = new AdaptadorGrabado({}, { version: '1.0.0' });
+    const s = await grabado.ejecutar(ctx('org-a'), solicitud());
+    expect(s.error?.clase).toBe('NO_DISPONIBLE');
   });
 });

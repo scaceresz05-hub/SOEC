@@ -1,21 +1,20 @@
 /**
- * @soec/adaptadores · adaptador FAKE (determinista, sólo dev/test — M4-C-A).
+ * @soec/adaptadores · adaptador FAKE (determinista, sólo dev/test — M4-C-A / endurecido en M4-C-A-H).
  *
- * Responde de forma determinista según un mapa `operacion → salida`, más una salud configurable y, opcional,
- * un fallo normalizado forzado para probar la frontera. NO toca red, entorno, reloj ni SDKs. Respeta la
- * cancelación por `AbortSignal`. Es el proveedor por defecto de la frontera mientras no exista uno real.
+ * Aporta SÓLO salida funcional no autoritativa (`SalidaAdaptador`): no decide modo, naturaleza, tenant,
+ * identidad ni instante — eso lo fija el sandbox. Responde de forma determinista según un mapa
+ * `operacion → salida`, con salud configurable y, opcional, un fallo normalizado forzado. NO toca red,
+ * entorno, reloj ni SDKs. Respeta la cancelación por `AbortSignal`.
  */
 import type { RequestContext } from '@soec/contracts';
-import type { AdaptadorExterno, EstadoSalud, PeticionAdaptador, ResultadoAdaptador, SaludAdaptador } from '../port/adaptador-externo';
+import type { AdaptadorExterno, EstadoSalud, SalidaAdaptador, SaludReporte, SolicitudAdaptador } from '../port/adaptador-externo';
 import { type ErrorNormalizado, errorNormalizado } from '../domain/errores-normalizados';
 
 export interface ConfigFake {
   readonly capacidad?: string;
   readonly version?: string;
-  /** Mapa operación → salida estructurada determinista. */
   readonly respuestas?: Readonly<Record<string, Readonly<Record<string, string>>>>;
   readonly salud?: EstadoSalud;
-  /** Si se define, toda ejecución devuelve este error normalizado (para probar la frontera). */
   readonly errorForzado?: ErrorNormalizado;
 }
 
@@ -35,24 +34,18 @@ export class AdaptadorFake implements AdaptadorExterno {
     this.#errorForzado = config.errorForzado ?? null;
   }
 
-  private abortado(signal?: AbortSignal): boolean {
-    return signal?.aborted === true;
+  async salud(): Promise<SaludReporte> {
+    return { estado: this.#salud, detalle: 'fake' };
   }
 
-  async salud(_ctx: RequestContext, observadoEn: string): Promise<SaludAdaptador> {
-    return { estado: this.#salud, detalle: 'fake', observadoEn };
-  }
-
-  async ejecutar(_ctx: RequestContext, peticion: PeticionAdaptador, observadoEn: string, signal?: AbortSignal): Promise<ResultadoAdaptador> {
-    const base = { modo: 'SIMULADO' as const, adaptador: this.nombre, version: this.version, observadoEn };
-    if (this.abortado(signal)) {
-      const razon = signal?.reason;
-      const err = razon === 'timeout' ? errorNormalizado('TIMEOUT', 'se agotó el plazo de ejecución') : errorNormalizado('CANCELADO', 'ejecución cancelada');
-      return { estado: 'ERROR', salida: null, error: err, ...base };
+  async ejecutar(_ctx: RequestContext, solicitud: SolicitudAdaptador, signal?: AbortSignal): Promise<SalidaAdaptador> {
+    if (signal?.aborted) {
+      const clase = signal.reason === 'timeout' ? 'TIMEOUT' : 'CANCELADO';
+      return { estado: 'ERROR', salida: null, error: errorNormalizado(clase, clase === 'TIMEOUT' ? 'se agotó el plazo' : 'ejecución cancelada') };
     }
-    if (this.#errorForzado) return { estado: 'ERROR', salida: null, error: this.#errorForzado, ...base };
-    const salida = this.#respuestas.get(peticion.operacion);
-    if (!salida) return { estado: 'ERROR', salida: null, error: errorNormalizado('INVALIDO', `operación no soportada: ${peticion.operacion}`), ...base };
-    return { estado: 'OK', salida, error: null, ...base };
+    if (this.#errorForzado) return { estado: 'ERROR', salida: null, error: this.#errorForzado };
+    const salida = this.#respuestas.get(solicitud.peticion.operacion);
+    if (!salida) return { estado: 'ERROR', salida: null, error: errorNormalizado('INVALIDO', `operación no soportada: ${solicitud.peticion.operacion}`) };
+    return { estado: 'OK', salida, error: null };
   }
 }
