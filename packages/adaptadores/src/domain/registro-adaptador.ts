@@ -183,9 +183,11 @@ export function reconstruirAdaptador(org: string, adaptadorId: string, eventos: 
 }
 
 /**
- * Consumibilidad OPERATIVA del adaptador (complementa a `esConsumible` de la capacidad, no la reemplaza).
- * Sólo un adaptador AUTORIZADO, no terminal, no expirado, con salud ≠ NO_CONFIABLE y breaker ≠ ABIERTO
- * puede consumirse. `ahora` (ISO) se inyecta para evaluar la expiración sin reloj interno.
+ * Autorización de CICLO DE VIDA del adaptador (complementa a `esConsumible` de la capacidad, no la
+ * reemplaza). Sólo un adaptador AUTORIZADO, no terminal, no revocado, no expirado y no pausado está
+ * operativamente autorizado. `ahora` (ISO) se inyecta para evaluar la expiración sin reloj interno.
+ * La salud (fail-safe) y el circuit breaker son gates RUNTIME SEPARADOS (los evalúa el orquestador con
+ * `efectoSalud` y `evaluarBreaker`), para distinguir su causa (`NO_DISPONIBLE`) del rechazo de autorización.
  */
 export function puedeConsumirOperativo(reg: RegistroAdaptador, ahora: string): { ok: boolean; motivo: string } {
   if (!reg.existe) return { ok: false, motivo: 'adaptador no existe' };
@@ -194,7 +196,5 @@ export function puedeConsumirOperativo(reg: RegistroAdaptador, ahora: string): {
   if (reg.estado === 'EXPIRADO' || (reg.expiraEn !== null && reg.expiraEn <= ahora)) return { ok: false, motivo: 'adaptador EXPIRADO' };
   if (reg.estado === 'PAUSADO') return { ok: false, motivo: 'adaptador PAUSADO' };
   if (reg.estado !== 'AUTORIZADO') return { ok: false, motivo: `adaptador no AUTORIZADO (${reg.estado})` };
-  if (reg.salud === 'NO_CONFIABLE') return { ok: false, motivo: 'salud NO_CONFIABLE' };
-  if (reg.circuitBreaker.estado === 'ABIERTO') return { ok: false, motivo: 'circuit breaker ABIERTO' };
   return { ok: true, motivo: '' };
 }

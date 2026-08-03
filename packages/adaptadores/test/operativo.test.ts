@@ -12,6 +12,7 @@ import {
   registrarResultadoBreaker,
   verificarCompatibilidad,
   CIRCUIT_BREAKER_CERRADO,
+  type EstadoCircuitBreaker,
 } from '../src/index';
 
 const compat = { contratoId: 'gen', versionesContratoSoportadas: ['1.0.0', '1.1.0'], implementacionVersion: '1.0.0', evidenciaSchemaVersion: '1' };
@@ -53,7 +54,7 @@ describe('@soec/adaptadores · circuit breaker (determinista)', () => {
   });
 
   it('pasa a SEMIABIERTO tras el tiempo de reapertura (instante inyectado)', () => {
-    let e = { estado: 'ABIERTO' as const, fallosConsecutivos: 3, abiertoDesde: T0 };
+    let e: EstadoCircuitBreaker = { estado: 'ABIERTO', fallosConsecutivos: 3, abiertoDesde: T0 };
     expect(evaluarBreaker(e, politicaBreaker, T0).permitido).toBe(false);
     const ev = evaluarBreaker(e, politicaBreaker, T31);
     expect(ev.permitido).toBe(true);
