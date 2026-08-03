@@ -200,6 +200,35 @@ importers:
         specifier: workspace:*
         version: link:../../packages/piloto
 
+  packages/adaptador-generativo-externo:
+    dependencies:
+      '@soec/adaptadores':
+        specifier: workspace:*
+        version: link:../adaptadores
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@soec/plataforma-capacidades':
+        specifier: workspace:*
+        version: link:../plataforma-capacidades
+
+  packages/adaptadores:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/plataforma-capacidades':
+        specifier: workspace:*
+        version: link:../plataforma-capacidades
+      '@soec/secretos':
+        specifier: workspace:*
+        version: link:../secretos
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
   packages/aprendizaje:
     dependencies:
       '@soec/contracts':
@@ -831,6 +860,16 @@ importers:
         specifier: workspace:*
         version: link:../medicion
 
+  packages/plataforma-capacidades:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
   packages/programas:
     dependencies:
       '@soec/aprendizaje':
@@ -866,6 +905,19 @@ importers:
         version: link:../event-store
 
   packages/rubros: {}
+
+  packages/secretos:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/plataforma-capacidades':
+        specifier: workspace:*
+        version: link:../plataforma-capacidades
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
 
 packages:
 
