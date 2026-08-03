@@ -26,6 +26,7 @@ import { type RegistroAdaptador, puedeConsumirOperativo } from '../domain/regist
 import { autoridadModoReal, derivarEstadoFrontera } from '../domain/autoridad-real';
 import { descriptorSoportaReal } from '../domain/descriptor';
 import { validarInstanciaContraDescriptor } from '../domain/integridad';
+import { sellarAdaptador } from '../m4d/sellado';
 import { type EstadoCircuitBreaker, type LimiteConcurrencia, type PoliticaCircuitBreaker, type PoliticaRetry } from '../domain/operativo-tipos';
 import { evaluarBreaker, registrarResultadoBreaker } from '../domain/circuit-breaker';
 import { RETRY_DESHABILITADO, decidirRetry } from '../domain/retry';
@@ -115,13 +116,16 @@ export class OrquestadorAdaptadores {
   }
 
   async orquestar(
-    adaptador: AdaptadorExterno,
+    adaptadorEntrada: AdaptadorExterno,
     ctx: RequestContext,
     solicitud: SolicitudAdaptador,
     capacidad: CapacidadState,
     registroInicial: RegistroAdaptador,
     opciones: OpcionesOrquestacion,
   ): Promise<ResultadoOrquestacion> {
+    // F-CCC-1: sellar la instancia al entrar; el resto del flujo usa la copia sellada, de modo que un
+    // monkey-patch posterior de la instancia original no altera el comportamiento autorizado.
+    const adaptador = sellarAdaptador(adaptadorEntrada);
     const modoSolicitado: ModoAdaptador = opciones.modoSolicitado ?? 'SIMULADO';
     const org = String(ctx.organizationId);
     const politica = opciones.politicaRetry ?? RETRY_DESHABILITADO;
