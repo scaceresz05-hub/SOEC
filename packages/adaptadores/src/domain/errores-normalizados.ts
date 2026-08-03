@@ -28,6 +28,12 @@ const REINTENTABLES: ReadonlySet<ClaseErrorAdaptador> = new Set(['TIMEOUT', 'NO_
 /** Error de programación (no de frontera): se propaga; nunca es un resultado normalizado. */
 export class AdaptadorInvalidoError extends SoecError {}
 
+/** El registro de adaptador no existe en la organización. */
+export class RegistroAdaptadorNoEncontradoError extends SoecError {}
+
+/** Transición de ciclo de vida operativo no permitida (sin atajos). */
+export class TransicionAdaptadorInvalidaError extends SoecError {}
+
 export function errorNormalizado(clase: ClaseErrorAdaptador, mensaje: string): ErrorNormalizado {
   return { clase, mensaje, reintentable: REINTENTABLES.has(clase) };
 }
