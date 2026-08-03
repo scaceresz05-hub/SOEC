@@ -80,6 +80,12 @@ export interface AdaptadorExterno {
   readonly nombre: string;
   readonly capacidad: string;
   readonly version: string;
+  /**
+   * Declaración HONESTA de si el adaptador soporta ejecución REAL (Art. 9). Es un GATE obligatorio en la
+   * composición: si está ausente se asume `false` (fail-closed). El adaptador declara su capacidad; jamás
+   * la autoriza (la autorización vive en el RegistroAdaptador + gates canónicos).
+   */
+  soportaReal?(): boolean;
   salud(ctx: RequestContext, signal?: AbortSignal): Promise<SaludReporte>;
   ejecutar(ctx: RequestContext, solicitud: SolicitudAdaptador, signal?: AbortSignal): Promise<SalidaAdaptador>;
 }

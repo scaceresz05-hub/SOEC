@@ -38,6 +38,22 @@ export class HealthCheckSintetico implements HealthCheckAdaptador {
   }
 }
 
+/** Versiones de esquema de evidencia de health soportadas. */
+const HEALTH_EVIDENCIA_SOPORTADAS: ReadonlySet<string> = new Set(['1']);
+
+/**
+ * Valida ESTRICTAMENTE el resultado de un health check como ENTRADA HOSTIL (F-CB-2). Un resultado inválido
+ * NO se degrada a saludable: el orquestador lo trata fail-closed (salud DESCONOCIDA → NO_DISPONIBLE).
+ */
+export function healthValido(r: ResultadoHealthCheck | null | undefined): r is ResultadoHealthCheck {
+  if (!r || typeof r !== 'object') return false;
+  if (r.estado !== 'SALUDABLE' && r.estado !== 'DEGRADADA' && r.estado !== 'NO_CONFIABLE') return false;
+  if (typeof r.codigo !== 'string' || r.codigo.trim().length === 0 || r.codigo.length > 64) return false;
+  if (typeof r.observadoEn !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(r.observadoEn) || Number.isNaN(Date.parse(r.observadoEn))) return false;
+  if (typeof r.evidenciaVersion !== 'string' || !HEALTH_EVIDENCIA_SOPORTADAS.has(r.evidenciaVersion)) return false;
+  return true;
+}
+
 /** Efecto de la salud sobre la ejecución (fail-safe). `DESCONOCIDA` nunca permite REAL. */
 export function efectoSalud(salud: SaludRegistro, modoDeseado: 'SIMULADO' | 'REAL'): { permite: boolean; motivo: string } {
   if (salud === 'NO_CONFIABLE') return { permite: false, motivo: 'salud NO_CONFIABLE' };

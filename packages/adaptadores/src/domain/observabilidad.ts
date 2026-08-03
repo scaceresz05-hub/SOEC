@@ -8,9 +8,13 @@ import type { ClaseErrorAdaptador } from './errores-normalizados';
 import type { EstadoRegistroAdaptador, SaludRegistro } from './registro-adaptador';
 import type { EstadoBreaker } from './operativo-tipos';
 
-export const EVIDENCIA_OPERATIVA_VERSION = 1;
+export const EVIDENCIA_OPERATIVA_VERSION = 2;
 
 export type NaturalezaDuracion = 'REAL' | 'ESTIMADA' | 'SIMULADA';
+export type ModoIntencion = 'SIMULADO' | 'REAL';
+
+/** Gate que produjo un rechazo temprano (trazabilidad). `null` si la ejecución llegó al sandbox. */
+export type GateRechazo = 'CICLO_VIDA' | 'MODO_REAL' | 'COMPATIBILIDAD' | 'SALUD' | 'BREAKER' | 'CONCURRENCIA' | null;
 
 export interface EvidenciaOperativa {
   readonly evidenciaVersion: number;
@@ -22,6 +26,10 @@ export interface EvidenciaOperativa {
   readonly implementacionVersion: string;
   readonly estado: EstadoRegistroAdaptador;
   readonly salud: SaludRegistro;
+  readonly modoSolicitado: ModoIntencion;
+  readonly modoAutorizado: ModoIntencion;
+  readonly soportaReal: boolean;
+  readonly gateRechazo: GateRechazo;
   readonly intento: number;
   readonly duracion: number;
   readonly naturalezaDuracion: NaturalezaDuracion;

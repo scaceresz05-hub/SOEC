@@ -1,32 +1,36 @@
 /**
- * @soec/adaptadores · aplicación · ORQUESTADOR OPERATIVO (M4-C-B). Compone la cadena de gobernanza y delega
- * la EJECUCIÓN en el sandbox autoritativo (M4-C-A-H). Orden: estado/expiración/revocación (operativo) →
- * compatibilidad → salud (fail-safe) → circuit breaker → concurrencia → retry gobernado → SANDBOX →
- * evidencia operativa. No duplica `esConsumible` (M4-A, lo aplica el sandbox), `esReferenciaSecreto` (M4-B,
- * lo aplica el sandbox) ni la autoridad de identidad/tenant/evidencia (el sandbox). Determinista y neutral:
- * sin red/SDK/reloj (el instante se inyecta; la duración se declara SIMULADA en este bloque).
+ * @soec/adaptadores · aplicación · ORQUESTADOR OPERATIVO (M4-C-B, endurecido en M4-C-B-H). Compone la cadena
+ * de gobernanza y delega la EJECUCIÓN en el sandbox autoritativo (M4-C-A-H). El llamador sólo expresa una
+ * INTENCIÓN de modo (`modoSolicitado`); NUNCA la autoriza (F-CB-1): el modo REAL se DERIVA de fuentes
+ * autoritativas (`RegistroAdaptador.modo/estado/secretRef` + `adaptador.soportaReal()`), y el estado de
+ * frontera es una PROYECCIÓN del registro (el llamador no puede fabricarla más permisiva). El resultado del
+ * health check se valida como ENTRADA HOSTIL: inválido → fail-closed `NO_DISPONIBLE` (F-CB-2). No duplica
+ * `esConsumible` (M4-A), `esReferenciaSecreto` (M4-B) ni la autoridad de identidad/evidencia del sandbox.
+ * Orden de gates: ciclo de vida → autoridad REAL → compatibilidad → salud → breaker → concurrencia → retry
+ * → sandbox → evidencia operativa. Todo rechazo temprano ocurre ANTES de concurrencia/retry/breaker/sandbox.
  */
 import type { RequestContext } from '@soec/contracts';
 import type { CapacidadState } from '@soec/plataforma-capacidades';
 import type { AdaptadorExterno, ResultadoAdaptador, SolicitudAdaptador } from '../port/adaptador-externo';
-import type { EstadoAdaptador, ModoAdaptador } from '../domain/estado-adaptador';
+import type { ModoAdaptador } from '../domain/estado-adaptador';
 import type { EvidenciaEjecucion } from '../domain/evidencia';
 import { Sandbox } from './sandbox';
 import { blindar } from '../domain/inmutable';
 import type { ClaseErrorAdaptador } from '../domain/errores-normalizados';
 import { type RegistroAdaptador, puedeConsumirOperativo } from '../domain/registro-adaptador';
+import { autoridadModoReal, derivarEstadoFrontera, soportaReal } from '../domain/autoridad-real';
 import { type EstadoCircuitBreaker, type LimiteConcurrencia, type PoliticaCircuitBreaker, type PoliticaRetry } from '../domain/operativo-tipos';
 import { evaluarBreaker, registrarResultadoBreaker } from '../domain/circuit-breaker';
 import { RETRY_DESHABILITADO, decidirRetry } from '../domain/retry';
 import { LimitadorConcurrencia } from '../domain/concurrencia';
 import { verificarCompatibilidad, type SolicitudCompatibilidad } from '../domain/compatibilidad';
-import { type HealthCheckAdaptador, efectoSalud } from '../domain/health';
-import { EVIDENCIA_OPERATIVA_VERSION, type EvidenciaOperativa } from '../domain/observabilidad';
+import { type HealthCheckAdaptador, efectoSalud, healthValido } from '../domain/health';
+import { EVIDENCIA_OPERATIVA_VERSION, type EvidenciaOperativa, type GateRechazo } from '../domain/observabilidad';
 
 export interface OpcionesOrquestacion {
   readonly observadoEn: string;
-  readonly modoDeseado?: ModoAdaptador;
-  readonly estadoFrontera?: EstadoAdaptador;
+  /** INTENCIÓN de modo. El llamador nunca autoriza REAL; la autoridad la derivan los gates. */
+  readonly modoSolicitado?: ModoAdaptador;
   readonly politicaBreaker: PoliticaCircuitBreaker;
   readonly politicaRetry?: PoliticaRetry;
   readonly limite?: LimiteConcurrencia;
@@ -54,63 +58,67 @@ export class OrquestadorAdaptadores {
     registro: RegistroAdaptador,
     opciones: OpcionesOrquestacion,
   ): Promise<ResultadoOrquestacion> {
-    const modo: ModoAdaptador = opciones.modoDeseado ?? 'SIMULADO';
+    const modoSolicitado: ModoAdaptador = opciones.modoSolicitado ?? 'SIMULADO';
+    const soporta = soportaReal(adaptador);
     const org = String(ctx.organizationId);
 
-    const rechazo = (codigo: ClaseErrorAdaptador, intento: number, breaker: EstadoCircuitBreaker, limiteAlcanzado = false): ResultadoOrquestacion => ({
+    const rechazo = (codigo: ClaseErrorAdaptador, gate: GateRechazo, modoAutorizado: ModoAdaptador, breaker: EstadoCircuitBreaker, limiteAlcanzado = false): ResultadoOrquestacion => ({
       resultado: null,
       evidenciaSandbox: null,
-      evidenciaOperativa: this.evidencia(registro, codigo, intento, breaker.estado, false, limiteAlcanzado, opciones.observadoEn),
+      evidenciaOperativa: this.evidencia(registro, modoSolicitado, modoAutorizado, soporta, gate, codigo, 0, breaker.estado, false, limiteAlcanzado, opciones.observadoEn),
       breaker,
     });
 
-    // 1) estado operativo (incluye revocación/expiración/pausa).
-    const opGate = puedeConsumirOperativo(registro, opciones.observadoEn);
-    if (!opGate.ok) return rechazo('NO_AUTORIZADO', 0, registro.circuitBreaker);
+    // 1) ciclo de vida (existe/terminal/revocado/expirado/pausado/AUTORIZADO).
+    if (!puedeConsumirOperativo(registro, opciones.observadoEn).ok) return rechazo('NO_AUTORIZADO', 'CICLO_VIDA', 'SIMULADO', registro.circuitBreaker);
 
-    // 2) compatibilidad.
+    // 2) AUTORIDAD DEL MODO REAL (F-CB-1): derivada del registro + adaptador, nunca del llamador.
+    const autoridad = autoridadModoReal(registro, adaptador, modoSolicitado);
+    if (!autoridad.ok) return rechazo('NO_AUTORIZADO', 'MODO_REAL', 'SIMULADO', registro.circuitBreaker);
+    const modoEjecutado = autoridad.modoEjecutado;
+
+    // 3) compatibilidad.
     if (opciones.compatSolicitada && registro.compatibilidad) {
-      const compat = verificarCompatibilidad(opciones.compatSolicitada, registro.compatibilidad);
-      if (!compat.compatible) return rechazo('INVALIDO', 0, registro.circuitBreaker);
+      if (!verificarCompatibilidad(opciones.compatSolicitada, registro.compatibilidad).compatible) return rechazo('INVALIDO', 'COMPATIBILIDAD', modoEjecutado, registro.circuitBreaker);
     }
 
-    // 3) salud (fail-safe). Health check sintético puede endurecer la salud del registro.
+    // 4) salud (fail-CLOSED, F-CB-2): el resultado del health check es entrada hostil.
     let salud = registro.salud;
     if (opciones.healthCheck) {
-      const h = await opciones.healthCheck.comprobar({ ctx, adaptadorId: registro.adaptadorId, capacidadId: registro.capacidadId, observadoEn: opciones.observadoEn });
+      let h;
+      try {
+        h = await opciones.healthCheck.comprobar({ ctx, adaptadorId: registro.adaptadorId, capacidadId: registro.capacidadId, observadoEn: opciones.observadoEn });
+      } catch {
+        return rechazo('NO_DISPONIBLE', 'SALUD', modoEjecutado, registro.circuitBreaker); // health lanzó → sin fuga
+      }
+      if (!healthValido(h)) return rechazo('NO_DISPONIBLE', 'SALUD', modoEjecutado, registro.circuitBreaker); // inválido → DESCONOCIDA/bloqueo
       if (h.estado === 'NO_CONFIABLE') salud = 'NO_CONFIABLE';
       else if (h.estado === 'DEGRADADA' && salud !== 'NO_CONFIABLE') salud = 'DEGRADADA';
     }
-    if (!efectoSalud(salud, modo).permite) return rechazo('NO_DISPONIBLE', 0, registro.circuitBreaker);
+    if (!efectoSalud(salud, modoEjecutado).permite) return rechazo('NO_DISPONIBLE', 'SALUD', modoEjecutado, registro.circuitBreaker);
 
-    // 4) circuit breaker.
+    // 5) circuit breaker.
     const evalBreaker = evaluarBreaker(registro.circuitBreaker, opciones.politicaBreaker, opciones.observadoEn);
-    if (!evalBreaker.permitido) return rechazo('NO_DISPONIBLE', 0, evalBreaker.estado);
+    if (!evalBreaker.permitido) return rechazo('NO_DISPONIBLE', 'BREAKER', modoEjecutado, evalBreaker.estado);
     let breaker = evalBreaker.estado;
 
-    // 5) concurrencia (liberación garantizada).
+    // 6) concurrencia (liberación garantizada).
     const limitador = opciones.limitador ?? new LimitadorConcurrencia();
     const liberar = opciones.limite ? limitador.adquirir(org, registro.adaptadorId, registro.capacidadId, opciones.limite) : () => {};
-    if (!liberar) return rechazo('LIMITE', 0, breaker, true);
+    if (!liberar) return rechazo('LIMITE', 'CONCURRENCIA', modoEjecutado, breaker, true);
 
     try {
-      // 6) ejecución con retry gobernado (sin sleep real: determinismo).
+      // 7) ejecución con retry gobernado (sin sleep real: determinismo). La frontera se DERIVA del registro.
+      const estadoFrontera = derivarEstadoFrontera(registro);
       const politica = opciones.politicaRetry ?? RETRY_DESHABILITADO;
+      const correr = () => this.sandbox.ejecutar(adaptador, ctx, solicitud, capacidad, opciones.observadoEn, { signal: opciones.signal, modoDeseado: modoEjecutado, estadoAdaptador: estadoFrontera });
       let intento = 1;
-      let res = await this.sandbox.ejecutar(adaptador, ctx, solicitud, capacidad, opciones.observadoEn, {
-        signal: opciones.signal,
-        modoDeseado: modo,
-        estadoAdaptador: opciones.estadoFrontera,
-      });
+      let res = await correr();
       while (res.resultado.estado === 'ERROR' && res.resultado.error) {
         const d = decidirRetry(politica, intento, res.resultado.error.clase);
         if (!d.reintentar) break;
         intento += 1;
-        res = await this.sandbox.ejecutar(adaptador, ctx, solicitud, capacidad, opciones.observadoEn, {
-          signal: opciones.signal,
-          modoDeseado: modo,
-          estadoAdaptador: opciones.estadoFrontera,
-        });
+        res = await correr();
       }
 
       const exito = res.resultado.estado === 'OK';
@@ -119,7 +127,7 @@ export class OrquestadorAdaptadores {
       return {
         resultado: res.resultado,
         evidenciaSandbox: res.evidencia,
-        evidenciaOperativa: this.evidencia(registro, codigo, intento, breaker.estado, intento > 1, false, opciones.observadoEn),
+        evidenciaOperativa: this.evidencia(registro, modoSolicitado, modoEjecutado, soporta, null, codigo, intento, breaker.estado, intento > 1, false, opciones.observadoEn),
         breaker,
       };
     } finally {
@@ -129,6 +137,10 @@ export class OrquestadorAdaptadores {
 
   private evidencia(
     registro: RegistroAdaptador,
+    modoSolicitado: ModoAdaptador,
+    modoAutorizado: ModoAdaptador,
+    soporta: boolean,
+    gateRechazo: GateRechazo,
     codigoError: ClaseErrorAdaptador | null,
     intento: number,
     breaker: EstadoCircuitBreaker['estado'],
@@ -146,6 +158,10 @@ export class OrquestadorAdaptadores {
       implementacionVersion: registro.implementacionVersion,
       estado: registro.estado,
       salud: registro.salud,
+      modoSolicitado,
+      modoAutorizado,
+      soportaReal: soporta,
+      gateRechazo,
       intento,
       duracion: 0,
       naturalezaDuracion: 'SIMULADA' as const,

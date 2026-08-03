@@ -48,6 +48,18 @@ Un paquete-frontera neutral (`@soec/adaptador-generativo-externo`) con un adapta
 - (+) Cierra F-4 de ADR-0022 (revocación/expiración/eliminación) a nivel de contrato y evento.
 - (−) Sin proveedor real, red, SDK ni secretos: el adaptador concreto es una carcasa; el smoke real queda como contrato bloqueado. Circuit breaker/semáforo son en memoria (no distribuidos): deuda explícita para M4-C-C/M4-D.
 
+## Autoridad del modo REAL y health hostil (M4-C-B-H)
+
+La auditoría de M4-C-B halló que la composición dejaba pasar REAL con datos del llamador (F-CB-1) y que un health inválido fallaba fail-open (F-CB-2). Correcciones ratificadas:
+
+- **`RegistroAdaptador` es la autoridad del modo y la autorización.** El llamador sólo expresa una INTENCIÓN (`modoSolicitado: SIMULADO | REAL`); **jamás** autoriza REAL. El orquestador deriva el modo ejecutado con `autoridadModoReal(registro, adaptador, modoSolicitado)`, que exige `registro.estado === AUTORIZADO` **y** `registro.modo === REAL` (acto humano `activarReal`) **y** `registro.secretRef` presente **y** `adaptador.soportaReal() === true`. Con intención REAL y cualquier condición incumplida → `NO_AUTORIZADO`, **antes** de compatibilidad/salud/breaker/concurrencia/retry/sandbox, sin invocar al adaptador.
+- **`EstadoAdaptador` de frontera es una PROYECCIÓN derivada** (`derivarEstadoFrontera(registro)`), no una autoridad que el llamador pueda fabricar más permisiva. `validarCoherenciaFrontera` rechaza una frontera incoherente con el registro.
+- **`soportaReal()` es un gate obligatorio** (ausente ⇒ `false`, fail-closed). La carcasa `AdaptadorGenerativoExternoDesactivado` declara `soportaReal:false`; aun con registro REAL/AUTORIZADO + secretRef válida + capacidad consumible, su ejecución REAL termina en `NO_AUTORIZADO` sin tocar el sandbox.
+- **Health check como ENTRADA HOSTIL (fail-closed):** el resultado se valida (`healthValido`: estado ∈ {SALUDABLE,DEGRADADA,NO_CONFIABLE}, código no vacío/acotado, `observadoEn` ISO válido, `evidenciaVersion` soportada). Un resultado inválido o una excepción del health check ⇒ salud efectiva DESCONOCIDA ⇒ `NO_DISPONIBLE` (nunca SALUDABLE por defecto), sin filtrar el payload inválido.
+- **Evidencia de rechazo temprano** (`EvidenciaOperativa` v2) registra `modoSolicitado`, `modoAutorizado`, `soportaReal`, `gateRechazo` y `codigoError`, sin secreto/stack/cause/proveedor.
+
+**F-CB-3 y F-CB-4 permanecen como requisitos del próximo tramo operativo (M4-C-C):** re-evaluar los gates (expiración/revocación/cancelación) entre reintentos cuando exista backoff temporal REAL, y garantizar el single-probe en `SEMIABIERTO` bajo concurrencia (circuit breaker distribuido).
+
 ## Deuda permitida (M4-C-C/M4-D)
 
 Circuit breaker y semáforo distribuidos, métricas productivas, proveedor/SDK concreto, secret store productivo, smoke real, costeo real por proveedor, fallback real entre adaptadores. **No** son deuda: revocación, expiración, eliminación lógica, aislamiento, compatibilidad, health fail-safe, circuit breaker básico, retry gobernado, concurrencia básica, sandbox autoritativo.

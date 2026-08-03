@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { ActorId, OrganizationId, type RequestContext } from '@soec/contracts';
 import type { CapacidadState } from '@soec/plataforma-capacidades';
-import { Sandbox, estadoInicialAdaptador } from '@soec/adaptadores';
+import { Sandbox, estadoInicialAdaptador, OrquestadorAdaptadores, CIRCUIT_BREAKER_CERRADO, type RegistroAdaptador } from '@soec/adaptadores';
 import { AdaptadorGenerativoExternoDesactivado, DESCRIPTOR_GENERATIVO_EXTERNO } from '../src/index';
 
 const O = '2026-08-02T00:00:00.000Z';
@@ -45,5 +45,22 @@ describe('@soec/adaptador-generativo-externo · carcasa desactivada', () => {
     const { resultado } = await new Sandbox().ejecutar(ad, ctx(), solicitud, cap(), O, { modoDeseado: 'REAL', estadoAdaptador: estadoInicialAdaptador() });
     expect(resultado.estado).toBe('ERROR');
     expect(resultado.error?.clase).toBe('NO_AUTORIZADO');
+  });
+
+  it('vía orquestador: aun con registro REAL/AUTORIZADO + capacidad consumible, soportaReal=false → NO_AUTORIZADO sin ejecutar', async () => {
+    const reg: RegistroAdaptador = {
+      organizationId: 'org-a', adaptadorId: ad.nombre, capacidadId: 'gen', contratoId: 'generacion', contratoVersion: '1.0.0', implementacionVersion: '0.1.0',
+      estado: 'AUTORIZADO', modo: 'REAL', secretRef: 'env:GEN', salud: 'SALUDABLE', compatibilidad: null, limites: null, circuitBreaker: CIRCUIT_BREAKER_CERRADO,
+      expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4,
+    };
+    const r = await new OrquestadorAdaptadores().orquestar(ad, ctx(), solicitud, cap(), reg, {
+      observadoEn: O,
+      politicaBreaker: { maxFallosConsecutivos: 3, ventanaMs: 60000, tiempoReaperturaMs: 30000, version: '1' },
+      modoSolicitado: 'REAL',
+    });
+    expect(r.resultado).toBeNull();
+    expect(r.evidenciaOperativa.codigoError).toBe('NO_AUTORIZADO');
+    expect(r.evidenciaOperativa.gateRechazo).toBe('MODO_REAL');
+    expect(r.evidenciaOperativa.soportaReal).toBe(false);
   });
 });
