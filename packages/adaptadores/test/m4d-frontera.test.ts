@@ -113,6 +113,17 @@ describe('@soec/adaptadores · gate de presupuesto en el orquestador (REAL)', ()
     const r = await orq.orquestar(adaptador, ctx(), sol, cap(), reg(), { observadoEn: O, politicaBreaker, modoSolicitado: 'REAL' });
     expect(r.resultado?.estado).toBe('OK');
   });
+  it('nivel de activación SANDBOX bloquea REAL (ACTIVACION); PILOTO lo permite', async () => {
+    const rSandbox = await orq.orquestar(adaptador, ctx(), sol, cap(), reg(), { observadoEn: O, politicaBreaker, modoSolicitado: 'REAL', nivelActivacion: 'SANDBOX' });
+    expect(rSandbox.evidenciaOperativa.gateRechazo).toBe('ACTIVACION');
+    expect(rSandbox.resultado).toBeNull();
+    const rPiloto = await orq.orquestar(adaptador, ctx(), sol, cap(), reg(), { observadoEn: O, politicaBreaker, modoSolicitado: 'REAL', nivelActivacion: 'PILOTO' });
+    expect(rPiloto.resultado?.estado).toBe('OK');
+  });
+  it('nivel de activación no afecta a SIMULADO', async () => {
+    const r = await orq.orquestar(adaptador, ctx(), sol, cap(), reg(), { observadoEn: O, politicaBreaker, nivelActivacion: 'SIMULADO' });
+    expect(r.resultado?.estado).toBe('OK');
+  });
   it('el presupuesto NO aplica en SIMULADO (sin costo)', async () => {
     const r = await orq.orquestar(adaptador, ctx(), sol, cap(), reg(), {
       observadoEn: O, politicaBreaker, // SIMULADO por defecto

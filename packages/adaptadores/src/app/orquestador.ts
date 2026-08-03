@@ -34,6 +34,7 @@ import { LimitadorConcurrencia } from '../domain/concurrencia';
 import { verificarCompatibilidad, type SolicitudCompatibilidad } from '../domain/compatibilidad';
 import { type HealthCheckAdaptador, efectoSalud, healthValido } from '../domain/health';
 import { type EstimacionUso, type PoliticaPresupuesto, evaluarPresupuesto } from '../m4d/presupuesto';
+import { type NivelActivacion, nivelPermiteReal } from '../m4d/activacion';
 import { type SaludRegistro } from '../domain/registro-adaptador';
 import { CoordinadorSemiabierto } from '../domain/lease-semiabierto';
 import { type ProgramadorEspera, ProgramadorEsperaInmediato, isoSumarMs } from './programador-espera';
@@ -58,6 +59,9 @@ export interface OpcionesOrquestacion {
   /** Si true, una ejecución REAL SIN política de presupuesto se rechaza (fail-closed a no-gasto). Default: false
    *  (la fundación no exige presupuesto). El path real de M4-D debe activarlo. */
   readonly exigirPresupuesto?: boolean;
+  /** Nivel de activación (Eje 7). Si se provee y es REAL la intención, el nivel debe permitir REAL
+   *  (PILOTO/REAL); si no, se rechaza. Ausente → sin gate (fundación). El path real de M4-D lo inyecta. */
+  readonly nivelActivacion?: NivelActivacion;
   /** Backoff entre reintentos (F-CB-3). Por defecto inmediato (determinista). */
   readonly programadorEspera?: ProgramadorEspera;
   /** Relee el registro para reevaluar gates entre reintentos. Por defecto reusa el snapshot. */
@@ -99,6 +103,10 @@ export class OrquestadorAdaptadores {
     if (!puedeConsumirOperativo(registro, instante).ok) return noOk('CICLO_VIDA', 'NO_AUTORIZADO', registro.circuitBreaker);
     const autoridad = autoridadModoReal(registro, modoSolicitado);
     if (!autoridad.ok) return noOk('MODO_REAL', 'NO_AUTORIZADO', registro.circuitBreaker);
+    // Nivel de activación (Eje 7): REAL exige un nivel que lo permita (PILOTO/REAL). Inyectado; ausente = sin gate.
+    if (autoridad.modoEjecutado === 'REAL' && opciones.nivelActivacion && !nivelPermiteReal(opciones.nivelActivacion)) {
+      return noOk('ACTIVACION', 'NO_AUTORIZADO', registro.circuitBreaker);
+    }
     if (!validarInstanciaContraDescriptor(registro, adaptador).ok) return noOk('INTEGRIDAD', 'INVALIDO', registro.circuitBreaker);
     if (opciones.compatSolicitada && registro.compatibilidad && !verificarCompatibilidad(opciones.compatSolicitada, registro.compatibilidad).compatible) {
       return noOk('COMPATIBILIDAD', 'INVALIDO', registro.circuitBreaker);
