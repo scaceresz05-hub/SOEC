@@ -163,3 +163,16 @@ export function coberturaDe(ent: EntidadComercial): Cobertura {
   const faltantes = esperados.filter((k) => !(k in ent.campos));
   return { tipo: ent.tipo, esperados, presentes, faltantes, completitud: esperados.length === 0 ? 1 : presentes.length / esperados.length };
 }
+
+/**
+ * RAÍZ del conocimiento comercial. Decisión de arquitectura (Arquitecto, 2026-08-03, ADR-0028): la
+ * Empresa es el **agregado raíz** del dominio y se representa como la `EntidadComercial` SINGLETON
+ * tipada (`ID_EMPRESA`), no como un modelo nominal aparte — así se evita una segunda sede de datos de
+ * empresa (SSOT). Su capa EVALUABLE es la afirmación de clase `EMPRESA` en `@soec/motor-estrategico`, y
+ * la composición del dominio (productos, ICP, mercado, competidores…) la provee el GRAFO de enlaces, no
+ * una propiedad de este agregado. Esta función nombra explícitamente esa raíz (retorna `null` si aún no
+ * se registró la empresa: ausencia declarada, no conclusión).
+ */
+export function raizEmpresa(state: ConocimientoComercialState): EntidadComercial | null {
+  return state.empresa;
+}

@@ -117,6 +117,9 @@ paralelos, extendiendo la capa tipada `@soec/crm-comercial/perfiles`, con existe
   frecuencia); canónico como `INDICADOR`. **El CÁLCULO del valor sigue siendo SSOT de `@soec/medicion`**
   (`Indicador`); aquí solo vive la DEFINICIÓN de la meta, no el valor observado → sin duplicación.
 
-**Decisión de arquitectura reservada (no cerrada por ingeniería):** si "Empresa" debe pasar a ser un
-agregado raíz nominal dedicado o se mantiene como la `EntidadComercial` singleton tipada actual
-(`ID_EMPRESA`). Queda a resolución del Arquitecto antes del cierre formal de M5.
+**Decisión de arquitectura RESUELTA (Arquitecto, 2026-08-03):** la **Empresa se mantiene como la
+`EntidadComercial` singleton tipada** (`ID_EMPRESA`) — es el agregado raíz del dominio comercial — y NO
+se promueve a un modelo nominal aparte, para no crear una segunda sede de datos de empresa (SSOT). Se
+formaliza esa raíz con `raizEmpresa(state)` (`crm-comercial/perfiles.ts`); su capa evaluable es la
+afirmación de clase `EMPRESA`, y la composición del dominio la provee el grafo de enlaces. Con esto, la
+auditoría de cobertura de M5 queda **sin pendientes**.

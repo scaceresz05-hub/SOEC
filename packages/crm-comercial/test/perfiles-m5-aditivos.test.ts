@@ -11,7 +11,7 @@ import { ActorId, OrganizationId, type Attribution, type RequestContext } from '
 import { InMemoryEventStore } from '@soec/event-store';
 import { ConocimientoService as NegocioConocimientoService } from '@soec/negocio';
 import { ConocimientoComercialService } from '../src/app/conocimiento-service';
-import { ESQUEMAS, claveValida, coberturaDe } from '../src/domain/perfiles';
+import { ESQUEMAS, claveValida, coberturaDe, raizEmpresa } from '../src/domain/perfiles';
 
 const attr: Attribution = { source: 'crm', purpose: 'test', assumptions: ['t'], claimType: 'observational', regime: 'empirical', uncertainty: 'media' };
 const O = '2026-08-03T00:00:00.000Z';
@@ -57,6 +57,17 @@ describe('M5 aditivos · frontera SSOT (crm tipado ↔ negocio canónico)', () =
     // SSOT de existencia en negocio, mismo id, tipo mapeado (no una segunda base):
     const neg = await new NegocioConocimientoService(store).cargar(c);
     expect(neg.items['bp-1']?.tipo).toBe('BUYER_PERSONA');
+  });
+
+  it('la Empresa es la raíz singleton (raizEmpresa): null antes de registrar, la entidad después', async () => {
+    const store = new InMemoryEventStore();
+    const crm = new ConocimientoComercialService(store);
+    const c = ctx();
+    expect(raizEmpresa(await crm.cargar(c))).toBeNull(); // ausencia declarada, no conclusión
+    await crm.registrarEntidad(c, 'empresa', 'EMPRESA', 'Acme SpA', attr, O);
+    const raiz = raizEmpresa(await crm.cargar(c));
+    expect(raiz?.tipo).toBe('EMPRESA');
+    expect(raiz?.nombre).toBe('Acme SpA');
   });
 
   it('registrar un KPI con meta/umbral/responsable lo asienta como INDICADOR canónico', async () => {
