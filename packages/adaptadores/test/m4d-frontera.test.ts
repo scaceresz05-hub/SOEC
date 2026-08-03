@@ -104,6 +104,15 @@ describe('@soec/adaptadores · gate de presupuesto en el orquestador (REAL)', ()
     expect(r.resultado?.estado).toBe('OK');
     expect(r.resultado?.modoEjecutado).toBe('REAL');
   });
+  it('REAL sin política + exigirPresupuesto → fail-closed (NO_AUTORIZADO)', async () => {
+    const r = await orq.orquestar(adaptador, ctx(), sol, cap(), reg(), { observadoEn: O, politicaBreaker, modoSolicitado: 'REAL', exigirPresupuesto: true });
+    expect(r.evidenciaOperativa.gateRechazo).toBe('PRESUPUESTO');
+    expect(r.resultado).toBeNull();
+  });
+  it('REAL sin política y sin exigir → permitido (fundación: presupuesto opcional)', async () => {
+    const r = await orq.orquestar(adaptador, ctx(), sol, cap(), reg(), { observadoEn: O, politicaBreaker, modoSolicitado: 'REAL' });
+    expect(r.resultado?.estado).toBe('OK');
+  });
   it('el presupuesto NO aplica en SIMULADO (sin costo)', async () => {
     const r = await orq.orquestar(adaptador, ctx(), sol, cap(), reg(), {
       observadoEn: O, politicaBreaker, // SIMULADO por defecto

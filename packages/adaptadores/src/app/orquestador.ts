@@ -55,6 +55,9 @@ export interface OpcionesOrquestacion {
   readonly coordinadorSemiabierto?: CoordinadorSemiabierto;
   /** Gate de presupuesto (Eje 4). Sólo aplica a ejecución REAL; se evalúa ANTES de la ejecución. Config D-3. */
   readonly presupuesto?: { readonly politica: PoliticaPresupuesto; readonly consumidoEnVentana: number; readonly estimacion: EstimacionUso };
+  /** Si true, una ejecución REAL SIN política de presupuesto se rechaza (fail-closed a no-gasto). Default: false
+   *  (la fundación no exige presupuesto). El path real de M4-D debe activarlo. */
+  readonly exigirPresupuesto?: boolean;
   /** Backoff entre reintentos (F-CB-3). Por defecto inmediato (determinista). */
   readonly programadorEspera?: ProgramadorEspera;
   /** Relee el registro para reevaluar gates entre reintentos. Por defecto reusa el snapshot. */
@@ -116,9 +119,14 @@ export class OrquestadorAdaptadores {
     const eb = evaluarBreaker(registro.circuitBreaker, opciones.politicaBreaker, instante);
     if (!eb.permitido) return noOk('BREAKER', 'NO_DISPONIBLE', eb.estado);
     // Presupuesto (Eje 4): sólo REAL, ANTES de la ejecución. Rechazo si superaría el tope o estimación desconocida.
-    if (autoridad.modoEjecutado === 'REAL' && opciones.presupuesto) {
-      const vp = evaluarPresupuesto(opciones.presupuesto.politica, opciones.presupuesto.consumidoEnVentana, opciones.presupuesto.estimacion);
-      if (!vp.permitido) return noOk('PRESUPUESTO', 'LIMITE', eb.estado);
+    if (autoridad.modoEjecutado === 'REAL') {
+      if (opciones.presupuesto) {
+        const vp = evaluarPresupuesto(opciones.presupuesto.politica, opciones.presupuesto.consumidoEnVentana, opciones.presupuesto.estimacion);
+        if (!vp.permitido) return noOk('PRESUPUESTO', 'LIMITE', eb.estado);
+      } else if (opciones.exigirPresupuesto) {
+        // fail-closed: REAL sin política de presupuesto no ejecuta (no-gasto por precaución).
+        return noOk('PRESUPUESTO', 'NO_AUTORIZADO', eb.estado);
+      }
     }
     return { ok: true, gate: null, codigo: null, modoEjecutado: autoridad.modoEjecutado, breaker: eb.estado };
   }
