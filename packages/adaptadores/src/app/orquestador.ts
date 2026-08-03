@@ -13,7 +13,7 @@ import type { EstadoAdaptador, ModoAdaptador } from '../domain/estado-adaptador'
 import type { EvidenciaEjecucion } from '../domain/evidencia';
 import { Sandbox } from './sandbox';
 import { blindar } from '../domain/inmutable';
-import { type ClaseErrorAdaptador, errorNormalizado } from '../domain/errores-normalizados';
+import type { ClaseErrorAdaptador } from '../domain/errores-normalizados';
 import { type RegistroAdaptador, puedeConsumirOperativo } from '../domain/registro-adaptador';
 import { type EstadoCircuitBreaker, type LimiteConcurrencia, type PoliticaCircuitBreaker, type PoliticaRetry } from '../domain/operativo-tipos';
 import { evaluarBreaker, registrarResultadoBreaker } from '../domain/circuit-breaker';

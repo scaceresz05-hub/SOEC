@@ -200,6 +200,19 @@ importers:
         specifier: workspace:*
         version: link:../../packages/piloto
 
+  packages/adaptador-generativo-externo:
+    dependencies:
+      '@soec/adaptadores':
+        specifier: workspace:*
+        version: link:../adaptadores
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@soec/plataforma-capacidades':
+        specifier: workspace:*
+        version: link:../plataforma-capacidades
+
   packages/adaptadores:
     dependencies:
       '@soec/contracts':
