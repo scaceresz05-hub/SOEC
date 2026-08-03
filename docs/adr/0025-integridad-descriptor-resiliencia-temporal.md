@@ -34,6 +34,12 @@ Un `CoordinadorSemiabierto` local otorga un **lease** único por `organizationId
 
 `EvidenciaOperativa` v3 añade `descriptorVersion`, `descriptorHuella`, `implementacionVersion`, `maxIntentos`, `backoffAplicadoMs`, `gateReevaluado`, `breakerEstadoAntes/Despues`, `leaseSemiabierto`. `EvidenciaIntentoAdaptador` (versionada) permite reconstruir **cada intento** de forma independiente; los intentos no se duplican por replay/idempotencia. Nada de secreto/secretRef completa/stack/cause/mensaje original/proveedor comercial.
 
+## Estado de las deudas
+
+- **F-CBH-1 — CERRADO:** `soportaReal` proviene del descriptor persistido (`descriptorSoportaReal`); un monkey-patch de la instancia no habilita REAL (verificado con la carcasa).
+- **F-CB-3 — CERRADO:** el orquestador reevalúa la cadena de gates entre reintentos (`evaluarGates`) con el registro/instante vigentes; revocación/expiración/cancelación/incompatibilidad/breaker/salud durante el backoff detienen la secuencia con el gate concreto (`gateReevaluado`).
+- **F-CB-4 — CERRADO (proceso único):** `CoordinadorSemiabierto` otorga un lease único por org+adaptador; un segundo intento concurrente → `NO_DISPONIBLE`; liberación garantizada e idempotente; aislado por organización. La coordinación **distribuida** queda como deuda posterior.
+
 ## Consecuencias
 
 - (+) La autorización REAL deja de depender de una instancia mutable; la resiliencia temporal reevalúa gobierno entre intentos; SEMIABIERTO admite una sola prueba en el proceso.

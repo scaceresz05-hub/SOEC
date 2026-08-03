@@ -43,7 +43,7 @@ describe('@soec/adaptadores · orquestador (composición)', () => {
     const r = await orq.orquestar(fake, ctx(), solicitud, cap(), reg(), { observadoEn: O, politicaBreaker, compatSolicitada: { contratoId: 'gen', contratoVersion: '1.0.0', evidenciaSchemaVersion: '1' } });
     expect(r.resultado?.estado).toBe('OK');
     expect(r.evidenciaOperativa.organizationId).toBe('org-a');
-    expect(r.evidenciaOperativa.evidenciaVersion).toBe(2);
+    expect(r.evidenciaOperativa.evidenciaVersion).toBe(3);
     expect(r.evidenciaOperativa.naturalezaDuracion).toBe('SIMULADA');
     expect(Object.isFrozen(r.evidenciaOperativa)).toBe(true);
   });
