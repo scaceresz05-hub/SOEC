@@ -8,7 +8,7 @@
 import type { RecordedEvent } from '@soec/contracts';
 import type { Activo } from './activo';
 import type { Adaptacion } from './adaptacion';
-import type { PiezaFuente } from './pieza';
+import type { FormatoPieza, PiezaFuente, TrazaAfirmacion } from './pieza';
 import type { Revision } from './revision';
 import type { Hallazgo } from './validacion';
 
@@ -32,7 +32,23 @@ export const EVENTOS_PAQ = {
   entregado: 'paq.entregado',
   ejecutado: 'paq.ejecutado',
   retirado: 'paq.retirado',
+  gobernanza: 'paq.gobernanza_creativa_vinculada',
 } as const;
+
+/** M6: gobernanza creativa que se ADJUNTA a la pieza de un paquete ya producido (aditivo). */
+export interface PayloadGobernanzaCreativa {
+  readonly formato: FormatoPieza;
+  readonly objetivo: string;
+  readonly segmento: string;
+  readonly briefId: string;
+  readonly territorioId: string;
+  readonly estrategiaCreativaId: string;
+  readonly mensajesUtilizados: readonly string[];
+  readonly referenciasM5: readonly { readonly afirmacionId: string; readonly version: number }[];
+  readonly resultadoValidacion: 'VALIDO' | 'INVALIDO' | 'REQUIERE_REVISION';
+  readonly versionConocimiento: number;
+  readonly trazabilidad: readonly TrazaAfirmacion[];
+}
 
 export function paqueteStreamId(paqueteId: string): string {
   return `paquete:${paqueteId}`;
@@ -171,6 +187,28 @@ export function aplicarPaquete(state: PaqueteState, event: RecordedEvent): Paque
     case EVENTOS_PAQ.retirado: {
       const p = event.payload as PayloadRetirado;
       return { ...next, estado: 'retirado', resultadoEjecucion: p.motivo, historial: [...state.historial, { estado: 'retirado', en: event.recordedAt }] };
+    }
+    case EVENTOS_PAQ.gobernanza: {
+      if (!state.pieza) return next; // requiere una pieza ya producida
+      const p = event.payload as PayloadGobernanzaCreativa;
+      return {
+        ...next,
+        pieza: {
+          ...state.pieza,
+          formato: p.formato,
+          objetivo: p.objetivo,
+          segmento: p.segmento,
+          briefId: p.briefId,
+          territorioId: p.territorioId,
+          estrategiaCreativaId: p.estrategiaCreativaId,
+          mensajesUtilizados: p.mensajesUtilizados,
+          referenciasM5: p.referenciasM5,
+          resultadoValidacion: p.resultadoValidacion,
+          versionConocimiento: p.versionConocimiento,
+          naturaleza: 'SIMULADO',
+          trazabilidad: p.trazabilidad,
+        },
+      };
     }
     default:
       return next;
