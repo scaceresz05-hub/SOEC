@@ -34,13 +34,14 @@ import {
   indiceTerritoriosStreamId,
   reconstruirIndiceTerritorios,
 } from '../dominio/indice-territorios';
+import type { MensajeCreativo } from '../dominio/mensaje';
 import { type ResultadoCreativo, abstener, proponer } from '../dominio/abstencion';
 import {
   type RespaldoAfirmacion,
   type VeredictoAutoritativo,
   combinarVeredicto,
 } from '../dominio/validacion-autoritativa';
-import type { EntradaTerritorio, EvaluacionTerritorio, LecturaCreativa } from '../contratos';
+import type { EntradaTerritorio, EvaluacionTerritorio } from '../contratos';
 
 /** Un rol solicitado para construir el contexto: qué afirmación de M5 cumple qué rol creativo. */
 export interface RolSolicitado {
@@ -54,7 +55,7 @@ export interface MensajeARespaldar {
   readonly afirmacionRespaldoId: string | null;
 }
 
-export class MotorCreativoService implements LecturaCreativa {
+export class MotorCreativoService {
   constructor(
     private readonly store: EventStore,
     private readonly conocimiento: LecturaConocimiento,
@@ -251,6 +252,38 @@ export class MotorCreativoService implements LecturaCreativa {
       const af = await this.conocimiento.cargar(ctx, m.afirmacionRespaldoId);
       const estado = af.existe ? (await this.conocimiento.evaluar(ctx, m.afirmacionRespaldoId)).evaluacion.estado : 'NO_EVALUABLE';
       respaldos.push({ mensajeId: m.mensajeId, afirmacionId: m.afirmacionRespaldoId, existe: af.existe, retirada: af.retirada, estado });
+    }
+    return combinarVeredicto(textual, respaldos);
+  }
+
+  /**
+   * Validación AUTORITATIVA COMPLETA para el pipeline: además del texto A-3 y del respaldo VERDADERO,
+   * verifica que la VERSIÓN de M5 no cambió respecto de la esperada (obsolescencia) y que la CLASE de la
+   * afirmación autoriza el TIPO de mensaje. Resuelve todo contra M5 por `LecturaConocimiento`.
+   */
+  async validarMensajesAutoritativo(
+    ctx: RequestContext,
+    entrada: EntradaValidacionContenido,
+    mensajes: readonly MensajeCreativo[],
+    versionesEsperadas: Readonly<Record<string, number>>,
+  ): Promise<VeredictoAutoritativo> {
+    const textual = validarContenidoComercial(entrada);
+    const respaldos: RespaldoAfirmacion[] = [];
+    for (const m of mensajes) {
+      if (!m.afirmacionRespaldoId) continue;
+      const af = await this.conocimiento.cargar(ctx, m.afirmacionRespaldoId);
+      const estado = af.existe ? (await this.conocimiento.evaluar(ctx, m.afirmacionRespaldoId)).evaluacion.estado : 'NO_EVALUABLE';
+      const r: RespaldoAfirmacion = {
+        mensajeId: m.mensajeId,
+        afirmacionId: m.afirmacionRespaldoId,
+        existe: af.existe,
+        retirada: af.retirada,
+        estado,
+        tipoMensaje: m.tipo,
+        ...(af.existe ? { versionActual: af.version, clase: af.clase } : {}),
+        ...(Object.prototype.hasOwnProperty.call(versionesEsperadas, m.afirmacionRespaldoId) ? { versionEsperada: versionesEsperadas[m.afirmacionRespaldoId]! } : {}),
+      };
+      respaldos.push(r);
     }
     return combinarVeredicto(textual, respaldos);
   }

@@ -7,6 +7,7 @@
  * (problema, beneficio, diferenciación, prueba) EXIGEN respaldo en una afirmación de M5; CTA y educativo
  * pueden no afirmar un hecho comercial y por eso no lo exigen (pero igual declaran su audiencia).
  */
+import type { ClaseAfirmacion } from '@soec/motor-estrategico';
 
 export type TipoMensaje = 'PROBLEMA' | 'BENEFICIO' | 'DIFERENCIACION' | 'PRUEBA' | 'OBJECION' | 'CTA' | 'EDUCATIVO';
 
@@ -41,6 +42,25 @@ export interface MensajeCreativo {
  */
 export function requiereRespaldo(tipo: TipoMensaje): boolean {
   return tipo === 'PROBLEMA' || tipo === 'BENEFICIO' || tipo === 'DIFERENCIACION' || tipo === 'PRUEBA' || tipo === 'OBJECION';
+}
+
+/**
+ * ¿Una afirmación de clase `clase` (M5) puede autorizar un mensaje de tipo `tipo`? Mapeo GOBERNABLE que
+ * evita que, p. ej., un mensaje de PRUEBA se respalde en una afirmación de EMPRESA. CTA/EDUCATIVO no
+ * afirman un hecho ⇒ cualquier clase (o ninguna) los autoriza. El resto exige coherencia semántica.
+ */
+const CLASES_POR_TIPO: Record<TipoMensaje, readonly ClaseAfirmacion[]> = {
+  PROBLEMA: ['ICP', 'BUYER_PERSONA', 'MERCADO', 'HIPOTESIS'],
+  BENEFICIO: ['PROPUESTA_VALOR', 'EMPRESA', 'KPI', 'HIPOTESIS'],
+  DIFERENCIACION: ['COMPETENCIA', 'PROPUESTA_VALOR', 'EMPRESA'],
+  PRUEBA: ['HIPOTESIS', 'KPI', 'MERCADO'],
+  OBJECION: ['ICP', 'BUYER_PERSONA', 'COMPETENCIA', 'HIPOTESIS'],
+  CTA: ['EMPRESA', 'ICP', 'BUYER_PERSONA', 'PROPUESTA_VALOR', 'OBJETIVO', 'ESTRATEGIA', 'PLAN', 'KPI', 'MERCADO', 'COMPETENCIA', 'HIPOTESIS'],
+  EDUCATIVO: ['EMPRESA', 'ICP', 'BUYER_PERSONA', 'PROPUESTA_VALOR', 'OBJETIVO', 'ESTRATEGIA', 'PLAN', 'KPI', 'MERCADO', 'COMPETENCIA', 'HIPOTESIS'],
+};
+
+export function claseAutorizaTipo(clase: ClaseAfirmacion, tipo: TipoMensaje): boolean {
+  return CLASES_POR_TIPO[tipo].includes(clase);
 }
 
 /** Validación estructural de un mensaje (previa a la validación epistémica autoritativa contra M5). */

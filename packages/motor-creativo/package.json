@@ -14,6 +14,7 @@
     "@soec/contracts": "workspace:*",
     "@soec/motor-estrategico": "workspace:*",
     "@soec/estrategia-creativa": "workspace:*",
+    "@soec/contenido": "workspace:*",
     "@soec/negocio": "workspace:*"
   },
   "devDependencies": {

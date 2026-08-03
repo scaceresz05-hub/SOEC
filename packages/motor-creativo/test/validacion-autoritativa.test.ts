@@ -49,6 +49,18 @@ describe('combinarVeredicto (puro)', () => {
     const v = combinarVeredicto(textoOK, [resp({ existe: false, estado: 'NO_EVALUABLE' })]);
     expect(v.respaldosInvalidos[0]!.motivo).toBe('INEXISTENTE');
   });
+  it('versión cambiada respecto de la esperada ⇒ bloquea (VERSION_CAMBIADA, obsolescencia)', () => {
+    const v = combinarVeredicto(textoOK, [resp({ versionEsperada: 2, versionActual: 3 })]);
+    expect(v.autoriza).toBe(false);
+    expect(v.respaldosInvalidos[0]!.motivo).toBe('VERSION_CAMBIADA');
+  });
+  it('la clase de la afirmación no autoriza el tipo de mensaje ⇒ bloquea (TIPO_NO_AUTORIZADO)', () => {
+    // EMPRESA no respalda un mensaje de PRUEBA.
+    const v = combinarVeredicto(textoOK, [resp({ clase: 'EMPRESA', tipoMensaje: 'PRUEBA' })]);
+    expect(v.respaldosInvalidos[0]!.motivo).toBe('TIPO_NO_AUTORIZADO');
+    // PROPUESTA_VALOR sí respalda un BENEFICIO.
+    expect(combinarVeredicto(textoOK, [resp({ clase: 'PROPUESTA_VALOR', tipoMensaje: 'BENEFICIO' })]).autoriza).toBe(true);
+  });
 });
 
 describe('validarMensaje (estructural)', () => {

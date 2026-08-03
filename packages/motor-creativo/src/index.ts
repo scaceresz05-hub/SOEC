@@ -15,6 +15,7 @@ export * from './dominio/territorio';
 export * from './dominio/indice-territorios';
 export * from './dominio/mensaje';
 export * from './dominio/validacion-autoritativa';
+export * from './dominio/vigencia';
 export * from './dominio/errors';
 export * from './contratos';
 export {
@@ -22,3 +23,10 @@ export {
   type RolSolicitado,
   type MensajeARespaldar,
 } from './app/motor-creativo-service';
+export { LecturaCreativaService } from './app/lectura-creativa-service';
+export {
+  PipelineCreativoService,
+  type EntradaPipeline,
+  type PlanCreativo,
+  type ProductorPieza,
+} from './app/pipeline-creativo-service';

@@ -56,12 +56,34 @@ Nuevo paquete **`@soec/motor-creativo`** que consume M5 solo por `LecturaConocim
   afirmaciones de M5 por id+versión, y se vuelve obsoleta si M5 cambia.
 - (+) El gate de validación es autoritativo, no solo textual: bloquea afirmaciones sin respaldo real.
 - (+) Cero modelos paralelos: A/B, calendario, aprobación, validador A-3 y el artefacto se REUTILIZAN.
-- (−) Deuda declarada (no bloqueante, para la auditoría/decisión): el brief (`@soec/contenido`) y las
-  piezas se REUTILIZAN tal cual — su ampliación descriptiva (objeciones/razones-para-creer/estado de
-  evaluabilidad en el brief; exposición de `piezaId`/`formato`/`segmento` en la pieza) y la orquestación
-  end-to-end que hile brief→territorio→estrategia→mensajes→piezas→variantes→calendario quedan como
-  ampliación aditiva posterior. La obsolescencia del contexto no propaga aún automáticamente
-  `estadoGobernanza=OBSOLETO` al artefacto (settable, no auto-cableado).
+## Adenda — cierre interno de M6 (dictamen `AUDITORIA_M6_REQUIERE_CIERRE_INTERNO`)
+
+Los pendientes declarados eran criterios LOCKED, no deuda opcional. Se cerraron sobre la misma rama, de
+forma ADITIVA (sin modelos paralelos):
+
+- **Brief canónico ampliado** — `@soec/contenido/brief.ts` (`ContenidoBrief`): campos opcionales de
+  gobernanza M5 (`contextoCreativoId`, `razonesParaCreer`, `objeciones`, `referenciasM5` versionadas,
+  `informacionFaltante`, `estadoEpistemico`, `explicacion`, `versionConocimiento`, `vigencia`). El brief es
+  inmutable por versión (solo transiciona de estado); una versión nueva de M5 no lo muta en silencio.
+- **Piezas canónicas ampliadas** — `@soec/contenido/pieza.ts` (`PiezaFuente` + `FormatoPieza` +
+  `TrazaAfirmacion`): `formato`, `objetivo`, `segmento`, `briefId`, `territorioId`, `estrategiaCreativaId`,
+  `mensajesUtilizados`, `referenciasM5`, `resultadoValidacion`, `versionConocimiento`, `naturaleza`,
+  `trazabilidad`. Se adjuntan por el evento aditivo `paq.gobernanza_creativa_vinculada` (no toca la
+  producción canónica ni la huella B-1 del paquete).
+- **Orquestación end-to-end** — `PipelineCreativoService`: conecta contexto→brief→territorio→estrategia→
+  mensajes→pieza (fábrica canónica reutilizada por puerto `ProductorPieza`)→A/B→calendario. Se ABSTIENE
+  (primera clase) ante el primer gate que falla; no crea pieza/variante/calendario si la validación
+  autoritativa no autoriza; NUNCA aprueba automáticamente; deja la entrada de calendario en BORRADOR (no
+  programa); idempotente y multi-tenant.
+- **Obsolescencia** — `vigencia.ts` (`estadoVigencia`/`desajustesVersiones`) + `LecturaCreativa.vigenciaContexto`:
+  compara versiones M5 usadas vs actuales; un cambio deja el contexto OBSOLETO. El gate autoritativo bloquea
+  además por `VERSION_CAMBIADA` (respaldo obsoleto), `RETIRADA`, `INEXISTENTE` (incl. cross-tenant),
+  `NO_VERDADERA` (contradicción) y `TIPO_NO_AUTORIZADO` (la clase de la afirmación no autoriza el tipo de
+  mensaje). La aprobación no se hereda entre versiones (gate canónico `estaAprobada` de M3).
+- **Contratos M7 completos** — `LecturaCreativa` (solo lectura) + `LecturaCreativaService`: contexto,
+  vigencia, brief, territorio, estrategia, pieza, experimento A/B y calendario.
+
+Todo neutral/simulado; `AUTONOMOUS_REAL` bloqueado; M6 no ejecuta, no publica, no programa, no gasta.
 
 ## Alcance respetado
 
