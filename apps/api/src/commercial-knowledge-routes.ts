@@ -17,7 +17,7 @@ import { contextoDe, exigir } from './superficie-auth';
 
 const BASE = '/commercial-knowledge';
 const BODY_LIMIT = 16 * 1024;
-const TIPOS_PERFIL: readonly TipoPerfil[] = ['EMPRESA', 'PRODUCTO', 'SERVICIO', 'CLIENTE_IDEAL', 'COMPETIDOR', 'MERCADO'];
+const TIPOS_PERFIL: readonly TipoPerfil[] = ['EMPRESA', 'PRODUCTO', 'SERVICIO', 'CLIENTE_IDEAL', 'COMPETIDOR', 'MERCADO', 'BUYER_PERSONA', 'PROPUESTA_VALOR', 'KPI'];
 const ORIGENES: readonly TipoEvidencia[] = ['HECHO_VERIFICADO', 'DATO_DECLARADO_POR_USUARIO', 'DATO_IMPORTADO', 'INFERENCIA', 'HIPOTESIS', 'ESTIMACION', 'SIMULACION', 'DESCONOCIDO'];
 
 const ATRIBUCION: Attribution = {

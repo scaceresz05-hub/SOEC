@@ -98,3 +98,25 @@ Nuevo paquete **`@soec/motor-estrategico`**, en dos capas, sin duplicar ningún 
 Neutral y simulado: sin proveedores, SDK, red, credenciales, datos reales ni costos. `AUTONOMOUS_REAL`
 permanece bloqueado. M5 produce conocimiento estructurado; no genera campañas ni contenido (prohibiciones
 del Bloque Maestro).
+
+## Adenda — cierre de los pendientes descriptivos (auditoría de cobertura M5)
+
+Tras la auditoría de cobertura del dominio se cerraron, como **ampliaciones ADITIVAS** (sin crear modelos
+paralelos, extendiendo la capa tipada `@soec/crm-comercial/perfiles`, con existencia canónica en
+`@soec/negocio` por el MISMO id):
+
+- **Mercado** — `ESQUEMAS.MERCADO` + `segmentos`, `tamano`, `barreras`.
+- **Competencia** — `ESQUEMAS.COMPETIDOR` + `diferenciadores`, `riesgos`.
+- **Buyer Persona** — nuevo `TipoPerfil='BUYER_PERSONA'` (esquema: rol, responsabilidades, objetivos,
+  dolores, motivaciones, objeciones, criteriosDecision, canalesInformacion, nivelDecision, influencia);
+  existencia canónica nueva en `@soec/negocio` (`TipoEntidad='BUYER_PERSONA'`). La relación
+  "pertenece a un ICP, varias por ICP" vive en el grafo evaluable (enlace `PERTENECE_A`).
+- **Propuesta de Valor** — nuevo `TipoPerfil='PROPUESTA_VALOR'` (beneficios, problemasResueltos,
+  diferenciadores, prueba); canónico en `@soec/negocio` (`PROPUESTA_VALOR`, ya existente).
+- **KPI con meta/umbral/responsable** — nuevo `TipoPerfil='KPI'` (meta, umbral, responsable, unidad,
+  frecuencia); canónico como `INDICADOR`. **El CÁLCULO del valor sigue siendo SSOT de `@soec/medicion`**
+  (`Indicador`); aquí solo vive la DEFINICIÓN de la meta, no el valor observado → sin duplicación.
+
+**Decisión de arquitectura reservada (no cerrada por ingeniería):** si "Empresa" debe pasar a ser un
+agregado raíz nominal dedicado o se mantiene como la `EntidadComercial` singleton tipada actual
+(`ID_EMPRESA`). Queda a resolución del Arquitecto antes del cierre formal de M5.

@@ -28,6 +28,7 @@ export type TipoEntidad =
   | 'MARCA'
   | 'PRODUCTO'
   | 'PUBLICO'
+  | 'BUYER_PERSONA'
   | 'PROPUESTA_VALOR'
   | 'PROBLEMA_CLIENTE'
   | 'COMPETIDOR'
