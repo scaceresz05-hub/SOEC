@@ -19,6 +19,9 @@ import {
 import { BriefService, type BriefState, type PaqueteState, paqueteStreamId, reconstruirPaquete } from '@soec/contenido';
 import { MotorCreativoService } from './motor-creativo-service';
 import { GobernanzaCreativaService } from './gobernanza-creativa-service';
+import { SolicitudAprobacionService } from './solicitud-aprobacion-service';
+import { congelarProfundo } from '../dominio/congelar';
+import type { EstadoSolicitud } from '../dominio/solicitud-aprobacion';
 import type { ContextoCreativoState } from '../dominio/contexto-creativo';
 import type { TerritorioState } from '../dominio/territorio';
 import type { ResultadoCreativo } from '../dominio/abstencion';
@@ -46,6 +49,14 @@ export class LecturaCreativaService implements LecturaCreativa {
     this.calendario = new CalendarioEditorialService(store);
     this.aprobacion = new AprobacionService(store);
     this.gobernanza = new GobernanzaCreativaService(store, conocimiento);
+    this.solicitud = new SolicitudAprobacionService(store, this.aprobacion);
+  }
+  private readonly solicitud: SolicitudAprobacionService;
+
+  /** Estado de la solicitud de aprobación de una VERSIÓN de pieza, relativo a la versión vigente actual. */
+  async estadoSolicitudPieza(ctx: RequestContext, paqueteId: string, versionSolicitada: number): Promise<EstadoSolicitud> {
+    const paq = await this.cargarPieza(ctx, paqueteId);
+    return this.solicitud.estado(ctx, 'PIEZA', paqueteId, versionSolicitada, paq.version);
   }
 
   cargarContexto(ctx: RequestContext, contextoId: string): Promise<ContextoCreativoState> {
@@ -115,6 +126,7 @@ export class LecturaCreativaService implements LecturaCreativa {
         trazabilidad: (paq.pieza.trazabilidad ?? []).map((t) => ({ afirmacionId: t.afirmacionId, version: t.version, estado: t.estado, mensajeId: t.mensajeId })),
       });
     }
-    return out;
+    // Inmutabilidad en RUNTIME: los snapshots para M7 se congelan en profundidad (readonly no basta).
+    return congelarProfundo(out);
   }
 }

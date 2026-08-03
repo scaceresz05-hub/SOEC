@@ -39,6 +39,8 @@ import {
 } from '@soec/contenido';
 import { MotorCreativoService } from './motor-creativo-service';
 import { GobernanzaCreativaService } from './gobernanza-creativa-service';
+import { SolicitudAprobacionService } from './solicitud-aprobacion-service';
+import { solicitudDeterministaId } from '../dominio/solicitud-aprobacion';
 import { type ResultadoCreativo, abstener, esPropuesta, proponer } from '../dominio/abstencion';
 import type { MensajeCreativo } from '../dominio/mensaje';
 import type { EntradaValidacionContenido } from '@soec/estrategia-creativa';
@@ -78,6 +80,9 @@ export interface PlanCreativo {
   readonly paqueteId: string;
   /** Versión EXACTA de la pieza que debe aprobarse (una versión nueva no hereda aprobación). */
   readonly piezaVersionParaAprobar: number;
+  /** Identidad DETERMINISTA de la solicitud de aprobación de la pieza (PENDIENTE hasta decisión humana). */
+  readonly solicitudPiezaId: string;
+  readonly solicitudVarianteId: string | null;
   readonly varianteId: string | null;
   readonly entradaCalendarioId: string | null;
   readonly estado: EstadoPlan;
@@ -93,6 +98,7 @@ export class PipelineCreativoService {
   private readonly calendario: CalendarioEditorialService;
   private readonly aprobacion: AprobacionService;
   private readonly gobernanza: GobernanzaCreativaService;
+  private readonly solicitudes: SolicitudAprobacionService;
   private readonly factory: ProductorPieza;
 
   constructor(
@@ -107,6 +113,7 @@ export class PipelineCreativoService {
     this.calendario = new CalendarioEditorialService(store);
     this.aprobacion = new AprobacionService(store);
     this.gobernanza = new GobernanzaCreativaService(store, conocimiento);
+    this.solicitudes = new SolicitudAprobacionService(store, this.aprobacion);
     this.factory = deps?.factory ?? new FactoryService(new ProveedorGenerativoDeterminista());
   }
 
@@ -165,11 +172,14 @@ export class PipelineCreativoService {
     }
 
     const piezaVersion = (await this.cargarPaquete(ctx, e.paqueteId)).version;
+    // Solicitud de aprobación CANÓNICA (idempotente por versión; PENDIENTE hasta decisión humana).
+    const solicitudPiezaId = await this.solicitudes.solicitar(ctx, 'PIEZA', e.paqueteId, piezaVersion, a, o);
+    const solicitudVarianteId = e.variante ? await this.solicitudes.solicitar(ctx, 'VARIANTE', e.variante.varianteId, 1, a, o) : null;
     return proponer({
       contextoId: e.contextoId, briefId: e.briefId, territorioId: e.territorioId, estrategiaCreativaId: e.estrategiaCreativaId, paqueteId: e.paqueteId,
-      piezaVersionParaAprobar: piezaVersion, varianteId, entradaCalendarioId: null,
+      piezaVersionParaAprobar: piezaVersion, solicitudPiezaId, solicitudVarianteId, varianteId, entradaCalendarioId: null,
       estado: 'PENDIENTE_APROBACION', vigencia: 'VIGENTE',
-      resumen: `pieza gobernada, trazable a ${refsM5.length} afirmaciones de M5; a la espera de aprobación humana (no publica ni programa)`,
+      resumen: `pieza gobernada, trazable a ${refsM5.length} afirmaciones de M5; solicitud de aprobación PENDIENTE (no publica ni programa)`,
     });
   }
 
@@ -201,7 +211,10 @@ export class PipelineCreativoService {
 
     return proponer({
       contextoId: e.contextoId, briefId: e.briefId, territorioId: e.territorioId, estrategiaCreativaId: e.estrategiaCreativaId, paqueteId: e.paqueteId,
-      piezaVersionParaAprobar: piezaVersion, varianteId: e.variante?.varianteId ?? null, entradaCalendarioId: e.calendario.entradaId,
+      piezaVersionParaAprobar: piezaVersion,
+      solicitudPiezaId: solicitudDeterministaId(this.org(ctx), 'PIEZA', e.paqueteId, piezaVersion),
+      solicitudVarianteId: e.variante ? solicitudDeterministaId(this.org(ctx), 'VARIANTE', e.variante.varianteId, 1) : null,
+      varianteId: e.variante?.varianteId ?? null, entradaCalendarioId: e.calendario.entradaId,
       estado: 'CALENDARIZADO', vigencia: 'VIGENTE',
       resumen: `pieza aprobada y vigente, entrada de calendario creada en BORRADOR (M7 programará/ejecutará)`,
     });

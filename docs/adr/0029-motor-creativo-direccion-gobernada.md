@@ -96,6 +96,19 @@ El cierre demostraba componentes, no las INTERACCIONES gobernadas. Corregido sin
 - **E · Contratos M7**: `LecturaCreativa.listarPiezasAprobadas` devuelve SOLO piezas aprobadas por versión exacta y VIGENTES (re-derivando la vigencia); excluye retiradas, obsoletas y aprobaciones no vigentes; snapshots inmutables (paqueteId, versión, referenciasM5, trazabilidad). El puerto no expone escritura.
 - **F · Autoauditoría**: aprobación vieja tras cambio de M5, pieza vigente/variante no aprobada, obsolescencia materializada + exclusión de la lista, fallo parcial + reintento, replay frío, cross-tenant, texto inválido. 35 tests en `@soec/motor-creativo`.
 
+## Adenda 3 — recuperación, concurrencia, replay frío e inmutabilidad (`AUDITORIA_M6_REQUIERE_CORRECCIONES_FOCALIZADAS_2`)
+
+Faltaba DEMOSTRAR atomicidad lógica y recuperación en todas las fronteras. Cerrado (52 tests en el paquete):
+
+- **A · Matriz de fallos parciales por frontera** (`recuperacion-m6.test.ts`, `StoreFallaEvento`): fallo deliberado en producción de pieza, vinculación de gobernanza, índice de piezas, variante A/B, solicitud de aprobación y append de calendario. Para cada una: 1.º intento deja estado parcial → 2.º repara → 3.º no-op idempotente, con **conteo de eventos = 1** (sin duplicados).
+- **B · Solicitud de aprobación canónica** (`solicitud-aprobacion.ts` + servicio): identidad determinista `sol:<org>:<tipo>:<id>:v<version>`, idempotente por versión, PENDIENTE hasta decisión humana, no equivale a aprobación, y pasa a OBSOLETA cuando la versión deja de ser la vigente. El pipeline la emite en `componer` y la devuelve en el plan.
+- **C · Replay FRÍO**: `InMemoryEventStore.exportar()` + `desdeInstantanea()` reconstruyen un store **nuevo** desde el log serializado (round-trip JSON, sin referencias del proceso anterior); los snapshots de contexto/brief/estrategia/pieza/variante/calendario/vigencia/`listarPiezasAprobadas` coinciden exactamente.
+- **D · Concurrencia**: dos calendarizaciones concurrentes ⇒ una entrada; dos evaluaciones de vigencia concurrentes sobre pieza obsoleta ⇒ un solo evento de obsolescencia; decisión humana repetida ⇒ una aprobación (concurrencia optimista + idempotencia por contenido).
+- **E · Inmutabilidad runtime**: `congelarProfundo` congela los snapshots de `listarPiezasAprobadas`; mutar referencias/versiones falla y una segunda lectura permanece intacta (`readonly` no basta).
+- **F · Contrato M7**: `listarPiezasAprobadas` excluye aprobación de otra versión, pieza obsoleta, retirada, aprobación revocada y cross-tenant.
+
+Aditivos: `InMemoryEventStore.exportar/desdeInstantanea` (@soec/event-store, soporte de test); `SolicitudAprobacionService` y `congelarProfundo` (@soec/motor-creativo). `verify` global 1112 verde.
+
 ## Alcance respetado
 
 Neutral y simulado: sin proveedores reales, SDK, red, publicación, gasto, canales, credenciales ni

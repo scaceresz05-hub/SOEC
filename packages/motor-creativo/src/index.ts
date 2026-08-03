@@ -18,6 +18,8 @@ export * from './dominio/validacion-autoritativa';
 export * from './dominio/vigencia';
 export * from './dominio/vigencia-creativa';
 export * from './dominio/indice-piezas';
+export * from './dominio/solicitud-aprobacion';
+export * from './dominio/congelar';
 export * from './dominio/errors';
 export * from './contratos';
 export {
@@ -26,6 +28,7 @@ export {
   type MensajeARespaldar,
 } from './app/motor-creativo-service';
 export { GobernanzaCreativaService, type ObjetivoMaterializacion } from './app/gobernanza-creativa-service';
+export { SolicitudAprobacionService } from './app/solicitud-aprobacion-service';
 export { LecturaCreativaService } from './app/lectura-creativa-service';
 export {
   PipelineCreativoService,
