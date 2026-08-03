@@ -48,6 +48,10 @@ export class EstrategiaCreativaArtefactoService {
   async vincularGobernanzaM5(ctx: RequestContext, estrategiaCreativaId: string, gobernanza: GobernanzaM5, a: Attribution, o: string): Promise<ArtefactoCreativoState> {
     const st = await this.cargar(ctx, estrategiaCreativaId);
     if (!st.existe) throw new ArtefactoCreativoNoEncontradoError(`artefacto ${estrategiaCreativaId} no encontrado`);
+    // Idempotente por contenido: revincular la MISMA gobernanza no emite (permite reintentos/concurrencia).
+    const ar = st.artefacto;
+    const igual = ar && JSON.stringify([ar.afirmacionesProhibidas ?? [], ar.referenciasM5 ?? [], ar.estadoGobernanza ?? null, ar.contextoCreativoId ?? null]) === JSON.stringify([gobernanza.afirmacionesProhibidas, gobernanza.referenciasM5, gobernanza.estadoGobernanza, gobernanza.contextoCreativoId ?? null]);
+    if (igual) return st;
     const input: EventInput = { type: EVENTOS_ARTEFACTO.gobernanza, payload: gobernanza, attribution: a, occurredAt: o };
     await this.store.append(ctx, artefactoCreativoStreamId(this.org(ctx), estrategiaCreativaId), st.version, [input]);
     return this.cargar(ctx, estrategiaCreativaId);

@@ -35,5 +35,6 @@ export {
   type EntradaPipeline,
   type PlanCreativo,
   type EstadoPlan,
+  type SolicitudesPlan,
   type ProductorPieza,
 } from './app/pipeline-creativo-service';

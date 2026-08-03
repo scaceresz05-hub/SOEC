@@ -119,7 +119,7 @@ describe('B · solicitud de aprobación canónica (determinista, idempotente, PE
     const r = await pipeline.componer(c, entrada, attr, O);
     if (!esPropuesta(r)) throw new Error('propuesta');
     const v = r.valor.piezaVersionParaAprobar;
-    expect(r.valor.solicitudPiezaId).toBe(`sol:org-a:PIEZA:paq1:v${v}`);
+    expect(r.valor.solicitudes.piezaId).toBe(`sol:org-a:PIEZA:paq1:v${v}`);
     expect(await lectura.estadoSolicitudPieza(c, 'paq1', v)).toBe('PENDIENTE');
     await pipeline.componer(c, entrada, attr, O); // reintento: no duplica la solicitud
     expect(await cuenta(store, c, solicitudStreamId('org-a', 'PIEZA', 'paq1'), 'creativo-solicitud.registrada')).toBe(1);
@@ -233,13 +233,27 @@ describe('F · listarPiezasAprobadas excluye no-ejecutables', () => {
 
   it('aprobación de OTRA versión ⇒ excluida', async () => {
     const { aprobacion, lectura, c, version } = await base();
-    await aprobacion.decidir(c, { resourceType: 'PIEZA', resourceId: 'paq1', resourceVersion: version + 7, decision: 'APROBADA' }, attr, O);
+    await aprobar(aprobacion, c, version + 7); // pieza aprobada en una versión que NO es la vigente
     expect(await lectura.listarPiezasAprobadas(c)).toEqual([]);
   });
 
-  it('aprobación revocada (RECHAZADA posterior) ⇒ excluida', async () => {
+  it('pieza aprobada pero VARIANTE no aprobada ⇒ excluida (consistencia pieza–variante)', async () => {
     const { aprobacion, lectura, c, version } = await base();
-    await aprobacion.decidir(c, { resourceType: 'PIEZA', resourceId: 'paq1', resourceVersion: version, decision: 'APROBADA' }, attr, O);
+    await aprobacion.decidir(c, { resourceType: 'PIEZA', resourceId: 'paq1', resourceVersion: version, decision: 'APROBADA' }, attr, O); // solo la pieza
+    expect(await lectura.listarPiezasAprobadas(c)).toEqual([]);
+  });
+
+  it('variante RECHAZADA ⇒ excluye la pieza (aunque la pieza siga aprobada)', async () => {
+    const { aprobacion, lectura, c, version } = await base();
+    await aprobar(aprobacion, c, version);
+    expect((await lectura.listarPiezasAprobadas(c)).length).toBe(1);
+    await aprobacion.decidir(c, { resourceType: 'VARIANTE', resourceId: 'v1', resourceVersion: 1, decision: 'RECHAZADA' }, attr, O);
+    expect(await lectura.listarPiezasAprobadas(c)).toEqual([]);
+  });
+
+  it('aprobación de pieza revocada (RECHAZADA posterior) ⇒ excluida', async () => {
+    const { aprobacion, lectura, c, version } = await base();
+    await aprobar(aprobacion, c, version);
     expect((await lectura.listarPiezasAprobadas(c)).length).toBe(1);
     await aprobacion.decidir(c, { resourceType: 'PIEZA', resourceId: 'paq1', resourceVersion: version, decision: 'RECHAZADA' }, attr, O);
     expect(await lectura.listarPiezasAprobadas(c)).toEqual([]);
@@ -247,8 +261,7 @@ describe('F · listarPiezasAprobadas excluye no-ejecutables', () => {
 
   it('pieza RETIRADA ⇒ excluida', async () => {
     const { store, aprobacion, lectura, c, version } = await base();
-    await aprobacion.decidir(c, { resourceType: 'PIEZA', resourceId: 'paq1', resourceVersion: version, decision: 'APROBADA' }, attr, O);
-    // Retiro directo del paquete (evento canónico de @soec/contenido).
+    await aprobar(aprobacion, c, version);
     const st = await store.readStream(c, paqueteStreamId('paq1'));
     await store.append(c, paqueteStreamId('paq1'), st.length, [{ type: EVENTOS_PAQ.retirado, payload: { motivo: 'descartada' }, attribution: attr, occurredAt: O }]);
     expect(await lectura.listarPiezasAprobadas(c)).toEqual([]);
@@ -256,14 +269,113 @@ describe('F · listarPiezasAprobadas excluye no-ejecutables', () => {
 
   it('pieza OBSOLETA (M5 cambió) ⇒ excluida aunque estuviera aprobada', async () => {
     const { store, aprobacion, lectura, c, version } = await base();
-    await aprobacion.decidir(c, { resourceType: 'PIEZA', resourceId: 'paq1', resourceVersion: version, decision: 'APROBADA' }, attr, O);
+    await aprobar(aprobacion, c, version);
     await new MotorEstrategicoService(store).agregarEvidencia(c, 'pv', { evidenciaId: 'pv-e2', enunciado: 'm', origen: 'DATO_IMPORTADO', sentido: 'A_FAVOR', pertinente: true }, attr, O);
     expect(await lectura.listarPiezasAprobadas(c)).toEqual([]);
   });
 
   it('cross-tenant: org B no ve piezas de org A', async () => {
     const { aprobacion, lectura, c, version } = await base();
-    await aprobacion.decidir(c, { resourceType: 'PIEZA', resourceId: 'paq1', resourceVersion: version, decision: 'APROBADA' }, attr, O);
+    await aprobar(aprobacion, c, version);
     expect(await lectura.listarPiezasAprobadas(ctx('org-b'))).toEqual([]);
+  });
+});
+
+// ── A2 · Concurrencia REPARADORA tras fallo parcial (los cuatro bordes sensibles) ──────────────────
+describe('A2 · dos reintentos concurrentes tras fallo parcial convergen sin duplicar', () => {
+  const bordes: { nombre: string; tipoFalla: string; stream: (c: RequestContext) => string; tipo: string }[] = [
+    { nombre: 'índice de piezas', tipoFalla: 'creativo-pieza-indice.registrada', stream: (c) => indicePiezasStreamId(String(c.organizationId)), tipo: 'creativo-pieza-indice.registrada' },
+    { nombre: 'variante A/B', tipoFalla: 'ab.variante_agregada', stream: () => experimentoABStreamId('org-a', 'paq1'), tipo: 'ab.variante_agregada' },
+    { nombre: 'solicitud de aprobación', tipoFalla: 'creativo-solicitud.registrada', stream: (c) => solicitudStreamId(String(c.organizationId), 'PIEZA', 'paq1'), tipo: 'creativo-solicitud.registrada' },
+  ];
+  for (const b of bordes) {
+    it(`${b.nombre}: fallo → estado parcial → dos reintentos concurrentes → una sola cadena → no-op`, async () => {
+      const inner = new InMemoryEventStore();
+      const store = new StoreFallaEvento(inner, new Map([[b.tipoFalla, 1]]));
+      const c = ctx();
+      await sembrar(inner, c);
+      const { pipeline, lectura } = montar(store);
+      await expect(pipeline.componer(c, entrada, attr, O)).rejects.toThrow(); // estado parcial
+      expect(await cuenta(inner, c, b.stream(c), b.tipo)).toBe(0);
+      const res = await Promise.allSettled([pipeline.componer(c, entrada, attr, O), pipeline.componer(c, entrada, attr, O)]);
+      expect(res.some((r) => r.status === 'fulfilled')).toBe(true); // al menos uno converge
+      expect(await cuenta(inner, c, b.stream(c), b.tipo)).toBe(1); // UNA sola cadena, sin duplicados
+      await pipeline.componer(c, entrada, attr, O); // no-op idempotente
+      expect(await cuenta(inner, c, b.stream(c), b.tipo)).toBe(1);
+      expect((await lectura.cargarPieza(c, 'paq1')).pieza?.trazabilidad).toHaveLength(1); // gobernada una vez
+    });
+  }
+
+  it('calendario: fallo → dos calendarizaciones concurrentes → una entrada → no-op', async () => {
+    const inner = new InMemoryEventStore();
+    const store = new StoreFallaEvento(inner, new Map([['cal.entrada_agregada', 1]]));
+    const c = ctx();
+    await sembrar(inner, c);
+    const { pipeline, aprobacion } = montar(store);
+    const r = await pipeline.componer(c, entrada, attr, O);
+    if (!esPropuesta(r)) throw new Error('propuesta');
+    await aprobar(aprobacion, c, r.valor.piezaVersionParaAprobar);
+    await expect(pipeline.calendarizar(c, entrada, attr, O)).rejects.toThrow();
+    await Promise.allSettled([pipeline.calendarizar(c, entrada, attr, O), pipeline.calendarizar(c, entrada, attr, O)]);
+    expect(await cuenta(inner, c, calendarioStreamId('org-a', 'prog1'), 'cal.entrada_agregada')).toBe(1);
+    await pipeline.calendarizar(c, entrada, attr, O); // no-op
+    expect(await cuenta(inner, c, calendarioStreamId('org-a', 'prog1'), 'cal.entrada_agregada')).toBe(1);
+  });
+});
+
+// ── B2 · Solicitudes canónicas para pieza, variante y (por política) estrategia ─────────────────────
+describe('B2 · solicitudes canónicas por artefacto (pieza, variante, estrategia por política)', () => {
+  it('sin política de estrategia: solicitudes de pieza y variante; estrategia null', async () => {
+    const store = new InMemoryEventStore();
+    const c = ctx();
+    await sembrar(store, c);
+    const { pipeline } = montar(store);
+    const r = await pipeline.componer(c, entrada, attr, O);
+    if (!esPropuesta(r)) throw new Error('propuesta');
+    expect(r.valor.solicitudes.piezaId).toMatch(/^sol:org-a:PIEZA:paq1:v\d+$/);
+    expect(r.valor.solicitudes.varianteId).toBe('sol:org-a:VARIANTE:v1:v1');
+    expect(r.valor.solicitudes.estrategiaId).toBeNull();
+  });
+
+  it('con política de estrategia: emite también la solicitud de estrategia y calendarizar la exige', async () => {
+    const store = new InMemoryEventStore();
+    const c = ctx();
+    await sembrar(store, c);
+    const { pipeline, aprobacion, lectura } = montar(store);
+    const e = { ...entrada, politica: { requiereAprobacionEstrategia: true } };
+    const r = await pipeline.componer(c, e, attr, O);
+    if (!esPropuesta(r)) throw new Error('propuesta');
+    expect(r.valor.solicitudes.estrategiaId).toMatch(/^sol:org-a:ESTRATEGIA_CREATIVA:estcr1:v\d+$/);
+    // Idempotente: la solicitud de estrategia no se duplica.
+    await pipeline.componer(c, e, attr, O);
+    expect(await cuenta(store, c, solicitudStreamId('org-a', 'ESTRATEGIA_CREATIVA', 'estcr1'), 'creativo-solicitud.registrada')).toBe(1);
+    // Aprobadas pieza y variante pero NO la estrategia ⇒ calendarizar se abstiene.
+    await aprobar(aprobacion, c, r.valor.piezaVersionParaAprobar);
+    const sinEstrategia = await pipeline.calendarizar(c, e, attr, O);
+    expect(sinEstrategia.tipo).toBe('ABSTENCION');
+    // Aprobada la estrategia (su versión exacta) ⇒ calendariza.
+    const estrategiaVersion = (await lectura.cargarEstrategia(c, 'estcr1')).version;
+    await aprobacion.decidir(c, { resourceType: 'ESTRATEGIA_CREATIVA', resourceId: 'estcr1', resourceVersion: estrategiaVersion, decision: 'APROBADA' }, attr, O);
+    const cal = await pipeline.calendarizar(c, e, attr, O);
+    expect(esPropuesta(cal)).toBe(true);
+  });
+});
+
+// ── C2 · Inconsistencia pieza–variante en calendarizar ──────────────────────────────────────────────
+describe('C2 · calendarizar rechaza combinación cruzada pieza–variante', () => {
+  it('una variante que no pertenece al experimento de la pieza ⇒ abstención (no calendariza)', async () => {
+    const store = new InMemoryEventStore();
+    const c = ctx();
+    await sembrar(store, c);
+    const { pipeline, aprobacion, lectura } = montar(store);
+    const r = await pipeline.componer(c, entrada, attr, O);
+    if (!esPropuesta(r)) throw new Error('propuesta');
+    await aprobar(aprobacion, c, r.valor.piezaVersionParaAprobar);
+    // Se aprueba una variante ajena y se intenta calendarizar con ella (combinación cruzada).
+    await aprobacion.decidir(c, { resourceType: 'VARIANTE', resourceId: 'ajena', resourceVersion: 1, decision: 'APROBADA' }, attr, O);
+    const cruzado = { ...entrada, variante: { ...entrada.variante!, varianteId: 'ajena' } };
+    const cal = await pipeline.calendarizar(c, cruzado, attr, O);
+    expect(cal.tipo).toBe('ABSTENCION');
+    expect((await lectura.cargarCalendario(c, 'prog1')).existe).toBe(false);
   });
 });

@@ -119,6 +119,16 @@ export class LecturaCreativaService implements LecturaCreativa {
       const dictamen = await this.gobernanza.dictaminar(ctx, refsM5);
       if (dictamen.estado !== 'VIGENTE') continue;
       if (!(await this.aprobacion.estaAprobada(ctx, 'PIEZA', paqueteId, paq.version))) continue;
+      // Consistencia pieza–variante: toda variante del experimento de la pieza debe estar aprobada
+      // vigente. Una variante no aprobada / rechazada / retirada excluye la pieza (no es ejecutable).
+      const exp = await this.variantes.cargar(ctx, paqueteId);
+      if (exp.existe) {
+        let variantesOk = true;
+        for (const v of exp.variantes) {
+          if (!(await this.aprobacion.aprobadaVigente(ctx, 'VARIANTE', v.varianteId))) { variantesOk = false; break; }
+        }
+        if (!variantesOk) continue;
+      }
       out.push({
         paqueteId,
         version: paq.version,

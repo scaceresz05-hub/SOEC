@@ -68,6 +68,15 @@ export interface EntradaPipeline {
   readonly canal: Canal;
   readonly variante?: { readonly varianteId: string; readonly hipotesis: string; readonly elemento: 'gancho' | 'cta' | 'angulo' | 'formato' | 'longitud'; readonly diferencia: string; readonly constantes: readonly string[] };
   readonly calendario?: { readonly programaId: string; readonly entradaId: string; readonly fechaHora: string; readonly zonaHoraria: string; readonly objetivo: string; readonly segmento: string };
+  /** Política creativa: si la Estrategia requiere aprobación humana SEPARADA (sin hardcodear autoridad). */
+  readonly politica?: { readonly requiereAprobacionEstrategia?: boolean };
+}
+
+/** Solicitudes canónicas de aprobación por artefacto (deterministas, PENDIENTE hasta decisión humana). */
+export interface SolicitudesPlan {
+  readonly piezaId: string;
+  readonly varianteId: string | null;
+  readonly estrategiaId: string | null;
 }
 
 export type EstadoPlan = 'PENDIENTE_APROBACION' | 'CALENDARIZADO';
@@ -80,9 +89,8 @@ export interface PlanCreativo {
   readonly paqueteId: string;
   /** Versión EXACTA de la pieza que debe aprobarse (una versión nueva no hereda aprobación). */
   readonly piezaVersionParaAprobar: number;
-  /** Identidad DETERMINISTA de la solicitud de aprobación de la pieza (PENDIENTE hasta decisión humana). */
-  readonly solicitudPiezaId: string;
-  readonly solicitudVarianteId: string | null;
+  /** Solicitudes canónicas de aprobación (pieza, variante y —según política— estrategia). */
+  readonly solicitudes: SolicitudesPlan;
   readonly varianteId: string | null;
   readonly entradaCalendarioId: string | null;
   readonly estado: EstadoPlan;
@@ -171,15 +179,19 @@ export class PipelineCreativoService {
       varianteId = e.variante.varianteId;
     }
 
+    const estrategiaVersion = (await this.artefacto.cargar(ctx, e.estrategiaCreativaId)).version;
     const piezaVersion = (await this.cargarPaquete(ctx, e.paqueteId)).version;
-    // Solicitud de aprobación CANÓNICA (idempotente por versión; PENDIENTE hasta decisión humana).
-    const solicitudPiezaId = await this.solicitudes.solicitar(ctx, 'PIEZA', e.paqueteId, piezaVersion, a, o);
-    const solicitudVarianteId = e.variante ? await this.solicitudes.solicitar(ctx, 'VARIANTE', e.variante.varianteId, 1, a, o) : null;
+    // Solicitudes de aprobación CANÓNICAS por artefacto (idempotentes por versión; PENDIENTE).
+    const solicitudes = {
+      piezaId: await this.solicitudes.solicitar(ctx, 'PIEZA', e.paqueteId, piezaVersion, a, o),
+      varianteId: e.variante ? await this.solicitudes.solicitar(ctx, 'VARIANTE', e.variante.varianteId, 1, a, o) : null,
+      estrategiaId: e.politica?.requiereAprobacionEstrategia ? await this.solicitudes.solicitar(ctx, 'ESTRATEGIA_CREATIVA', e.estrategiaCreativaId, estrategiaVersion, a, o) : null,
+    };
     return proponer({
       contextoId: e.contextoId, briefId: e.briefId, territorioId: e.territorioId, estrategiaCreativaId: e.estrategiaCreativaId, paqueteId: e.paqueteId,
-      piezaVersionParaAprobar: piezaVersion, solicitudPiezaId, solicitudVarianteId, varianteId, entradaCalendarioId: null,
+      piezaVersionParaAprobar: piezaVersion, solicitudes, varianteId, entradaCalendarioId: null,
       estado: 'PENDIENTE_APROBACION', vigencia: 'VIGENTE',
-      resumen: `pieza gobernada, trazable a ${refsM5.length} afirmaciones de M5; solicitud de aprobación PENDIENTE (no publica ni programa)`,
+      resumen: `pieza gobernada, trazable a ${refsM5.length} afirmaciones de M5; solicitudes de aprobación PENDIENTES (no publica ni programa)`,
     });
   }
 
@@ -201,19 +213,37 @@ export class PipelineCreativoService {
     if (!(await this.aprobacion.estaAprobada(ctx, 'PIEZA', e.paqueteId, piezaVersion))) {
       return abstener('VIOLA_RESTRICCIONES', { porQue: 'la pieza no tiene aprobación humana vigente para su versión actual', evidenciaUsada: [], queFalta: [`aprobación humana de la pieza ${e.paqueteId} v${piezaVersion}`], queImpediriaConcluir: ['pieza no aprobada / aprobación de otra versión'] });
     }
-    if (e.variante && !(await this.aprobacion.aprobadaVigente(ctx, 'VARIANTE', e.variante.varianteId))) {
-      return abstener('VIOLA_RESTRICCIONES', { porQue: 'la variante no tiene aprobación vigente', evidenciaUsada: [], queFalta: [`aprobación de la variante ${e.variante.varianteId}`], queImpediriaConcluir: ['variante no aprobada'] });
+    if (e.variante) {
+      // La variante debe PERTENECER al experimento de esta pieza (no cross-pieza) y estar aprobada.
+      const exp = await this.variantes.cargar(ctx, e.paqueteId);
+      if (!exp.variantes.some((v) => v.varianteId === e.variante!.varianteId)) {
+        return abstener('VIOLA_RESTRICCIONES', { porQue: 'la variante no pertenece al experimento de esta pieza', evidenciaUsada: [], queFalta: ['una variante del experimento de la pieza'], queImpediriaConcluir: ['inconsistencia pieza–variante'] });
+      }
+      if (!(await this.aprobacion.aprobadaVigente(ctx, 'VARIANTE', e.variante.varianteId))) {
+        return abstener('VIOLA_RESTRICCIONES', { porQue: 'la variante no tiene aprobación vigente', evidenciaUsada: [], queFalta: [`aprobación de la variante ${e.variante.varianteId}`], queImpediriaConcluir: ['variante no aprobada'] });
+      }
+    }
+    // Estrategia: aprobación separada SOLO si la política lo exige (sin hardcodear una segunda autoridad).
+    if (e.politica?.requiereAprobacionEstrategia) {
+      const estrategiaVersion = (await this.artefacto.cargar(ctx, e.estrategiaCreativaId)).version;
+      if (!(await this.aprobacion.estaAprobada(ctx, 'ESTRATEGIA_CREATIVA', e.estrategiaCreativaId, estrategiaVersion))) {
+        return abstener('VIOLA_RESTRICCIONES', { porQue: 'la estrategia requiere aprobación y no la tiene vigente', evidenciaUsada: [], queFalta: ['aprobación humana de la estrategia'], queImpediriaConcluir: ['estrategia no aprobada'] });
+      }
     }
 
     // Solo aquí se crea la entrada de calendario (idempotente). NO se programa (eso lo hará M7).
     await this.calendario.crear(ctx, e.calendario.programaId, e.calendario.zonaHoraria, a, o);
     await this.calendario.agregarEntrada(ctx, e.calendario.programaId, { entradaId: e.calendario.entradaId, fechaHora: e.calendario.fechaHora, canal: e.canal, piezaId: e.paqueteId, ...(e.variante ? { varianteId: e.variante.varianteId } : {}), objetivo: e.calendario.objetivo, segmento: e.calendario.segmento }, a, o);
 
+    const estrategiaVersion = (await this.artefacto.cargar(ctx, e.estrategiaCreativaId)).version;
     return proponer({
       contextoId: e.contextoId, briefId: e.briefId, territorioId: e.territorioId, estrategiaCreativaId: e.estrategiaCreativaId, paqueteId: e.paqueteId,
       piezaVersionParaAprobar: piezaVersion,
-      solicitudPiezaId: solicitudDeterministaId(this.org(ctx), 'PIEZA', e.paqueteId, piezaVersion),
-      solicitudVarianteId: e.variante ? solicitudDeterministaId(this.org(ctx), 'VARIANTE', e.variante.varianteId, 1) : null,
+      solicitudes: {
+        piezaId: solicitudDeterministaId(this.org(ctx), 'PIEZA', e.paqueteId, piezaVersion),
+        varianteId: e.variante ? solicitudDeterministaId(this.org(ctx), 'VARIANTE', e.variante.varianteId, 1) : null,
+        estrategiaId: e.politica?.requiereAprobacionEstrategia ? solicitudDeterministaId(this.org(ctx), 'ESTRATEGIA_CREATIVA', e.estrategiaCreativaId, estrategiaVersion) : null,
+      },
       varianteId: e.variante?.varianteId ?? null, entradaCalendarioId: e.calendario.entradaId,
       estado: 'CALENDARIZADO', vigencia: 'VIGENTE',
       resumen: `pieza aprobada y vigente, entrada de calendario creada en BORRADOR (M7 programará/ejecutará)`,

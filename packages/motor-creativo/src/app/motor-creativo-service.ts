@@ -104,6 +104,12 @@ export class MotorCreativoService {
       }
     }
     const st = await this.cargarContexto(ctx, contextoId);
+    // Idempotente por contenido: reconstruir con las MISMAS referencias/faltantes (y no obsoleto) no
+    // versiona (permite reintentos y concurrencia limpia). Un cambio real de M5 sí produce nueva versión.
+    const nuevoCanon = JSON.stringify({ referencias, faltantes });
+    if (st.existe && !st.obsoleto && JSON.stringify({ referencias: st.referencias, faltantes: st.faltantes }) === nuevoCanon) {
+      return st;
+    }
     await this.appendContexto(ctx, contextoId, st.version, EVENTOS_CONTEXTO.construido, { referencias, faltantes }, a, o);
     return this.cargarContexto(ctx, contextoId);
   }

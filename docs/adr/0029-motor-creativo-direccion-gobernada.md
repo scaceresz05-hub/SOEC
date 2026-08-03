@@ -109,6 +109,26 @@ Faltaba DEMOSTRAR atomicidad lógica y recuperación en todas las fronteras. Cer
 
 Aditivos: `InMemoryEventStore.exportar/desdeInstantanea` (@soec/event-store, soporte de test); `SolicitudAprobacionService` y `congelarProfundo` (@soec/motor-creativo). `verify` global 1112 verde.
 
+## Adenda 4 — corrección final acotada (`AUDITORIA_M6_REQUIERE_CORRECCION_FINAL_ACOTADA`)
+
+Tres cierres, sin ampliar arquitectura (solo completar/endurecer lo existente):
+
+- **Solicitudes canónicas por artefacto** (`PlanCreativo.solicitudes = { piezaId, varianteId, estrategiaId }`):
+  el pipeline emite solicitudes deterministas para pieza y variante, y —**según política**
+  (`EntradaPipeline.politica.requiereAprobacionEstrategia`, sin hardcodear una segunda autoridad)— para la
+  estrategia. Cada una es idempotente por versión, PENDIENTE, ligada a versión exacta e invalidada por
+  obsolescencia. `calendarizar` exige la aprobación de la estrategia solo cuando la política lo pide.
+- **Idempotencia total de `componer`** (para concurrencia reparadora limpia): `construirContexto` y
+  `vincularGobernanzaM5` pasan a ser idempotentes por CONTENIDO (reconstruir/revincular lo mismo no
+  versiona). Nuevas pruebas: fallo parcial en índice / variante / solicitud / calendario → **dos reintentos
+  concurrentes** → una sola cadena (conteo de eventos = 1) → tercer intento no-op.
+- **Lectura M7 endurecida por la tupla completa**: `listarPiezasAprobadas` excluye una pieza si alguna
+  variante de su experimento no está aprobada vigente (consistencia pieza–variante); `calendarizar` rechaza
+  una variante que no pertenece al experimento de la pieza (combinación cruzada). Pruebas negativas nuevas:
+  variante no aprobada / rechazada excluye la pieza; combinación cruzada pieza–variante no calendariza.
+
+61 tests en `@soec/motor-creativo`; `verify` global 1121 verde; 0 regresiones.
+
 ## Alcance respetado
 
 Neutral y simulado: sin proveedores reales, SDK, red, publicación, gasto, canales, credenciales ni
