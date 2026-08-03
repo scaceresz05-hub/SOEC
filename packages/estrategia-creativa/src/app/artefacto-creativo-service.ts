@@ -7,11 +7,13 @@ import type { Attribution, EventInput, EventStore, RequestContext } from '@soec/
 import {
   type ArtefactoCreativoState,
   type ContenidoArtefacto,
+  type GobernanzaM5,
   EVENTOS_ARTEFACTO,
   artefactoCreativoStreamId,
   contenidoArtefactoCanonico,
   reconstruirArtefacto,
 } from '../domain/artefacto-creativo';
+import { ArtefactoCreativoNoEncontradoError } from '../domain/errors';
 
 export class EstrategiaCreativaArtefactoService {
   constructor(private readonly store: EventStore) {}
@@ -34,6 +36,19 @@ export class EstrategiaCreativaArtefactoService {
     if (igual) return st; // sin cambios → no versiona
     const tipo = st.existe ? EVENTOS_ARTEFACTO.actualizada : EVENTOS_ARTEFACTO.registrada;
     const input: EventInput = { type: tipo, payload: contenido, attribution: a, occurredAt: o };
+    await this.store.append(ctx, artefactoCreativoStreamId(this.org(ctx), estrategiaCreativaId), st.version, [input]);
+    return this.cargar(ctx, estrategiaCreativaId);
+  }
+
+  /**
+   * M6: vincula la gobernanza M5 a un artefacto EXISTENTE (afirmaciones prohibidas, referencias a M5
+   * versionadas, estado de vigencia, contexto creativo). Ampliación aditiva: no altera el contenido
+   * canónico del artefacto (B-1). Exige que el artefacto ya exista.
+   */
+  async vincularGobernanzaM5(ctx: RequestContext, estrategiaCreativaId: string, gobernanza: GobernanzaM5, a: Attribution, o: string): Promise<ArtefactoCreativoState> {
+    const st = await this.cargar(ctx, estrategiaCreativaId);
+    if (!st.existe) throw new ArtefactoCreativoNoEncontradoError(`artefacto ${estrategiaCreativaId} no encontrado`);
+    const input: EventInput = { type: EVENTOS_ARTEFACTO.gobernanza, payload: gobernanza, attribution: a, occurredAt: o };
     await this.store.append(ctx, artefactoCreativoStreamId(this.org(ctx), estrategiaCreativaId), st.version, [input]);
     return this.cargar(ctx, estrategiaCreativaId);
   }

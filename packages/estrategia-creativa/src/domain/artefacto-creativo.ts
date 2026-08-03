@@ -13,6 +13,15 @@ import type { ConocimientoComercialState, EntidadComercial, HipotesisState } fro
 import { evaluarHipotesis } from '@soec/crm-comercial';
 import type { BriefComercial, EstrategiaCreativa } from './estrategia-creativa';
 
+/** Referencia versionada a una afirmación de M5 (`@soec/motor-estrategico`). Base de la vigencia. */
+export interface ReferenciaM5 {
+  readonly afirmacionId: string;
+  readonly version: number;
+}
+
+/** Vigencia de la gobernanza M5 de un artefacto: borrador → vigente → obsoleto (si M5 cambió). */
+export type EstadoArtefacto = 'BORRADOR' | 'VIGENTE' | 'OBSOLETO';
+
 export interface ArtefactoEstrategiaCreativa {
   readonly estrategiaCreativaId: string;
   readonly organizationId: string;
@@ -40,6 +49,23 @@ export interface ArtefactoEstrategiaCreativa {
   readonly version: number;
   readonly createdAt: string;
   readonly updatedAt: string;
+  // ── M6 · gobernanza M5 (ampliación ADITIVA; fuera del contenido canónico B-1) ──
+  /** Afirmaciones EXPLÍCITAMENTE prohibidas por la estrategia (lo que NO se puede decir). */
+  readonly afirmacionesProhibidas?: readonly string[];
+  /** Referencias a afirmaciones de M5 (id + versión) que sostienen la estrategia; base de obsolescencia. */
+  readonly referenciasM5?: readonly ReferenciaM5[];
+  /** Estado de vigencia respecto de M5 (BORRADOR/VIGENTE/OBSOLETO). */
+  readonly estadoGobernanza?: EstadoArtefacto;
+  /** Contexto creativo de M6 (`@soec/motor-creativo`) del que deriva la estrategia. */
+  readonly contextoCreativoId?: string | null;
+}
+
+/** Vínculo de gobernanza M5 aplicado a un artefacto ya existente (no altera su contenido canónico). */
+export interface GobernanzaM5 {
+  readonly afirmacionesProhibidas: readonly string[];
+  readonly referenciasM5: readonly ReferenciaM5[];
+  readonly estadoGobernanza: EstadoArtefacto;
+  readonly contextoCreativoId?: string | null;
 }
 
 export interface ArtefactoCreativoState {
@@ -50,7 +76,11 @@ export interface ArtefactoCreativoState {
   readonly artefacto: ArtefactoEstrategiaCreativa | null;
 }
 
-export const EVENTOS_ARTEFACTO = { registrada: 'creativa.artefacto_registrado', actualizada: 'creativa.artefacto_actualizado' } as const;
+export const EVENTOS_ARTEFACTO = {
+  registrada: 'creativa.artefacto_registrado',
+  actualizada: 'creativa.artefacto_actualizado',
+  gobernanza: 'creativa.artefacto_gobernanza_vinculada',
+} as const;
 
 export function artefactoCreativoStreamId(org: string, estrategiaCreativaId: string): string {
   return `creativa-artefacto:${org}:${estrategiaCreativaId}`;
@@ -184,6 +214,23 @@ export function aplicarArtefacto(state: ArtefactoCreativoState, event: RecordedE
       updatedAt: event.recordedAt,
     };
     return { ...next, existe: true, artefacto };
+  }
+  // M6: vínculo de gobernanza M5 sobre un artefacto EXISTENTE. Aditivo: no toca el contenido canónico
+  // (B-1) ni versiona el contenido; solo adjunta la capa de gobernanza y refresca updatedAt.
+  if (event.type === EVENTOS_ARTEFACTO.gobernanza) {
+    if (!state.artefacto) return next; // requiere artefacto ya registrado
+    const p = event.payload as GobernanzaM5;
+    return {
+      ...next,
+      artefacto: {
+        ...state.artefacto,
+        afirmacionesProhibidas: p.afirmacionesProhibidas,
+        referenciasM5: p.referenciasM5,
+        estadoGobernanza: p.estadoGobernanza,
+        contextoCreativoId: p.contextoCreativoId ?? null,
+        updatedAt: event.recordedAt,
+      },
+    };
   }
   return next;
 }
