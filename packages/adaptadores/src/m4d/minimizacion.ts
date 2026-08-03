@@ -7,21 +7,13 @@
  * correspondencia externa); NO es anonimización irreversible ni una garantía criptográfica. La anonimización
  * real exige política + revisión (D-7), no sólo esta transformación.
  */
+import { fnv1a } from '../domain/hash';
+
 export type NombreTransformacion = 'IDENTIDAD' | 'REDACTAR' | 'TRUNCAR' | 'SEUDONIMIZAR' | 'OMITIR';
 
 export interface OpcionesTransformacion {
   readonly longitud?: number; // TRUNCAR
   readonly clave?: string; // SEUDONIMIZAR (clave/sal inyectada; sin ella, seudonimizar falla-cerrado a OMITIR)
-}
-
-/** FNV-1a de 32 bits (determinista, sin azar): sólo para seudónimo estable/detección, no firma criptográfica. */
-function fnv1a(s: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i += 1) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h.toString(16).padStart(8, '0');
 }
 
 /**

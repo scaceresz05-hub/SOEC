@@ -13,7 +13,7 @@
 import type { RequestContext } from '@soec/contracts';
 import type { SecretStore } from '@soec/secretos';
 import type { AdaptadorExterno, SalidaAdaptador, SaludReporte, SolicitudAdaptador } from '../port/adaptador-externo';
-import { errorNormalizado, normalizarError } from '../domain/errores-normalizados';
+import { errorAborto, errorNormalizado, normalizarError } from '../domain/errores-normalizados';
 import { type EsquemaSalida, validarEgress } from './egress';
 
 export interface DependenciasAdaptadorReal {
@@ -39,10 +39,7 @@ export abstract class AdaptadorRealBase implements AdaptadorExterno {
   }
 
   async ejecutar(ctx: RequestContext, solicitud: SolicitudAdaptador, signal?: AbortSignal): Promise<SalidaAdaptador> {
-    if (signal?.aborted) {
-      const clase = signal.reason === 'timeout' ? 'TIMEOUT' : 'CANCELADO';
-      return { estado: 'ERROR', salida: null, error: errorNormalizado(clase, clase === 'TIMEOUT' ? 'se agotó el plazo' : 'ejecución cancelada') };
-    }
+    if (signal?.aborted) return { estado: 'ERROR', salida: null, error: errorAborto(signal.reason) };
     // 1) EGRESS: sólo salen los campos declarados y minimizados; lo no declarado no sale (default-deny).
     const egress = validarEgress(this.deps.esquemaEgress, solicitud.peticion.parametros);
     if (!egress.permitido) return { estado: 'ERROR', salida: null, error: errorNormalizado('INVALIDO', `egress rechazó campos: ${egress.motivo}`) };

@@ -9,7 +9,7 @@ Medición del rendimiento de la ejecución bajo **SOEC Engineering Methodology v
 | # | Hito | Estado | Commits | Tests agregados | Interrupciones al usuario | Bugs por AUTOauditoría | Bugs por auditoría EXTERNA (usuario) | Rework (ciclos H) | Tiempo→consolidación |
 |---|------|--------|--------:|----------------:|--------------------------:|-----------------------:|-------------------------------------:|-------------------|----------------------|
 | 1 | Fundación M4 (M4-A→M4-C-C) | Fusionada (`main`, tag `fundacion-m4`) | 15 | ~991 acumulados (suite global) | Alta (auditoría por tramo, por diseño de gobernanza) | varios (referencias opacas, esConsumible, huella) | **muchos**: F-CB-1, F-CB-2, C-1..C-7, F-CBH-1, F-CCC-1/2, PR-1 | **3** (M4-C-A→A-H, M4-C-B→B-H, M4-C-C→correcciones) | por tramo |
-| 2 | M4-D — andamiaje neutral + frontera | Técnicamente consolidado; pend. revalidación PG | 5 | ~33 (m4d) | **1** (feedback metodológico) | **2** (presupuesto fail-open; gate de nivel diferido) | 0 externo | 0 | 1 ciclo |
+| 2 | M4-D — andamiaje neutral + frontera | Técnicamente consolidado; pend. revalidación PG | 7 | 152 (2 paquetes M4) | **1** (feedback metodológico) | **2** autoauditoría (presupuesto fail-open; gate de nivel diferido) + DRY/consolidación (fnv1a, errorAborto) + no-filtración por path completo | 0 externo | 0 | 1 ciclo |
 
 ### Notas de honestidad
 - **Fundación M4:** las "interrupciones" fueron mayormente **auditorías de gobernanza solicitadas por el usuario** (por tramo), no fragmentación artificial. El alto rework (los `-H`) es precisamente lo que la metodología v1.0 (autoauditoría adversarial + regla del 95%) busca **reducir**: muchas correcciones venían de escenarios adversariales ejecutables antes de detenerse.

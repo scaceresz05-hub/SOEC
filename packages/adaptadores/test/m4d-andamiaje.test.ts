@@ -120,6 +120,10 @@ describe('@soec/adaptadores · presupuesto (antes de la llamada)', () => {
   it('permite si consumido + estimación no supera el tope', () => {
     expect(evaluarPresupuesto(politica, 80, estimarConservador(10, null)).permitido).toBe(true);
   });
+  it('en el límite exacto (proyectado == tope) permite; superarlo por 1 rechaza', () => {
+    expect(evaluarPresupuesto(politica, 90, estimarConservador(10, null)).permitido).toBe(true); // ==100
+    expect(evaluarPresupuesto(politica, 90, estimarConservador(11, null)).permitido).toBe(false); // 101
+  });
   it('rechaza ANTES de la llamada si superaría el tope', () => {
     expect(evaluarPresupuesto(politica, 95, estimarConservador(10, null)).permitido).toBe(false);
   });

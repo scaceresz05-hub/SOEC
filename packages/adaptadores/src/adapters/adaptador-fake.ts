@@ -8,7 +8,7 @@
  */
 import type { RequestContext } from '@soec/contracts';
 import type { AdaptadorExterno, EstadoSalud, SalidaAdaptador, SaludReporte, SolicitudAdaptador } from '../port/adaptador-externo';
-import { type ErrorNormalizado, errorNormalizado } from '../domain/errores-normalizados';
+import { type ErrorNormalizado, errorAborto, errorNormalizado } from '../domain/errores-normalizados';
 
 export interface ConfigFake {
   readonly capacidad?: string;
@@ -39,10 +39,7 @@ export class AdaptadorFake implements AdaptadorExterno {
   }
 
   async ejecutar(_ctx: RequestContext, solicitud: SolicitudAdaptador, signal?: AbortSignal): Promise<SalidaAdaptador> {
-    if (signal?.aborted) {
-      const clase = signal.reason === 'timeout' ? 'TIMEOUT' : 'CANCELADO';
-      return { estado: 'ERROR', salida: null, error: errorNormalizado(clase, clase === 'TIMEOUT' ? 'se agotó el plazo' : 'ejecución cancelada') };
-    }
+    if (signal?.aborted) return { estado: 'ERROR', salida: null, error: errorAborto(signal.reason) };
     if (this.#errorForzado) return { estado: 'ERROR', salida: null, error: this.#errorForzado };
     const salida = this.#respuestas.get(solicitud.peticion.operacion);
     if (!salida) return { estado: 'ERROR', salida: null, error: errorNormalizado('INVALIDO', `operación no soportada: ${solicitud.peticion.operacion}`) };

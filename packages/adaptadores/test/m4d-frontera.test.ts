@@ -21,6 +21,7 @@ import {
   nivelPermiteModo,
   nivelPermiteReal,
   transicionActivacionValida,
+  validarEgress,
 } from '../src/index';
 
 const O = '2026-08-02T00:00:00.000Z';
@@ -166,5 +167,23 @@ describe('@soec/adaptadores · template de adaptador real + fake', () => {
     const s = await ad.ejecutar(ctx(), { solicitudId: 's', capacidadId: 'gen', peticion: { operacion: 'generar', parametros: { tema: 'x' } } });
     expect(s.estado).toBe('ERROR');
     expect(auditarNoFiltracion(SECRETO, { salida: s }).filtra).toBe(false);
+  });
+
+  it('NO-FILTRACIÓN por el path COMPLETO del orquestador (resultado + ambas evidencias)', async () => {
+    const store = new SecretStoreEnMemoria({ 'env:GEN': SECRETO });
+    const ad = new AdaptadorRealFake({ secretStore: store, secretRef: 'env:GEN', esquemaEgress: esquema });
+    const cap = (): CapacidadState => ({ organizationId: 'org-a', capacidadId: 'gen', tipo: 'g', version: 5, existe: true, estado: 'EN_USO', modo: 'SIMULADA', salud: 'SALUDABLE', politicaDegradacion: 'SIMULAR', proveedorRef: null, secretRef: 'env:GEN', alternativaCapacidadId: null, cacheRef: null, configVersion: 3, reemplazadaPor: null, terminada: false });
+    const reg = (): RegistroAdaptador => ({ organizationId: 'org-a', adaptadorId: 'real-fake', capacidadId: 'gen', contratoId: 'gen', contratoVersion: '1.0.0', implementacionVersion: '0.0.0', estado: 'AUTORIZADO', modo: 'SIMULADO', secretRef: 'env:GEN', salud: 'SALUDABLE', compatibilidad: null, limites: null, circuitBreaker: CIRCUIT_BREAKER_CERRADO, expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, descriptor: null, creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4 });
+    const r = await new OrquestadorAdaptadores().orquestar(ad, ctx(), { solicitudId: 's', capacidadId: 'gen', peticion: { operacion: 'generar', parametros: { tema: 'agua', rut: '11.111' } } }, cap(), reg(), { observadoEn: O, politicaBreaker: { maxFallosConsecutivos: 3, ventanaMs: 60000, tiempoReaperturaMs: 30000, version: '1' } });
+    expect(r.resultado?.estado).toBe('OK');
+    expect(auditarNoFiltracion(SECRETO, { resultado: r.resultado, evOperativa: r.evidenciaOperativa, evSandbox: r.evidenciaSandbox }).filtra).toBe(false);
+  });
+
+  it('egress rechaza valores no primitivos y respeta límites/omisiones (completitud adversarial)', () => {
+    // objeto/array como valor de campo declarado → rechazado (default-deny de tipos complejos)
+    const esq: EsquemaSalida = { operacion: 'x', campos: [{ nombre: 'a', tipo: 'string' }] };
+    const r = validarEgress(esq, { a: { anidado: 1 } as unknown as string });
+    expect(r.rechazados).toContain('a');
+    expect(r.datos.a).toBeUndefined();
   });
 });
