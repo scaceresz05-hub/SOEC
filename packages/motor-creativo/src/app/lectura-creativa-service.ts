@@ -11,17 +11,20 @@ import {
   EstrategiaCreativaArtefactoService,
   VariantesABService,
   CalendarioEditorialService,
+  AprobacionService,
   type ArtefactoCreativoState,
   type ExperimentoABState,
   type CalendarioState,
 } from '@soec/estrategia-creativa';
 import { BriefService, type BriefState, type PaqueteState, paqueteStreamId, reconstruirPaquete } from '@soec/contenido';
 import { MotorCreativoService } from './motor-creativo-service';
+import { GobernanzaCreativaService } from './gobernanza-creativa-service';
 import type { ContextoCreativoState } from '../dominio/contexto-creativo';
 import type { TerritorioState } from '../dominio/territorio';
 import type { ResultadoCreativo } from '../dominio/abstencion';
 import { type Vigencia, estadoVigencia } from '../dominio/vigencia';
-import type { EntradaTerritorio, EvaluacionTerritorio, LecturaCreativa } from '../contratos';
+import { indicePiezasStreamId, reconstruirIndicePiezas } from '../dominio/indice-piezas';
+import type { EntradaTerritorio, EvaluacionTerritorio, LecturaCreativa, PiezaAprobada } from '../contratos';
 
 export class LecturaCreativaService implements LecturaCreativa {
   private readonly motor: MotorCreativoService;
@@ -29,6 +32,8 @@ export class LecturaCreativaService implements LecturaCreativa {
   private readonly artefacto: EstrategiaCreativaArtefactoService;
   private readonly variantes: VariantesABService;
   private readonly calendario: CalendarioEditorialService;
+  private readonly aprobacion: AprobacionService;
+  private readonly gobernanza: GobernanzaCreativaService;
 
   constructor(
     private readonly store: EventStore,
@@ -39,6 +44,8 @@ export class LecturaCreativaService implements LecturaCreativa {
     this.artefacto = new EstrategiaCreativaArtefactoService(store);
     this.variantes = new VariantesABService(store);
     this.calendario = new CalendarioEditorialService(store);
+    this.aprobacion = new AprobacionService(store);
+    this.gobernanza = new GobernanzaCreativaService(store, conocimiento);
   }
 
   cargarContexto(ctx: RequestContext, contextoId: string): Promise<ContextoCreativoState> {
@@ -86,5 +93,28 @@ export class LecturaCreativaService implements LecturaCreativa {
 
   cargarCalendario(ctx: RequestContext, programaId: string): Promise<CalendarioState> {
     return this.calendario.cargar(ctx, programaId);
+  }
+
+  async listarPiezasAprobadas(ctx: RequestContext): Promise<readonly PiezaAprobada[]> {
+    const org = String(ctx.organizationId);
+    const idx = reconstruirIndicePiezas(org, await this.store.readStream(ctx, indicePiezasStreamId(org)));
+    const out: PiezaAprobada[] = [];
+    for (const paqueteId of idx.paquetes) {
+      const paq = reconstruirPaquete(paqueteId, org, await this.store.readStream(ctx, paqueteStreamId(paqueteId)));
+      if (!paq.existe || !paq.pieza) continue;
+      if (paq.estado === 'retirado') continue; // pieza retirada nunca se lista
+      const refsM5 = (paq.pieza.referenciasM5 ?? []).map((r) => ({ afirmacionId: r.afirmacionId, version: r.version }));
+      // Autoridad ÚNICA: se DERIVA la vigencia contra M5 (no se confía en la caché materializada).
+      const dictamen = await this.gobernanza.dictaminar(ctx, refsM5);
+      if (dictamen.estado !== 'VIGENTE') continue;
+      if (!(await this.aprobacion.estaAprobada(ctx, 'PIEZA', paqueteId, paq.version))) continue;
+      out.push({
+        paqueteId,
+        version: paq.version,
+        referenciasM5: refsM5,
+        trazabilidad: (paq.pieza.trazabilidad ?? []).map((t) => ({ afirmacionId: t.afirmacionId, version: t.version, estado: t.estado, mensajeId: t.mensajeId })),
+      });
+    }
+    return out;
   }
 }

@@ -52,4 +52,18 @@ export class EstrategiaCreativaArtefactoService {
     await this.store.append(ctx, artefactoCreativoStreamId(this.org(ctx), estrategiaCreativaId), st.version, [input]);
     return this.cargar(ctx, estrategiaCreativaId);
   }
+
+  /**
+   * M6: MATERIALIZA la obsolescencia respecto de M5 (idempotente: si ya está en ese estado, no emite). El
+   * artefacto histórico se conserva; solo cambia su `estadoGobernanza`. La autoridad de la vigencia es la
+   * DERIVACIÓN (comparar referenciasM5 vs M5); esto mantiene la caché del agregado en concordancia.
+   */
+  async marcarObsoleto(ctx: RequestContext, estrategiaCreativaId: string, estado: 'OBSOLETO' | 'REQUIERE_REVISION', a: Attribution, o: string): Promise<ArtefactoCreativoState> {
+    const st = await this.cargar(ctx, estrategiaCreativaId);
+    if (!st.existe) throw new ArtefactoCreativoNoEncontradoError(`artefacto ${estrategiaCreativaId} no encontrado`);
+    if (st.artefacto?.estadoGobernanza === estado) return st; // idempotente en contenido
+    const input: EventInput = { type: EVENTOS_ARTEFACTO.obsoleto, payload: { estado }, attribution: a, occurredAt: o };
+    await this.store.append(ctx, artefactoCreativoStreamId(this.org(ctx), estrategiaCreativaId), st.version, [input]);
+    return this.cargar(ctx, estrategiaCreativaId);
+  }
 }

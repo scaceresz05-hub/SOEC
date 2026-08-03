@@ -16,6 +16,8 @@ export * from './dominio/indice-territorios';
 export * from './dominio/mensaje';
 export * from './dominio/validacion-autoritativa';
 export * from './dominio/vigencia';
+export * from './dominio/vigencia-creativa';
+export * from './dominio/indice-piezas';
 export * from './dominio/errors';
 export * from './contratos';
 export {
@@ -23,10 +25,12 @@ export {
   type RolSolicitado,
   type MensajeARespaldar,
 } from './app/motor-creativo-service';
+export { GobernanzaCreativaService, type ObjetivoMaterializacion } from './app/gobernanza-creativa-service';
 export { LecturaCreativaService } from './app/lectura-creativa-service';
 export {
   PipelineCreativoService,
   type EntradaPipeline,
   type PlanCreativo,
+  type EstadoPlan,
   type ProductorPieza,
 } from './app/pipeline-creativo-service';

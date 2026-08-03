@@ -33,7 +33,14 @@ export const EVENTOS_PAQ = {
   ejecutado: 'paq.ejecutado',
   retirado: 'paq.retirado',
   gobernanza: 'paq.gobernanza_creativa_vinculada',
+  obsoleta: 'paq.gobernanza_obsoleta',
 } as const;
+
+/** M6: materializa la obsolescencia de la pieza respecto de M5 (aditivo, idempotente). */
+export interface PayloadObsoletaCreativa {
+  readonly vigencia: 'OBSOLETO' | 'REQUIERE_REVISION';
+  readonly motivo: string;
+}
 
 /** M6: gobernanza creativa que se ADJUNTA a la pieza de un paquete ya producido (aditivo). */
 export interface PayloadGobernanzaCreativa {
@@ -187,6 +194,11 @@ export function aplicarPaquete(state: PaqueteState, event: RecordedEvent): Paque
     case EVENTOS_PAQ.retirado: {
       const p = event.payload as PayloadRetirado;
       return { ...next, estado: 'retirado', resultadoEjecucion: p.motivo, historial: [...state.historial, { estado: 'retirado', en: event.recordedAt }] };
+    }
+    case EVENTOS_PAQ.obsoleta: {
+      if (!state.pieza) return next;
+      const p = event.payload as PayloadObsoletaCreativa;
+      return { ...next, pieza: { ...state.pieza, vigencia: p.vigencia } };
     }
     case EVENTOS_PAQ.gobernanza: {
       if (!state.pieza) return next; // requiere una pieza ya producida

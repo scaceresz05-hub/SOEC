@@ -85,6 +85,17 @@ forma ADITIVA (sin modelos paralelos):
 
 Todo neutral/simulado; `AUTONOMOUS_REAL` bloqueado; M6 no ejecuta, no publica, no programa, no gasta.
 
+## Adenda 2 — correcciones focalizadas (dictamen `AUDITORIA_M6_REQUIERE_CORRECCIONES_FOCALIZADAS`)
+
+El cierre demostraba componentes, no las INTERACCIONES gobernadas. Corregido sin crear dominio nuevo:
+
+- **A · Vigencia como gate ÚNICO** (`gobernanza-creativa-service.ts:evaluarVigenciaCreativa` + `vigencia-creativa.ts:evaluarVigencia`): la autoridad de la vigencia es la DERIVACIÓN (referenciasM5 vs M5); estados `VIGENTE`/`REQUIERE_REVISION`/`OBSOLETO`. Cuando no es VIGENTE, MATERIALIZA la obsolescencia de forma idempotente en el artefacto (`creativa.artefacto_obsoleto` → `estadoGobernanza`) y en la pieza (`paq.gobernanza_obsoleta` → `pieza.vigencia`), de modo que ninguna consulta diga "obsoleto" mientras el agregado sigue "vigente". El artefacto histórico se conserva.
+- **B · Pipeline gobernado en dos fases** (`pipeline-creativo-service.ts`): `componer` deja PENDIENTE_APROBACION (nunca aprueba ni calendariza); `calendarizar` exige, por el gate único, vigencia VIGENTE + aprobación de la pieza **por versión exacta** (`estaAprobada`) + aprobación de la variante, y solo entonces crea la entrada de calendario. Una versión nueva no hereda aprobación.
+- **C · Fallo parcial reparable**: test con store que falla el alta de variante → reintento idempotente repara solo lo faltante, sin duplicar pieza/variante/eventos (`producirPieza`/`gobernarPieza`/índice idempotentes).
+- **D · Replay frío**: un `LecturaCreativaService` NUEVO reconstruye contexto/brief/estrategia/pieza/variante/calendario/vigencia idénticos desde el log, sin cachés de proceso.
+- **E · Contratos M7**: `LecturaCreativa.listarPiezasAprobadas` devuelve SOLO piezas aprobadas por versión exacta y VIGENTES (re-derivando la vigencia); excluye retiradas, obsoletas y aprobaciones no vigentes; snapshots inmutables (paqueteId, versión, referenciasM5, trazabilidad). El puerto no expone escritura.
+- **F · Autoauditoría**: aprobación vieja tras cambio de M5, pieza vigente/variante no aprobada, obsolescencia materializada + exclusión de la lista, fallo parcial + reintento, replay frío, cross-tenant, texto inválido. 35 tests en `@soec/motor-creativo`.
+
 ## Alcance respetado
 
 Neutral y simulado: sin proveedores reales, SDK, red, publicación, gasto, canales, credenciales ni

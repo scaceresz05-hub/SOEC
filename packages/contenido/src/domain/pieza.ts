@@ -72,6 +72,8 @@ export interface PiezaFuente {
   readonly naturaleza?: 'SIMULADO';
   /** Traza autoritativa: cada afirmación usada, rastreable hasta M5. */
   readonly trazabilidad?: readonly TrazaAfirmacion[];
+  /** Vigencia MATERIALIZADA respecto de M5 (la autoridad es la derivación; esto es su caché honesta). */
+  readonly vigencia?: 'VIGENTE' | 'OBSOLETO' | 'REQUIERE_REVISION';
 }
 
 const TRANSICIONES_PIEZA: Readonly<Record<EstadoPieza, readonly EstadoPieza[]>> = {

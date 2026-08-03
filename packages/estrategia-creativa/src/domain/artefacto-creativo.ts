@@ -19,8 +19,8 @@ export interface ReferenciaM5 {
   readonly version: number;
 }
 
-/** Vigencia de la gobernanza M5 de un artefacto: borrador → vigente → obsoleto (si M5 cambió). */
-export type EstadoArtefacto = 'BORRADOR' | 'VIGENTE' | 'OBSOLETO';
+/** Vigencia de la gobernanza M5 de un artefacto: borrador → vigente → requiere-revisión / obsoleto. */
+export type EstadoArtefacto = 'BORRADOR' | 'VIGENTE' | 'REQUIERE_REVISION' | 'OBSOLETO';
 
 export interface ArtefactoEstrategiaCreativa {
   readonly estrategiaCreativaId: string;
@@ -80,6 +80,7 @@ export const EVENTOS_ARTEFACTO = {
   registrada: 'creativa.artefacto_registrado',
   actualizada: 'creativa.artefacto_actualizado',
   gobernanza: 'creativa.artefacto_gobernanza_vinculada',
+  obsoleto: 'creativa.artefacto_obsoleto',
 } as const;
 
 export function artefactoCreativoStreamId(org: string, estrategiaCreativaId: string): string {
@@ -214,6 +215,12 @@ export function aplicarArtefacto(state: ArtefactoCreativoState, event: RecordedE
       updatedAt: event.recordedAt,
     };
     return { ...next, existe: true, artefacto };
+  }
+  // M6: materializa la obsolescencia respecto de M5 sobre un artefacto EXISTENTE (aditivo, idempotente).
+  if (event.type === EVENTOS_ARTEFACTO.obsoleto) {
+    if (!state.artefacto) return next;
+    const p = event.payload as { estado: EstadoArtefacto };
+    return { ...next, artefacto: { ...state.artefacto, estadoGobernanza: p.estado, updatedAt: event.recordedAt } };
   }
   // M6: vínculo de gobernanza M5 sobre un artefacto EXISTENTE. Aditivo: no toca el contenido canónico
   // (B-1) ni versiona el contenido; solo adjunta la capa de gobernanza y refresca updatedAt.

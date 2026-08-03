@@ -27,6 +27,14 @@ export interface EntradaTerritorio {
   readonly tesis: string;
 }
 
+/** Pieza aprobada y VIGENTE que M7 puede ejecutar: snapshot inmutable con versión y evidencia exactas. */
+export interface PiezaAprobada {
+  readonly paqueteId: string;
+  readonly version: number;
+  readonly referenciasM5: readonly { readonly afirmacionId: string; readonly version: number }[];
+  readonly trazabilidad: readonly { readonly afirmacionId: string; readonly version: number; readonly estado: string; readonly mensajeId: string }[];
+}
+
 /**
  * PUERTO DE LECTURA — todo lo que M7 (ejecución) necesita del motor creativo, solo lectura: contexto,
  * brief, territorio, estrategia, pieza, variante/experimento, calendario y la vigencia/obsolescencia.
@@ -44,4 +52,9 @@ export interface LecturaCreativa {
   cargarPieza(ctx: RequestContext, paqueteId: string): Promise<PaqueteState>;
   cargarExperimento(ctx: RequestContext, piezaBaseId: string): Promise<ExperimentoABState>;
   cargarCalendario(ctx: RequestContext, programaId: string): Promise<CalendarioState>;
+  /**
+   * Piezas que M7 puede ejecutar: SOLO las aprobadas por versión exacta Y vigentes respecto de M5.
+   * Excluye retiradas, obsoletas y con aprobación no vigente. Devuelve snapshots inmutables.
+   */
+  listarPiezasAprobadas(ctx: RequestContext): Promise<readonly PiezaAprobada[]>;
 }
