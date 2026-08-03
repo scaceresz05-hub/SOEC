@@ -33,6 +33,7 @@ import { RETRY_DESHABILITADO, decidirRetry } from '../domain/retry';
 import { LimitadorConcurrencia } from '../domain/concurrencia';
 import { verificarCompatibilidad, type SolicitudCompatibilidad } from '../domain/compatibilidad';
 import { type HealthCheckAdaptador, efectoSalud, healthValido } from '../domain/health';
+import { type EstimacionUso, type PoliticaPresupuesto, evaluarPresupuesto } from '../m4d/presupuesto';
 import { type SaludRegistro } from '../domain/registro-adaptador';
 import { CoordinadorSemiabierto } from '../domain/lease-semiabierto';
 import { type ProgramadorEspera, ProgramadorEsperaInmediato, isoSumarMs } from './programador-espera';
@@ -52,6 +53,8 @@ export interface OpcionesOrquestacion {
   readonly signal?: AbortSignal;
   /** Coordinación de la prueba SEMIABIERTO (F-CB-4). Por defecto una nueva por invocación. */
   readonly coordinadorSemiabierto?: CoordinadorSemiabierto;
+  /** Gate de presupuesto (Eje 4). Sólo aplica a ejecución REAL; se evalúa ANTES de la ejecución. Config D-3. */
+  readonly presupuesto?: { readonly politica: PoliticaPresupuesto; readonly consumidoEnVentana: number; readonly estimacion: EstimacionUso };
   /** Backoff entre reintentos (F-CB-3). Por defecto inmediato (determinista). */
   readonly programadorEspera?: ProgramadorEspera;
   /** Relee el registro para reevaluar gates entre reintentos. Por defecto reusa el snapshot. */
@@ -112,6 +115,11 @@ export class OrquestadorAdaptadores {
     if (!efectoSalud(salud, autoridad.modoEjecutado).permite) return noOk('SALUD', 'NO_DISPONIBLE', registro.circuitBreaker);
     const eb = evaluarBreaker(registro.circuitBreaker, opciones.politicaBreaker, instante);
     if (!eb.permitido) return noOk('BREAKER', 'NO_DISPONIBLE', eb.estado);
+    // Presupuesto (Eje 4): sólo REAL, ANTES de la ejecución. Rechazo si superaría el tope o estimación desconocida.
+    if (autoridad.modoEjecutado === 'REAL' && opciones.presupuesto) {
+      const vp = evaluarPresupuesto(opciones.presupuesto.politica, opciones.presupuesto.consumidoEnVentana, opciones.presupuesto.estimacion);
+      if (!vp.permitido) return noOk('PRESUPUESTO', 'LIMITE', eb.estado);
+    }
     return { ok: true, gate: null, codigo: null, modoEjecutado: autoridad.modoEjecutado, breaker: eb.estado };
   }
 

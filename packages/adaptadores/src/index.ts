@@ -40,3 +40,6 @@ export * from './m4d/minimizacion';
 export * from './m4d/egress';
 export * from './m4d/presupuesto';
 export * from './m4d/auditoria-no-filtracion';
+export * from './m4d/consumo';
+export * from './m4d/activacion';
+export * from './m4d/adaptador-real-base';
