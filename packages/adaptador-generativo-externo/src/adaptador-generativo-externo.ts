@@ -9,7 +9,22 @@
  * carcasa declara `soportaReal: false`, de modo que la gobernanza jamás la promueva a REAL.
  */
 import type { RequestContext } from '@soec/contracts';
-import type { AdaptadorExterno, SalidaAdaptador, SaludReporte, SolicitudAdaptador } from '@soec/adaptadores';
+import type { AdaptadorExterno, ContenidoDescriptor, SalidaAdaptador, SaludReporte, SolicitudAdaptador } from '@soec/adaptadores';
+
+/**
+ * Contenido de descriptor REGISTRABLE de la carcasa. La autoridad de capacidades vive en el descriptor
+ * persistido (M4-C-C): declara `soportaReal:false`. Aunque se monkey-patchee la instancia, el descriptor
+ * persistido impide REAL.
+ */
+export const CONTENIDO_DESCRIPTOR_GENERATIVO: ContenidoDescriptor = {
+  adaptadorId: 'generacion-externa-carcasa',
+  capacidadId: 'generacion-contenido',
+  contratoId: 'generacion',
+  contratoVersion: '1.0.0',
+  implementacionVersion: '0.1.0',
+  evidenciaSchemaVersion: '1',
+  capacidades: { soportaSimulado: true, soportaReal: false, soportaHealthCheck: true, soportaCancelacion: true, soportaTimeout: false },
+};
 
 export interface DescriptorAdaptador {
   readonly adaptadorIdLogico: string;

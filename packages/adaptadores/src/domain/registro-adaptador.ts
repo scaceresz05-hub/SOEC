@@ -13,6 +13,7 @@ import {
   type EstadoCircuitBreaker,
   type LimiteConcurrencia,
 } from './operativo-tipos';
+import type { DescriptorAdaptador } from './descriptor';
 
 export type EstadoRegistroAdaptador =
   | 'REGISTRADO'
@@ -45,6 +46,7 @@ export interface RegistroAdaptador {
   readonly expiraEn: string | null;
   readonly revocadoMotivo: string | null;
   readonly reemplazadoPor: string | null;
+  readonly descriptor: DescriptorAdaptador | null; // autoridad de capacidades (M4-C-C)
   readonly creadoPor: string | null;
   readonly actualizadoPor: string | null;
   readonly existe: boolean;
@@ -67,6 +69,9 @@ export const EVENTOS_ADAPTADOR = {
   saludRegistrada: 'adaptador.salud_registrada',
   breakerActualizado: 'adaptador.breaker_actualizado',
   versionCambiada: 'adaptador.version_cambiada',
+  descriptorRegistrado: 'adaptador.descriptor_registrado',
+  descriptorActualizado: 'adaptador.descriptor_actualizado',
+  descriptorReemplazado: 'adaptador.descriptor_reemplazado',
 } as const;
 
 export function adaptadorStreamId(org: string, adaptadorId: string): string {
@@ -91,6 +96,7 @@ export function estadoInicialAdaptadorRegistro(org: string, adaptadorId: string)
     expiraEn: null,
     revocadoMotivo: null,
     reemplazadoPor: null,
+    descriptor: null,
     creadoPor: null,
     actualizadoPor: null,
     existe: false,
@@ -173,6 +179,10 @@ export function aplicarAdaptador(state: RegistroAdaptador, ev: RecordedEvent): R
         compatibilidad: (p.compatibilidad as CompatibilidadAdaptador) ?? state.compatibilidad,
         actualizadoPor: actor,
       };
+    case EVENTOS_ADAPTADOR.descriptorRegistrado:
+    case EVENTOS_ADAPTADOR.descriptorActualizado:
+    case EVENTOS_ADAPTADOR.descriptorReemplazado:
+      return { ...next, descriptor: p.descriptor as DescriptorAdaptador, actualizadoPor: actor };
     default:
       return next;
   }

@@ -16,7 +16,13 @@ import {
   autoridadModoReal,
   derivarEstadoFrontera,
   validarCoherenciaFrontera,
+  crearDescriptor,
 } from '../src/index';
+
+const descReal = crearDescriptor(
+  { adaptadorId: 'gen-1', capacidadId: 'gen', contratoId: 'gen', contratoVersion: '1.0.0', implementacionVersion: '1.0.0', evidenciaSchemaVersion: '1', capacidades: { soportaSimulado: true, soportaReal: true, soportaHealthCheck: true, soportaCancelacion: true, soportaTimeout: true } },
+  1,
+);
 
 const O = '2026-08-02T00:00:00.000Z';
 const ctx = (org = 'org-a'): RequestContext => {
@@ -34,13 +40,13 @@ const politicaBreaker = { maxFallosConsecutivos: 3, ventanaMs: 60000, tiempoReap
 const reg = (over: Partial<RegistroAdaptador> = {}): RegistroAdaptador => ({
   organizationId: 'org-a', adaptadorId: 'gen-1', capacidadId: 'gen', contratoId: 'gen', contratoVersion: '1.0.0', implementacionVersion: '1.0.0',
   estado: 'AUTORIZADO', modo: 'SIMULADO', secretRef: 'env:GEN', salud: 'SALUDABLE', compatibilidad: compat, limites: limite, circuitBreaker: CIRCUIT_BREAKER_CERRADO,
-  expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4, ...over,
+  expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, descriptor: null, creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4, ...over,
 });
 const ok: SalidaAdaptador = { estado: 'OK', salida: { k: 'v' }, error: null };
 const adaptador = (soporta: boolean): AdaptadorExterno & { ejecutado: () => boolean } => {
   let ejec = false;
   return {
-    nombre: 'ad', capacidad: 'gen', version: '1.0.0',
+    nombre: 'gen-1', capacidad: 'gen', version: '1.0.0',
     soportaReal: () => soporta,
     async salud() { return { estado: 'SALUDABLE', detalle: '' }; },
     async ejecutar() { ejec = true; return ok; },
@@ -59,7 +65,7 @@ describe('@soec/adaptadores · F-CB-1 autoridad del modo REAL', () => {
     expect(ad.ejecutado()).toBe(false);
   });
 
-  it('registro REAL/AUTORIZADO + adaptador soportaReal=false → NO_AUTORIZADO', async () => {
+  it('registro REAL/AUTORIZADO + descriptor sin soportaReal → NO_AUTORIZADO', async () => {
     const ad = adaptador(false);
     const r = await orq.orquestar(ad, ctx(), solicitud, cap(), reg({ modo: 'REAL' }), { observadoEn: O, politicaBreaker, modoSolicitado: 'REAL' });
     expect(r.evidenciaOperativa.gateRechazo).toBe('MODO_REAL');
@@ -67,13 +73,13 @@ describe('@soec/adaptadores · F-CB-1 autoridad del modo REAL', () => {
   });
 
   it('registro REAL sin secretRef → NO_AUTORIZADO', async () => {
-    const r = await orq.orquestar(adaptador(true), ctx(), solicitud, cap(), reg({ modo: 'REAL', secretRef: null }), { observadoEn: O, politicaBreaker, modoSolicitado: 'REAL' });
+    const r = await orq.orquestar(adaptador(true), ctx(), solicitud, cap(), reg({ modo: 'REAL', secretRef: null, descriptor: descReal }), { observadoEn: O, politicaBreaker, modoSolicitado: 'REAL' });
     expect(r.evidenciaOperativa.gateRechazo).toBe('MODO_REAL');
   });
 
-  it('registro REAL/AUTORIZADO + soportaReal=true + gates completos → llega al sandbox en REAL', async () => {
+  it('registro REAL/AUTORIZADO + descriptor soportaReal=true + gates completos → llega al sandbox en REAL', async () => {
     const ad = adaptador(true);
-    const r = await orq.orquestar(ad, ctx(), solicitud, cap(), reg({ modo: 'REAL' }), { observadoEn: O, politicaBreaker, modoSolicitado: 'REAL' });
+    const r = await orq.orquestar(ad, ctx(), solicitud, cap(), reg({ modo: 'REAL', descriptor: descReal }), { observadoEn: O, politicaBreaker, modoSolicitado: 'REAL' });
     expect(r.resultado?.estado).toBe('OK');
     expect(r.resultado?.modoEjecutado).toBe('REAL');
     expect(r.evidenciaOperativa.modoAutorizado).toBe('REAL');
@@ -87,13 +93,13 @@ describe('@soec/adaptadores · F-CB-1 autoridad del modo REAL', () => {
     expect(limitador.enCursoOrg('org-a')).toBe(0);
   });
 
-  it('helper autoridadModoReal y coherencia de frontera derivada', () => {
+  it('helper autoridadModoReal usa el descriptor (no la instancia) y coherencia de frontera', () => {
     const ad = adaptador(true);
-    expect(autoridadModoReal(reg({ modo: 'SIMULADO' }), ad, 'REAL').ok).toBe(false);
-    expect(autoridadModoReal(reg({ modo: 'REAL' }), ad, 'REAL')).toEqual({ ok: true, modoEjecutado: 'REAL', motivo: '' });
+    expect(autoridadModoReal(reg({ modo: 'SIMULADO' }), 'REAL').ok).toBe(false);
+    expect(autoridadModoReal(reg({ modo: 'REAL' }), 'REAL').ok).toBe(false); // sin descriptor → rechazo
+    expect(autoridadModoReal(reg({ modo: 'REAL', descriptor: descReal }), 'REAL')).toEqual({ ok: true, modoEjecutado: 'REAL', motivo: '' });
     const front = derivarEstadoFrontera(reg({ modo: 'REAL' }));
     expect(front).toEqual({ activacion: 'ACTIVADO', modo: 'REAL', credencial: 'CON_CREDENCIAL', consumo: 'CONSUMIBLE', secretRef: 'env:GEN' });
-    // una frontera fabricada más permisiva es incoherente con un registro SIMULADO
     expect(validarCoherenciaFrontera(reg({ modo: 'SIMULADO' }), front, ad).coherente).toBe(false);
   });
 });

@@ -5,8 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import { ActorId, OrganizationId, type RequestContext } from '@soec/contracts';
 import type { CapacidadState } from '@soec/plataforma-capacidades';
-import { Sandbox, estadoInicialAdaptador, OrquestadorAdaptadores, CIRCUIT_BREAKER_CERRADO, type RegistroAdaptador } from '@soec/adaptadores';
-import { AdaptadorGenerativoExternoDesactivado, DESCRIPTOR_GENERATIVO_EXTERNO } from '../src/index';
+import { Sandbox, estadoInicialAdaptador, OrquestadorAdaptadores, CIRCUIT_BREAKER_CERRADO, crearDescriptor, type RegistroAdaptador } from '@soec/adaptadores';
+import { AdaptadorGenerativoExternoDesactivado, DESCRIPTOR_GENERATIVO_EXTERNO, CONTENIDO_DESCRIPTOR_GENERATIVO } from '../src/index';
 
 const O = '2026-08-02T00:00:00.000Z';
 const ctx = (): RequestContext => {
@@ -47,12 +47,15 @@ describe('@soec/adaptador-generativo-externo · carcasa desactivada', () => {
     expect(resultado.error?.clase).toBe('NO_AUTORIZADO');
   });
 
-  it('vía orquestador: aun con registro REAL/AUTORIZADO + capacidad consumible, soportaReal=false → NO_AUTORIZADO sin ejecutar', async () => {
+  it('vía orquestador: descriptor soportaReal=false + monkey-patch de la instancia → NO_AUTORIZADO (el descriptor persistido gobierna)', async () => {
+    const descriptor = crearDescriptor(CONTENIDO_DESCRIPTOR_GENERATIVO, 1);
     const reg: RegistroAdaptador = {
-      organizationId: 'org-a', adaptadorId: ad.nombre, capacidadId: 'gen', contratoId: 'generacion', contratoVersion: '1.0.0', implementacionVersion: '0.1.0',
+      organizationId: 'org-a', adaptadorId: ad.nombre, capacidadId: 'generacion-contenido', contratoId: 'generacion', contratoVersion: '1.0.0', implementacionVersion: '0.1.0',
       estado: 'AUTORIZADO', modo: 'REAL', secretRef: 'env:GEN', salud: 'SALUDABLE', compatibilidad: null, limites: null, circuitBreaker: CIRCUIT_BREAKER_CERRADO,
-      expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4,
+      expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, descriptor, creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4,
     };
+    // Ataque: monkey-patch de la instancia para intentar habilitar REAL.
+    (ad as unknown as { soportaReal: () => boolean }).soportaReal = () => true;
     const r = await new OrquestadorAdaptadores().orquestar(ad, ctx(), solicitud, cap(), reg, {
       observadoEn: O,
       politicaBreaker: { maxFallosConsecutivos: 3, ventanaMs: 60000, tiempoReaperturaMs: 30000, version: '1' },
@@ -61,6 +64,6 @@ describe('@soec/adaptador-generativo-externo · carcasa desactivada', () => {
     expect(r.resultado).toBeNull();
     expect(r.evidenciaOperativa.codigoError).toBe('NO_AUTORIZADO');
     expect(r.evidenciaOperativa.gateRechazo).toBe('MODO_REAL');
-    expect(r.evidenciaOperativa.soportaReal).toBe(false);
+    expect(r.evidenciaOperativa.soportaReal).toBe(false); // autoridad = descriptor, no la instancia
   });
 });

@@ -15,6 +15,8 @@ export * from './domain/inmutable';
 export * from './domain/evidencia';
 export * from './domain/operativo-tipos';
 export * from './domain/registro-adaptador';
+export * from './domain/descriptor';
+export * from './domain/integridad';
 export * from './domain/autoridad-real';
 export * from './domain/compatibilidad';
 export * from './domain/health';

@@ -14,7 +14,7 @@ export type NaturalezaDuracion = 'REAL' | 'ESTIMADA' | 'SIMULADA';
 export type ModoIntencion = 'SIMULADO' | 'REAL';
 
 /** Gate que produjo un rechazo temprano (trazabilidad). `null` si la ejecución llegó al sandbox. */
-export type GateRechazo = 'CICLO_VIDA' | 'MODO_REAL' | 'COMPATIBILIDAD' | 'SALUD' | 'BREAKER' | 'CONCURRENCIA' | null;
+export type GateRechazo = 'CICLO_VIDA' | 'MODO_REAL' | 'INTEGRIDAD' | 'COMPATIBILIDAD' | 'SALUD' | 'BREAKER' | 'SEMIABIERTO' | 'CONCURRENCIA' | null;
 
 export interface EvidenciaOperativa {
   readonly evidenciaVersion: number;

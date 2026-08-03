@@ -13,6 +13,7 @@ import {
   TransicionAdaptadorInvalidaError,
 } from '../domain/errores-normalizados';
 import type { CompatibilidadAdaptador, EstadoCircuitBreaker, LimiteConcurrencia } from '../domain/operativo-tipos';
+import { type ContenidoDescriptor, crearDescriptor, huellaDescriptor } from '../domain/descriptor';
 import {
   EVENTOS_ADAPTADOR,
   type EstadoRegistroAdaptador,
@@ -169,6 +170,26 @@ export class RegistroAdaptadoresService {
     const reg = await this.cargar(ctx, adaptadorId);
     if (!reg.existe) throw new RegistroAdaptadorNoEncontradoError(`adaptador ${adaptadorId} no encontrado`);
     await this.emitir(ctx, adaptadorId, EVENTOS_ADAPTADOR.versionCambiada, { contratoVersion, implementacionVersion, compatibilidad, actor, en: o }, a, o);
+    return this.cargar(ctx, adaptadorId);
+  }
+
+  /**
+   * Registra/actualiza el descriptor INMUTABLE del adaptador (F-CBH-1). Idempotente por huella; un cambio
+   * real incrementa `descriptorVersion` y exige ACTO HUMANO. Habilitar `soportaReal` NO activa el modo REAL
+   * (eso requiere `activarReal` sobre el registro). Un descriptor incompatible se bloquea en la ejecución.
+   */
+  async registrarDescriptor(ctx: RequestContext, adaptadorId: string, contenido: ContenidoDescriptor, actorHumano: string, a: Attribution, o: string): Promise<RegistroAdaptador> {
+    if (!actorHumano?.trim()) throw new AdaptadorInvalidoError('registrar/actualizar descriptor exige un actor humano');
+    const reg = await this.cargar(ctx, adaptadorId);
+    if (!reg.existe) throw new RegistroAdaptadorNoEncontradoError(`adaptador ${adaptadorId} no encontrado`);
+    if (contenido.adaptadorId !== adaptadorId) throw new AdaptadorInvalidoError('el descriptor no corresponde al adaptador');
+    if (reg.capacidadId && contenido.capacidadId !== reg.capacidadId) throw new AdaptadorInvalidoError('capacidadId del descriptor ≠ registro');
+    const huella = huellaDescriptor(contenido);
+    if (reg.descriptor && reg.descriptor.huella === huella) return reg; // idempotente
+    const primero = reg.descriptor === null;
+    const descriptorVersion = (reg.descriptor?.descriptorVersion ?? 0) + 1;
+    const descriptor = crearDescriptor(contenido, descriptorVersion);
+    await this.emitir(ctx, adaptadorId, primero ? EVENTOS_ADAPTADOR.descriptorRegistrado : EVENTOS_ADAPTADOR.descriptorActualizado, { descriptor, actor: actorHumano, en: o }, a, o);
     return this.cargar(ctx, adaptadorId);
   }
 

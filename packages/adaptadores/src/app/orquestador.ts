@@ -18,7 +18,9 @@ import { Sandbox } from './sandbox';
 import { blindar } from '../domain/inmutable';
 import type { ClaseErrorAdaptador } from '../domain/errores-normalizados';
 import { type RegistroAdaptador, puedeConsumirOperativo } from '../domain/registro-adaptador';
-import { autoridadModoReal, derivarEstadoFrontera, soportaReal } from '../domain/autoridad-real';
+import { autoridadModoReal, derivarEstadoFrontera } from '../domain/autoridad-real';
+import { descriptorSoportaReal } from '../domain/descriptor';
+import { validarInstanciaContraDescriptor } from '../domain/integridad';
 import { type EstadoCircuitBreaker, type LimiteConcurrencia, type PoliticaCircuitBreaker, type PoliticaRetry } from '../domain/operativo-tipos';
 import { evaluarBreaker, registrarResultadoBreaker } from '../domain/circuit-breaker';
 import { RETRY_DESHABILITADO, decidirRetry } from '../domain/retry';
@@ -59,7 +61,7 @@ export class OrquestadorAdaptadores {
     opciones: OpcionesOrquestacion,
   ): Promise<ResultadoOrquestacion> {
     const modoSolicitado: ModoAdaptador = opciones.modoSolicitado ?? 'SIMULADO';
-    const soporta = soportaReal(adaptador);
+    const soporta = descriptorSoportaReal(registro.descriptor); // autoridad: descriptor, no la instancia
     const org = String(ctx.organizationId);
 
     const rechazo = (codigo: ClaseErrorAdaptador, gate: GateRechazo, modoAutorizado: ModoAdaptador, breaker: EstadoCircuitBreaker, limiteAlcanzado = false): ResultadoOrquestacion => ({
@@ -72,10 +74,14 @@ export class OrquestadorAdaptadores {
     // 1) ciclo de vida (existe/terminal/revocado/expirado/pausado/AUTORIZADO).
     if (!puedeConsumirOperativo(registro, opciones.observadoEn).ok) return rechazo('NO_AUTORIZADO', 'CICLO_VIDA', 'SIMULADO', registro.circuitBreaker);
 
-    // 2) AUTORIDAD DEL MODO REAL (F-CB-1): derivada del registro + adaptador, nunca del llamador.
-    const autoridad = autoridadModoReal(registro, adaptador, modoSolicitado);
+    // 2) AUTORIDAD DEL MODO REAL (F-CB-1): derivada del registro + DESCRIPTOR, nunca del llamador ni la instancia.
+    const autoridad = autoridadModoReal(registro, modoSolicitado);
     if (!autoridad.ok) return rechazo('NO_AUTORIZADO', 'MODO_REAL', 'SIMULADO', registro.circuitBreaker);
     const modoEjecutado = autoridad.modoEjecutado;
+
+    // 2.5) INTEGRIDAD instancia ↔ descriptor (F-CBH-1): la instancia no puede ampliar lo declarado.
+    const integridad = validarInstanciaContraDescriptor(registro, adaptador);
+    if (!integridad.ok) return rechazo('INVALIDO', 'INTEGRIDAD', modoEjecutado, registro.circuitBreaker);
 
     // 3) compatibilidad.
     if (opciones.compatSolicitada && registro.compatibilidad) {

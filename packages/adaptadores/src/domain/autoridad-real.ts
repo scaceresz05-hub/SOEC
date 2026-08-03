@@ -8,8 +8,12 @@
 import type { AdaptadorExterno } from '../port/adaptador-externo';
 import type { EstadoAdaptador, ModoAdaptador } from './estado-adaptador';
 import type { RegistroAdaptador } from './registro-adaptador';
+import { descriptorSoportaReal } from './descriptor';
 
-/** Honestidad del adaptador: ausente → `false` (fail-closed). */
+/**
+ * Honestidad DECLARADA por la instancia (ausente → `false`). ⚠ NO es autoridad: la autoridad de `soportaReal`
+ * es el descriptor persistido (`descriptorSoportaReal`). Se conserva sólo para validar coherencia/diagnóstico.
+ */
 export function soportaReal(adaptador: AdaptadorExterno): boolean {
   return typeof adaptador.soportaReal === 'function' ? adaptador.soportaReal() === true : false;
 }
@@ -32,15 +36,17 @@ export interface AutoridadReal {
 }
 
 /**
- * Decide el modo EJECUTADO a partir de la intención y de la autoridad del registro + adaptador. REAL sólo si
- * TODO se cumple; en cualquier otro caso con intención REAL → rechazo (no se degrada en silencio a SIMULADO).
+ * Decide el modo EJECUTADO a partir de la intención y de la AUTORIDAD del registro (modo/estado/secretRef +
+ * `descriptor.soportaReal`). REAL sólo si TODO se cumple; en cualquier otro caso con intención REAL → rechazo
+ * (no se degrada en silencio a SIMULADO). `soportaReal` proviene del DESCRIPTOR persistido, no de la instancia
+ * mutable (F-CBH-1): un monkey-patch de la instancia no habilita REAL.
  */
-export function autoridadModoReal(registro: RegistroAdaptador, adaptador: AdaptadorExterno, modoSolicitado: ModoAdaptador): AutoridadReal {
+export function autoridadModoReal(registro: RegistroAdaptador, modoSolicitado: ModoAdaptador): AutoridadReal {
   if (modoSolicitado !== 'REAL') return { ok: true, modoEjecutado: 'SIMULADO', motivo: '' };
   if (registro.estado !== 'AUTORIZADO') return { ok: false, modoEjecutado: 'SIMULADO', motivo: 'registro no AUTORIZADO' };
   if (registro.modo !== 'REAL') return { ok: false, modoEjecutado: 'SIMULADO', motivo: 'registro no está en modo REAL (falta acto humano)' };
   if (!registro.secretRef) return { ok: false, modoEjecutado: 'SIMULADO', motivo: 'sin secretRef operativa' };
-  if (!soportaReal(adaptador)) return { ok: false, modoEjecutado: 'SIMULADO', motivo: 'el adaptador no soporta REAL' };
+  if (!descriptorSoportaReal(registro.descriptor)) return { ok: false, modoEjecutado: 'SIMULADO', motivo: 'el descriptor no declara soportaReal' };
   return { ok: true, modoEjecutado: 'REAL', motivo: '' };
 }
 
