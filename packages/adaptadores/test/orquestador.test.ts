@@ -32,7 +32,7 @@ const limite = { maxConcurrentesPorOrganizacion: 4, maxConcurrentesPorAdaptador:
 const reg = (over: Partial<RegistroAdaptador> = {}): RegistroAdaptador => ({
   organizationId: 'org-a', adaptadorId: 'gen-1', capacidadId: 'gen', contratoId: 'gen', contratoVersion: '1.0.0', implementacionVersion: '1.0.0',
   estado: 'AUTORIZADO', modo: 'SIMULADO', secretRef: 'env:GEN', salud: 'SALUDABLE', compatibilidad: compat, limites: limite, circuitBreaker: CIRCUIT_BREAKER_CERRADO,
-  expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, descriptor: null, creadoPor: 'ana', actualizadoPor: 'ana-humana', existe: true, terminada: false, version: 4, ...over,
+  expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, descriptor: null, nivelActivacion: 'SIMULADO', creadoPor: 'ana', actualizadoPor: 'ana-humana', existe: true, terminada: false, version: 4, ...over,
 });
 
 const orq = new OrquestadorAdaptadores();
@@ -43,7 +43,7 @@ describe('@soec/adaptadores · orquestador (composición)', () => {
     const r = await orq.orquestar(fake, ctx(), solicitud, cap(), reg(), { observadoEn: O, politicaBreaker, compatSolicitada: { contratoId: 'gen', contratoVersion: '1.0.0', evidenciaSchemaVersion: '1' } });
     expect(r.resultado?.estado).toBe('OK');
     expect(r.evidenciaOperativa.organizationId).toBe('org-a');
-    expect(r.evidenciaOperativa.evidenciaVersion).toBe(3);
+    expect(r.evidenciaOperativa.evidenciaVersion).toBe(4);
     expect(r.evidenciaOperativa.naturalezaDuracion).toBe('SIMULADA');
     expect(Object.isFrozen(r.evidenciaOperativa)).toBe(true);
   });

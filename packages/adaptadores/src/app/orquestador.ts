@@ -35,6 +35,7 @@ import { verificarCompatibilidad, type SolicitudCompatibilidad } from '../domain
 import { type HealthCheckAdaptador, efectoSalud, healthValido } from '../domain/health';
 import { type EstimacionUso, type PoliticaPresupuesto, evaluarPresupuesto } from '../m4d/presupuesto';
 import { type NivelActivacion, nivelPermiteReal } from '../m4d/activacion';
+import type { RegistroConsumo } from '../m4d/consumo';
 import { type SaludRegistro } from '../domain/registro-adaptador';
 import { CoordinadorSemiabierto } from '../domain/lease-semiabierto';
 import { type ProgramadorEspera, ProgramadorEsperaInmediato, isoSumarMs } from './programador-espera';
@@ -62,6 +63,9 @@ export interface OpcionesOrquestacion {
   /** Nivel de activación (Eje 7). Si se provee y es REAL la intención, el nivel debe permitir REAL
    *  (PILOTO/REAL); si no, se rechaza. Ausente → sin gate (fundación). El path real de M4-D lo inyecta. */
   readonly nivelActivacion?: NivelActivacion;
+  /** Ledger de consumo (Eje 4). Si se provee junto a `presupuesto`, tras una ejecución REAL exitosa se
+   *  registra el consumo estimado en la ventana (cierra el loop del presupuesto). Provider-agnóstico. */
+  readonly registroConsumo?: RegistroConsumo;
   /** Backoff entre reintentos (F-CB-3). Por defecto inmediato (determinista). */
   readonly programadorEspera?: ProgramadorEspera;
   /** Relee el registro para reevaluar gates entre reintentos. Por defecto reusa el snapshot. */
@@ -103,8 +107,10 @@ export class OrquestadorAdaptadores {
     if (!puedeConsumirOperativo(registro, instante).ok) return noOk('CICLO_VIDA', 'NO_AUTORIZADO', registro.circuitBreaker);
     const autoridad = autoridadModoReal(registro, modoSolicitado);
     if (!autoridad.ok) return noOk('MODO_REAL', 'NO_AUTORIZADO', registro.circuitBreaker);
-    // Nivel de activación (Eje 7): REAL exige un nivel que lo permita (PILOTO/REAL). Inyectado; ausente = sin gate.
-    if (autoridad.modoEjecutado === 'REAL' && opciones.nivelActivacion && !nivelPermiteReal(opciones.nivelActivacion)) {
+    // Nivel de activación (Eje 7): REAL exige un nivel que lo permita (PILOTO/REAL). Nivel efectivo = SSOT del
+    // registro; `opciones.nivelActivacion` puede forzarlo (tests). REAL sin nivel que lo permita → rechazo.
+    const nivel = opciones.nivelActivacion ?? registro.nivelActivacion;
+    if (autoridad.modoEjecutado === 'REAL' && !nivelPermiteReal(nivel)) {
       return noOk('ACTIVACION', 'NO_AUTORIZADO', registro.circuitBreaker);
     }
     if (!validarInstanciaContraDescriptor(registro, adaptador).ok) return noOk('INTEGRIDAD', 'INVALIDO', registro.circuitBreaker);
@@ -215,6 +221,10 @@ export class OrquestadorAdaptadores {
 
       const exito = res.resultado.estado === 'OK';
       breaker = registrarResultadoBreaker(breaker, opciones.politicaBreaker, exito, relojIntento(intento));
+      // Registro de consumo (Eje 4): tras una ejecución REAL exitosa, contabiliza lo estimado en la ventana.
+      if (exito && prep.modoEjecutado === 'REAL' && opciones.presupuesto && opciones.registroConsumo) {
+        opciones.registroConsumo.registrar(org, registro.capacidadId, opciones.presupuesto.estimacion.unidades, opciones.observadoEn);
+      }
       const codigo = exito ? null : (res.resultado.error?.clase ?? 'DESCONOCIDO');
       return {
         resultado: res.resultado,
@@ -257,6 +267,7 @@ export class OrquestadorAdaptadores {
       descriptorVersion: registro.descriptor?.descriptorVersion ?? null,
       descriptorHuella: registro.descriptor?.huella ?? null,
       estado: registro.estado,
+      nivelActivacion: registro.nivelActivacion,
       salud: registro.salud,
       modoSolicitado,
       modoAutorizado,

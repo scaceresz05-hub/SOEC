@@ -161,7 +161,7 @@ describe('@soec/adaptadores · orquestador sella la instancia (integración)', (
   const reg = (): RegistroAdaptador => ({
     organizationId: 'org-a', adaptadorId: 'gen-1', capacidadId: 'gen', contratoId: 'gen', contratoVersion: '1.0.0', implementacionVersion: '1.0.0',
     estado: 'AUTORIZADO', modo: 'SIMULADO', secretRef: 'env:GEN', salud: 'SALUDABLE', compatibilidad: null, limites: null, circuitBreaker: CIRCUIT_BREAKER_CERRADO,
-    expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, descriptor: null, creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4,
+    expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, descriptor: null, nivelActivacion: 'SIMULADO', creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4,
   });
 
   it('ejecución SIMULADA normal + monkey-patch del original tras entrar no altera el resultado', async () => {

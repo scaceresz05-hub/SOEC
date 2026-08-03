@@ -8,7 +8,7 @@ import type { ClaseErrorAdaptador } from './errores-normalizados';
 import type { EstadoRegistroAdaptador, SaludRegistro } from './registro-adaptador';
 import type { EstadoBreaker } from './operativo-tipos';
 
-export const EVIDENCIA_OPERATIVA_VERSION = 3;
+export const EVIDENCIA_OPERATIVA_VERSION = 4;
 export const EVIDENCIA_INTENTO_VERSION = 1;
 
 export type NaturalezaDuracion = 'REAL' | 'ESTIMADA' | 'SIMULADA';
@@ -28,6 +28,7 @@ export interface EvidenciaOperativa {
   readonly descriptorVersion: number | null;
   readonly descriptorHuella: string | null;
   readonly estado: EstadoRegistroAdaptador;
+  readonly nivelActivacion: string;
   readonly salud: SaludRegistro;
   readonly modoSolicitado: ModoIntencion;
   readonly modoAutorizado: ModoIntencion;

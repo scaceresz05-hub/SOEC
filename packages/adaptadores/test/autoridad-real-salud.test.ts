@@ -40,7 +40,7 @@ const politicaBreaker = { maxFallosConsecutivos: 3, ventanaMs: 60000, tiempoReap
 const reg = (over: Partial<RegistroAdaptador> = {}): RegistroAdaptador => ({
   organizationId: 'org-a', adaptadorId: 'gen-1', capacidadId: 'gen', contratoId: 'gen', contratoVersion: '1.0.0', implementacionVersion: '1.0.0',
   estado: 'AUTORIZADO', modo: 'SIMULADO', secretRef: 'env:GEN', salud: 'SALUDABLE', compatibilidad: compat, limites: limite, circuitBreaker: CIRCUIT_BREAKER_CERRADO,
-  expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, descriptor: null, creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4, ...over,
+  expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, descriptor: null, nivelActivacion: 'SIMULADO', creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4, ...over,
 });
 const ok: SalidaAdaptador = { estado: 'OK', salida: { k: 'v' }, error: null };
 const adaptador = (soporta: boolean): AdaptadorExterno & { ejecutado: () => boolean } => {
@@ -79,7 +79,7 @@ describe('@soec/adaptadores · F-CB-1 autoridad del modo REAL', () => {
 
   it('registro REAL/AUTORIZADO + descriptor soportaReal=true + gates completos → llega al sandbox en REAL', async () => {
     const ad = adaptador(true);
-    const r = await orq.orquestar(ad, ctx(), solicitud, cap(), reg({ modo: 'REAL', descriptor: descReal }), { observadoEn: O, politicaBreaker, modoSolicitado: 'REAL' });
+    const r = await orq.orquestar(ad, ctx(), solicitud, cap(), reg({ modo: 'REAL', descriptor: descReal, nivelActivacion: 'REAL' }), { observadoEn: O, politicaBreaker, modoSolicitado: 'REAL' });
     expect(r.resultado?.estado).toBe('OK');
     expect(r.resultado?.modoEjecutado).toBe('REAL');
     expect(r.evidenciaOperativa.modoAutorizado).toBe('REAL');
