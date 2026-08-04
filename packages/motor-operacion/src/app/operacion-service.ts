@@ -13,7 +13,7 @@
 import type { Attribution, EventInput, EventStore, RequestContext } from '@soec/contracts';
 import { ConcurrencyError } from '@soec/contracts';
 import type { LecturaCreativa } from '@soec/motor-creativo';
-import { type PoliticaPresupuesto, estimarConservador, evaluarPresupuesto } from '@soec/adaptadores';
+import { type PoliticaPresupuesto, type PoliticaRetry, type ClaseErrorAdaptador, estimarConservador, evaluarPresupuesto, decidirRetry, RETRY_DESHABILITADO } from '@soec/adaptadores';
 import { PausaService, type Alcance } from '@soec/control';
 import {
   EVENTOS_ORDEN,
@@ -28,6 +28,8 @@ import {
 } from '../dominio/orden';
 import { EVENTOS_TRABAJO, type TrabajoState, reclamable, trabajoStreamId, reconstruirTrabajo } from '../dominio/cola';
 import { claveEfecto, huellaEfecto, trabajoId as trabajoIdDe } from '../dominio/idempotencia';
+import { EVENTOS_RESERVA, type ReservaState, comprometeReserva, reservaId as reservaIdDe, reservaStreamId, reconstruirReserva } from '../dominio/reserva';
+import { EVENTOS_COMPENSACION, compensacionId as compensacionIdDe, compensacionStreamId, reconstruirCompensacion } from '../dominio/compensacion';
 import { EVIDENCIA_OPERACIONAL_VERSION, type EvidenciaOperacional, blindarEvidencia } from '../dominio/evidencia';
 import { ComandoOperacionInvalidoError, OperacionPausadaError, OrdenNoEncontradaError, TransicionInvalidaError, TrabajoNoReclamableError } from '../dominio/errors';
 import type { PuertoEjecucionSimulada } from '../contratos';
@@ -36,9 +38,11 @@ const EVENTOS_INDICE = { registrada: 'orden-indice.registrada' } as const;
 const EVENTOS_EFECTO = { aplicado: 'efecto.aplicado' } as const;
 const EVENTOS_CONSUMO = { registrado: 'consumo.registrado' } as const;
 
+const EVENTOS_RES_INDICE = { registrada: 'reserva-indice.registrada' } as const;
 function indiceStreamId(org: string): string { return `orden-indice:${org}`; }
 function efectoStreamId(org: string, clave: string): string { return `efecto:${org}:${clave}`; }
 function consumoStreamId(org: string): string { return `consumo-op:${org}`; }
+function reservaIndiceStreamId(org: string): string { return `reserva-indice:${org}`; }
 
 /** Entrada para crear una orden desde un artefacto aprobado de M6. */
 export interface EntradaOrden {
@@ -63,7 +67,15 @@ export interface OpcionesOperacion {
   readonly leaseTtlMs?: number;
   /** Ventana de expiración: si el instante planificado quedó más atrás que esto respecto de `ahora`. */
   readonly ventanaExpiracionMs?: number;
+  /**
+   * Política de reintento CANÓNICA (`@soec/adaptadores`). Si se omite, se deriva de `maxIntentos` (backoff
+   * fijo, base 0). Reutiliza `decidirRetry`; NUNCA una política paralela.
+   */
+  readonly politicaRetry?: PoliticaRetry;
 }
+
+/** Clases de error de adaptador reintentables cuando la política se deriva de `maxIntentos`. */
+const REINTENTABLES_POR_DEFECTO: readonly ClaseErrorAdaptador[] = ['TIMEOUT', 'NO_DISPONIBLE', 'LIMITE'];
 
 export class OperacionService {
   private readonly pausa: PausaService;
@@ -77,6 +89,18 @@ export class OperacionService {
   }
 
   private org(ctx: RequestContext): string { return String(ctx.organizationId); }
+
+  /**
+   * Política de reintento efectiva: la explícita (`politicaRetry`) o una DERIVADA de `maxIntentos`
+   * (backoff fijo, base 0) para compatibilidad. Reutiliza el contrato canónico de @soec/adaptadores; no
+   * define una política paralela.
+   */
+  private politicaRetryEfectiva(): PoliticaRetry {
+    if (this.opciones.politicaRetry) return this.opciones.politicaRetry;
+    const maxIntentos = this.opciones.maxIntentos ?? 1;
+    if (maxIntentos <= 1) return RETRY_DESHABILITADO;
+    return { habilitado: true, maxIntentos, erroresReintentables: REINTENTABLES_POR_DEFECTO, backoff: 'FIJO', baseMs: 0, jitter: false, version: 'derivada-maxIntentos' };
+  }
 
   /** Alcances de PAUSA relevantes para una orden: organización, programa y capacidad. */
   private alcancesDe(org: string, d: DatosOrden): readonly Alcance[] {
@@ -183,13 +207,14 @@ export class OperacionService {
   }
 
   /** Encola: crea el trabajo (id determinista por orden+intento) DISPONIBLE y pasa la orden a EN_COLA. */
-  async encolar(ctx: RequestContext, ordenId: string, a: Attribution, o: string): Promise<TrabajoState> {
+  async encolar(ctx: RequestContext, ordenId: string, a: Attribution, o: string, disponibleDesde?: string): Promise<TrabajoState> {
     const st = await this.exigir(ctx, ordenId);
     if (st.estado !== 'PROGRAMADA' && st.estado !== 'FALLIDA') throw new TransicionInvalidaError(`no se puede encolar desde ${st.estado}`);
     await this.exigirNoPausado(ctx, st.datos!);
     const intento = st.intentos + 1;
     const tid = trabajoIdDe(this.org(ctx), ordenId, intento);
-    await this.encolarTrabajo(ctx, tid, ordenId, intento, st.datos!.instantePlanificado, a, o);
+    // Backoff: si se indica `disponibleDesde` (reintento), el trabajo no es reclamable hasta ese instante.
+    await this.encolarTrabajo(ctx, tid, ordenId, intento, disponibleDesde ?? st.datos!.instantePlanificado, a, o);
     await this.transicionar(ctx, st.ordenId, 'EN_COLA', 'encolada', a, o); // PROGRAMADA→EN_COLA o FALLIDA→EN_COLA (reintento)
     return reconstruirTrabajo(this.org(ctx), tid, await this.store.readStream(ctx, trabajoStreamId(this.org(ctx), tid)));
   }
@@ -236,23 +261,24 @@ export class OperacionService {
       return this.cargarOrden(ctx, tw.ordenId);
     }
 
-    // Presupuesto ANTES del efecto (unidades lógicas; SIMULADO/ESTIMADO, nunca REAL).
-    const unidades = this.opciones.unidadesPorEjecucion ?? 1;
-    if (this.opciones.presupuesto) {
-      const consumido = await this.consumido(ctx);
-      const veredicto = evaluarPresupuesto(this.opciones.presupuesto, consumido, estimarConservador(null, unidades));
-      if (!veredicto.permitido) {
-        await this.emitirEvidencia(ctx, cur, tw.intentoLogico, 'RECHAZADA', 'PRESUPUESTO_EXCEDIDO', 'sin presupuesto', a, o);
-        await this.transicionar(ctx, cur.ordenId, 'FALLIDA', 'presupuesto excedido', a, o);
-        await this.fallarTrabajo(ctx, trabajoIdArg, 'presupuesto', a, o);
-        return this.cargarOrden(ctx, tw.ordenId);
-      }
+    // GATE de EXPIRACIÓN por intento: si venció la ventana antes de este intento, no se ejecuta.
+    const ventanaExp = this.opciones.ventanaExpiracionMs ?? Infinity;
+    const inst = Date.parse(d.instantePlanificado);
+    if (Number.isFinite(inst) && Date.parse(ahora) - inst > ventanaExp) {
+      await this.emitirEvidencia(ctx, cur, tw.intentoLogico, 'RECHAZADA', 'EXPIRADA', 'ventana vencida antes del intento', a, o);
+      await this.transicionar(ctx, cur.ordenId, 'EXPIRADA', 'expirada antes del intento', a, o);
+      await this.fallarTrabajo(ctx, trabajoIdArg, 'EXPIRADA', a, o);
+      return this.cargarOrden(ctx, tw.ordenId);
     }
 
-    // Efecto EXACTAMENTE UNA VEZ por la clave LÓGICA (sin intento). Distinto contenido ⇒ CONFLICTO.
+    // Clave LÓGICA + reserva presupuestaria (RESERVA antes del efecto; unidades lógicas, nunca REAL).
+    const unidades = this.opciones.unidadesPorEjecucion ?? 1;
     const clave = claveEfecto(org, tw.ordenId, d.pieza, d.variante, d.capacidad);
+    const rid = reservaIdDe(org, tw.ordenId, clave);
     const huella = huellaEfecto(d.pieza, d.variante, d.capacidad);
     const huellaPrevia = await this.efectoHuella(ctx, clave);
+
+    // Efecto EXACTAMENTE UNA VEZ por la clave LÓGICA. Conflicto de contenido ⇒ CONFLICTO_IDEMPOTENCIA.
     if (huellaPrevia !== null) {
       if (huellaPrevia !== huella) {
         await this.emitirEvidencia(ctx, cur, tw.intentoLogico, 'RECHAZADA', 'CONFLICTO_IDEMPOTENCIA', 'misma clave, contenido distinto', a, o);
@@ -265,23 +291,48 @@ export class OperacionService {
       await this.completarTrabajo(ctx, trabajoIdArg, 'DUPLICADA', a, o);
       return this.cargarOrden(ctx, tw.ordenId);
     }
+
+    // Presupuesto: estimación conservadora → validación del límite → RESERVA.
+    if (this.opciones.presupuesto) {
+      const veredicto = evaluarPresupuesto(this.opciones.presupuesto, await this.comprometido(ctx), estimarConservador(null, unidades));
+      if (!veredicto.permitido) {
+        await this.emitirEvidencia(ctx, cur, tw.intentoLogico, 'RECHAZADA', 'PRESUPUESTO_EXCEDIDO', 'sin presupuesto', a, o);
+        await this.transicionar(ctx, cur.ordenId, 'FALLIDA', 'presupuesto excedido', a, o);
+        await this.fallarTrabajo(ctx, trabajoIdArg, 'presupuesto', a, o);
+        return this.cargarOrden(ctx, tw.ordenId);
+      }
+    }
+    await this.reservar(ctx, rid, tw.ordenId, clave, unidades, d.politicaVersion, this.opciones.presupuesto?.ventanaMs ?? 0, a, o);
+    await this.appendOrdenFresco(ctx, cur.ordenId, EVENTOS_ORDEN.presupuesto, { unidades }, a, o);
+
     const r = await this.ejecutor.ejecutar({ organizacionId: org, ordenId: tw.ordenId, capacidad: d.capacidad, canalLogico: d.canalLogico, claveEfecto: clave, intento: tw.intentoLogico, observadoEn: o });
     if (r.resultado === 'EJECUTADA_SIMULADA') {
+      // Efecto aplicado (concurrencia optimista: si otro worker lo aplicó, este append falla ⇒ un solo efecto).
       await this.store.append(ctx, efectoStreamId(org, clave), 0, [{ type: EVENTOS_EFECTO.aplicado, payload: { clave, huella }, attribution: a, occurredAt: o }]);
-      await this.registrarConsumo(ctx, unidades, a, o);
+      await this.confirmarReserva(ctx, rid, unidades, a, o); // CONFIRMA el consumo UNA sola vez
     }
     await this.emitirEvidencia(ctx, cur, tw.intentoLogico, r.resultado, r.codigoError, 'ejecución simulada', a, o);
-    await this.appendOrdenFresco(ctx, cur.ordenId, EVENTOS_ORDEN.presupuesto, { unidades }, a, o);
     cur = await this.cargarOrden(ctx, tw.ordenId);
 
     if (r.resultado === 'EJECUTADA_SIMULADA') {
       await this.transicionar(ctx, cur.ordenId, 'EJECUTADA_SIMULADA', 'ejecutada (simulada)', a, o);
       await this.completarTrabajo(ctx, trabajoIdArg, 'EJECUTADA_SIMULADA', a, o);
-    } else if (r.reintentable && cur.intentos < (this.opciones.maxIntentos ?? 3)) {
+      return this.cargarOrden(ctx, tw.ordenId);
+    }
+    // Reintento CANÓNICO: `decidirRetry` (@soec/adaptadores) decide si reintentar y cuánto esperar (backoff).
+    // NUNCA reintenta INVALIDO/NO_AUTORIZADO/CANCELADO. La clase de error se normaliza; si el adaptador no la
+    // aporta, se deriva de `reintentable`. El próximo intento re-encola con backoff y re-ejecuta TODOS los gates.
+    const clase = (r.claseError as ClaseErrorAdaptador | undefined) ?? (r.reintentable ? 'TIMEOUT' : 'INVALIDO');
+    const decision = decidirRetry(this.politicaRetryEfectiva(), cur.intentos, clase);
+    if (decision.reintentar) {
+      // Fallo temporal reintentable: se CONSERVA la reserva (mismo efecto lógico) y se re-encola con backoff.
       await this.transicionar(ctx, cur.ordenId, 'FALLIDA', r.codigoError ?? 'fallo temporal', a, o);
       await this.fallarTrabajo(ctx, trabajoIdArg, r.codigoError ?? 'temporal', a, o);
-      await this.encolar(ctx, tw.ordenId, a, o); // reintento gobernado: nuevo intento lógico
+      const disponibleDesde = new Date(Date.parse(ahora) + decision.esperaMs).toISOString();
+      await this.encolar(ctx, tw.ordenId, a, o, disponibleDesde);
     } else {
+      // Terminal (no reintentable, o política agotada): se LIBERA la reserva (no se consumirá).
+      await this.liberarReserva(ctx, rid, `terminal: ${r.resultado} (${decision.motivo})`, a, o);
       await this.transicionar(ctx, cur.ordenId, 'FALLIDA', r.codigoError ?? 'fallo', a, o);
       await this.fallarTrabajo(ctx, trabajoIdArg, r.codigoError ?? 'fallo', a, o);
     }
@@ -296,14 +347,43 @@ export class OperacionService {
     return this.cargarOrden(ctx, ordenId);
   }
 
-  /** Compensación lógica (acción inversa registrada): de FALLIDA o EJECUTADA_SIMULADA a COMPENSADA. */
-  async compensar(ctx: RequestContext, ordenId: string, motivo: string, a: Attribution, o: string): Promise<OrdenState> {
+  async cargarCompensacion(ctx: RequestContext, cid: string) {
+    const org = this.org(ctx);
+    return reconstruirCompensacion(org, cid, await this.store.readStream(ctx, compensacionStreamId(org, cid)));
+  }
+
+  private async appendCompensacion(ctx: RequestContext, cid: string, type: string, payload: unknown, a: Attribution, o: string): Promise<void> {
+    const org = this.org(ctx);
+    const st = await this.cargarCompensacion(ctx, cid);
+    await this.store.append(ctx, compensacionStreamId(org, cid), st.version, [{ type, payload, attribution: a, occurredAt: o }]);
+  }
+
+  /**
+   * Compensación de PRIMERA CLASE (agregado propio): reverso LÓGICO simulado del efecto. No borra ni altera
+   * el efecto original. Sólo aplica si el efecto se aplicó y la orden está EJECUTADA_SIMULADA; en otro caso
+   * clasifica NO_APLICABLE. Idempotente: doble compensación converge. Devuelve el estado de la compensación.
+   */
+  async compensar(ctx: RequestContext, ordenId: string, motivo: string, a: Attribution, o: string) {
+    const org = this.org(ctx);
     const st = await this.exigir(ctx, ordenId);
-    if (st.estado === 'COMPENSADA') return st;
-    if (!transicionValida(st.estado, 'COMPENSADA')) throw new TransicionInvalidaError(`no se puede compensar desde ${st.estado}`);
+    const d = st.datos!;
+    const clave = claveEfecto(org, ordenId, d.pieza, d.variante, d.capacidad);
+    const cid = compensacionIdDe(org, ordenId, clave);
+    const comp0 = await this.cargarCompensacion(ctx, cid);
+    if (comp0.existe && (comp0.estado === 'COMPENSADA' || comp0.estado === 'NO_APLICABLE')) return comp0; // idempotente
+    if (!comp0.existe) await this.appendCompensacion(ctx, cid, EVENTOS_COMPENSACION.iniciada, { ordenId, claveLogica: clave, motivo }, a, o);
+    const efectoAplicado = (await this.efectoHuella(ctx, clave)) !== null;
+    if (st.estado !== 'EJECUTADA_SIMULADA' || !efectoAplicado) {
+      await this.appendCompensacion(ctx, cid, EVENTOS_COMPENSACION.noAplicable, { resultado: 'nada que compensar (efecto no aplicado o estado no ejecutado)' }, a, o);
+      return this.cargarCompensacion(ctx, cid);
+    }
+    await this.appendCompensacion(ctx, cid, EVENTOS_COMPENSACION.ejecutando, {}, a, o);
     await this.emitirEvidencia(ctx, st, st.intentos, 'COMPENSADA', null, motivo, a, o);
-    await this.transicionar(ctx, st.ordenId, 'COMPENSADA', motivo, a, o);
-    return this.cargarOrden(ctx, ordenId);
+    const fresca = await this.cargarOrden(ctx, ordenId);
+    const evidenciaRef = fresca.evidenciaRefs[fresca.evidenciaRefs.length - 1] ?? null;
+    await this.appendCompensacion(ctx, cid, EVENTOS_COMPENSACION.compensada, { evidenciaRef }, a, o);
+    if (transicionValida(st.estado, 'COMPENSADA')) await this.transicionar(ctx, ordenId, 'COMPENSADA', motivo, a, o);
+    return this.cargarCompensacion(ctx, cid);
   }
 
   private async marcarObsoletaSiCorresponde(_ctx: RequestContext, _ordenId: string, _motivo: string, _a: Attribution, _o: string): Promise<void> {
@@ -327,6 +407,56 @@ export class OperacionService {
   private async consumido(ctx: RequestContext): Promise<number> {
     const events = await this.store.readStream(ctx, consumoStreamId(this.org(ctx)));
     return events.filter((e) => e.type === EVENTOS_CONSUMO.registrado).reduce((s, e) => s + ((e.payload as { unidades: number }).unidades ?? 0), 0);
+  }
+
+  // ── Ciclo de reserva presupuestaria (RESERVA→CONFIRMA/LIBERA), idempotente y versionado ──────────────
+  async cargarReserva(ctx: RequestContext, rid: string): Promise<ReservaState> {
+    const org = this.org(ctx);
+    return reconstruirReserva(org, rid, await this.store.readStream(ctx, reservaStreamId(org, rid)));
+  }
+
+  /** Compromiso presupuestario vigente = suma de reservas RESERVADA/CONFIRMADA (idempotente, event-sourced). */
+  private async comprometido(ctx: RequestContext): Promise<number> {
+    const org = this.org(ctx);
+    const idx = await this.store.readStream(ctx, reservaIndiceStreamId(org));
+    const rids = idx.filter((e) => e.type === EVENTOS_RES_INDICE.registrada).map((e) => (e.payload as { rid: string }).rid);
+    let total = 0;
+    for (const rid of rids) {
+      const r = await this.cargarReserva(ctx, rid);
+      if (r.existe && comprometeReserva(r.estado)) total += r.unidades;
+    }
+    return total;
+  }
+
+  private async reservar(ctx: RequestContext, rid: string, ordenId: string, claveLogica: string, unidades: number, politicaVersion: string, ventanaMs: number, a: Attribution, o: string): Promise<void> {
+    const org = this.org(ctx);
+    const r = await this.cargarReserva(ctx, rid);
+    if (r.existe) return; // idempotente por identidad determinista
+    await this.store.append(ctx, reservaStreamId(org, rid), r.version, [{ type: EVENTOS_RESERVA.reservada, payload: { ordenId, claveLogica, unidades, ventanaMs, politicaVersion }, attribution: a, occurredAt: o }]);
+    const idx = await this.store.readStream(ctx, reservaIndiceStreamId(org));
+    if (!idx.some((e) => e.type === EVENTOS_RES_INDICE.registrada && (e.payload as { rid: string }).rid === rid)) {
+      await this.store.append(ctx, reservaIndiceStreamId(org), idx.length, [{ type: EVENTOS_RES_INDICE.registrada, payload: { rid }, attribution: a, occurredAt: o }]);
+    }
+  }
+
+  async confirmarReserva(ctx: RequestContext, rid: string, unidades: number, a: Attribution, o: string): Promise<void> {
+    const org = this.org(ctx);
+    const r = await this.cargarReserva(ctx, rid);
+    if (!r.existe || r.estado !== 'RESERVADA') return; // idempotente: confirmar dos veces converge
+    await this.store.append(ctx, reservaStreamId(org, rid), r.version, [{ type: EVENTOS_RESERVA.confirmada, payload: {}, attribution: a, occurredAt: o }]);
+    await this.registrarConsumo(ctx, unidades, a, o); // consumo confirmado UNA sola vez (tras RESERVADA→CONFIRMADA)
+  }
+
+  async liberarReserva(ctx: RequestContext, rid: string, motivo: string, a: Attribution, o: string): Promise<void> {
+    const org = this.org(ctx);
+    const r = await this.cargarReserva(ctx, rid);
+    if (!r.existe || r.estado !== 'RESERVADA') return; // idempotente
+    await this.store.append(ctx, reservaStreamId(org, rid), r.version, [{ type: EVENTOS_RESERVA.liberada, payload: { motivo }, attribution: a, occurredAt: o }]);
+  }
+
+  async listarReservasIds(ctx: RequestContext): Promise<readonly string[]> {
+    const idx = await this.store.readStream(ctx, reservaIndiceStreamId(this.org(ctx)));
+    return idx.filter((e) => e.type === EVENTOS_RES_INDICE.registrada).map((e) => (e.payload as { rid: string }).rid);
   }
 
   private async emitirEvidencia(ctx: RequestContext, orden: OrdenState, intento: number, resultado: EvidenciaOperacional['resultado'], codigoError: string | null, _nota: string, a: Attribution, o: string): Promise<void> {

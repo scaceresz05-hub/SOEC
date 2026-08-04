@@ -65,6 +65,7 @@ export class AdaptadorSandboxM4 implements PuertoEjecucionSimulada {
     );
     // El sandbox es la autoridad: naturaleza SIMULADA garantizada por modoSolicitado='SIMULADO'.
     if (r.resultado?.estado === 'OK') return { resultado: 'EJECUTADA_SIMULADA', codigoError: null, reintentable: false, naturaleza: 'SIMULADA' };
-    return { resultado: cfg.resultado, codigoError: r.evidenciaOperativa.codigoError ?? cfg.clase ?? 'ERROR', reintentable: cfg.reintentable, naturaleza: 'SIMULADA' };
+    // Propaga la CLASE de error normalizada para que el reintento canónico (`decidirRetry`) decida sobre ella.
+    return { resultado: cfg.resultado, codigoError: r.evidenciaOperativa.codigoError ?? cfg.clase ?? 'ERROR', reintentable: cfg.reintentable, naturaleza: 'SIMULADA', claseError: cfg.clase };
   }
 }

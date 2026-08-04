@@ -241,7 +241,7 @@ describe('M7 · reconciliación y replay frío', () => {
     const orden = await ordenes.cargarOrden(c, 'orden1');
     await store.append(c, ordenStreamId('org-a', 'orden1'), orden.version, [{ type: 'orden.transicionada', payload: { estado: 'EN_EJECUCION', motivo: 'x' }, attribution: attr, occurredAt: O }]);
     const hallazgos = await reconciliador.reconciliar(c, '2026-08-03T02:00:00.000Z', attr, O); // lease vencido
-    expect(hallazgos.some((h) => h.clase === 'ORDEN_EN_EJECUCION_SIN_TRABAJO_ACTIVO' && h.reparado)).toBe(true);
+    expect(hallazgos.some((h) => h.clase === 'ORDEN_EN_EJECUCION_SIN_TRABAJO_ACTIVO' && h.clasificacion === 'REPARADA')).toBe(true);
     expect((await ordenes.cargarOrden(c, 'orden1')).estado).toBe('FALLIDA');
     // Idempotente: correr de nuevo no vuelve a romper.
     await reconciliador.reconciliar(c, '2026-08-03T02:00:00.000Z', attr, O);

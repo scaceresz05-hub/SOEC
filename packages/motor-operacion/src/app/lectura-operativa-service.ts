@@ -6,7 +6,7 @@
  */
 import type { EventStore, RequestContext } from '@soec/contracts';
 import { congelarProfundo } from '@soec/motor-creativo';
-import { type EstadoOrden, type OrdenState, ordenStreamId, reconstruirOrden } from '../dominio/orden';
+import { type EstadoOrden, type OrdenState, clasificarM8, medibleM8, ordenStreamId, reconstruirOrden } from '../dominio/orden';
 import { type TrabajoState, trabajoStreamId, reconstruirTrabajo } from '../dominio/cola';
 import type { EvidenciaOperacional } from '../dominio/evidencia';
 import type { PlanEjecucion } from '../dominio/plan';
@@ -57,7 +57,8 @@ export class LecturaOperativaService implements LecturaOperativa {
       const st = await this.cargarOrden(ctx, id);
       if (!st.existe) continue;
       if (estado && st.estado !== estado) continue;
-      out.push({ ordenId: id, estado: st.estado, intentos: st.intentos, presupuestoReservado: st.presupuestoReservado, evidenciaRefs: st.evidenciaRefs });
+      const clasificacion = clasificarM8(st.estado, st.evidenciaRefs.length > 0);
+      out.push({ ordenId: id, estado: st.estado, clasificacion, medible: medibleM8(clasificacion), intentos: st.intentos, presupuestoReservado: st.presupuestoReservado, evidenciaRefs: st.evidenciaRefs });
     }
     return congelarProfundo(out);
   }

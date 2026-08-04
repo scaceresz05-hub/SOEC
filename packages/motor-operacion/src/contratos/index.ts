@@ -8,7 +8,7 @@
  *   no puede modificar la ejecución histórica.
  */
 import type { RequestContext } from '@soec/contracts';
-import type { EstadoOrden, OrdenState } from '../dominio/orden';
+import type { ClasificacionM8, EstadoOrden, OrdenState } from '../dominio/orden';
 import type { EvidenciaOperacional, ResultadoIntento } from '../dominio/evidencia';
 import type { PlanEjecucion } from '../dominio/plan';
 import type { TrabajoState } from '../dominio/cola';
@@ -32,6 +32,12 @@ export interface ResultadoEjecucion {
   readonly codigoError: string | null;
   readonly reintentable: boolean;
   readonly naturaleza: 'SIMULADA';
+  /**
+   * Clase de error NORMALIZADA (`ClaseErrorAdaptador` de @soec/adaptadores: TIMEOUT/NO_DISPONIBLE/LIMITE/
+   * INVALIDO/NO_AUTORIZADO/CANCELADO…). El motor la usa para decidir el reintento con `decidirRetry`
+   * (política canónica). Opcional: si falta, se deriva de `reintentable`.
+   */
+  readonly claseError?: string | null;
 }
 
 /** Frontera de ejecución: SIEMPRE simulada. Ningún adaptador real vive aquí hasta ratificación. */
@@ -43,6 +49,10 @@ export interface PuertoEjecucionSimulada {
 export interface OrdenM8 {
   readonly ordenId: string;
   readonly estado: EstadoOrden;
+  /** Clasificación semántica para medición (COMPLETA/PARCIAL/COMPENSADA/…/NO_RECONCILIADA). */
+  readonly clasificacion: ClasificacionM8;
+  /** ¿M8 puede medir esta orden como resultado de ejecución? Solo las COMPLETA. */
+  readonly medible: boolean;
   readonly intentos: number;
   readonly presupuestoReservado: number | null;
   readonly evidenciaRefs: readonly string[];

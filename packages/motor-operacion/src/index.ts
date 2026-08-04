@@ -11,6 +11,8 @@ export * from './dominio/orden';
 export * from './dominio/cola';
 export * from './dominio/idempotencia';
 export * from './dominio/plan';
+export * from './dominio/reserva';
+export * from './dominio/compensacion';
 export * from './dominio/evidencia';
 export * from './dominio/errors';
 export * from './contratos';

@@ -34,13 +34,43 @@ export function esTerminal(estado: EstadoOrden): boolean {
   return ESTADOS_TERMINALES.includes(estado);
 }
 
+/**
+ * Clasificación SEMÁNTICA para M8 (medición/optimización). M8 no razona sobre el estado crudo de la FSM:
+ * necesita saber si una orden es medible, y por qué no lo es. Determinista.
+ *  - COMPLETA: ejecutada con evidencia (medible como resultado real-simulado).
+ *  - PARCIAL: ejecutada SIN evidencia (anómala: efecto sin traza → no medir hasta reconciliar).
+ *  - COMPENSADA / CANCELADA / OBSOLETA / EXPIRADA / FALLIDA: terminales no-exitosas (excluidas del KPI de éxito).
+ *  - NO_RECONCILIADA: EN_EJECUCION (en curso o abandonada) → pendiente de reconciliación; nunca medir.
+ *  - EN_PROCESO: BORRADOR/VALIDADA/PROGRAMADA/EN_COLA (aún no ejecutada).
+ */
+export type ClasificacionM8 =
+  | 'COMPLETA' | 'PARCIAL' | 'COMPENSADA' | 'CANCELADA' | 'OBSOLETA' | 'EXPIRADA' | 'FALLIDA' | 'NO_RECONCILIADA' | 'EN_PROCESO';
+
+export function clasificarM8(estado: EstadoOrden, tieneEvidencia: boolean): ClasificacionM8 {
+  switch (estado) {
+    case 'EJECUTADA_SIMULADA': return tieneEvidencia ? 'COMPLETA' : 'PARCIAL';
+    case 'COMPENSADA': return 'COMPENSADA';
+    case 'CANCELADA': return 'CANCELADA';
+    case 'OBSOLETA': return 'OBSOLETA';
+    case 'EXPIRADA': return 'EXPIRADA';
+    case 'FALLIDA': return 'FALLIDA';
+    case 'EN_EJECUCION': return 'NO_RECONCILIADA';
+    default: return 'EN_PROCESO';
+  }
+}
+
+/** ¿M8 puede medir esta orden como RESULTADO de ejecución? Solo COMPLETA. */
+export function medibleM8(clas: ClasificacionM8): boolean {
+  return clas === 'COMPLETA';
+}
+
 /** Transiciones VÁLIDAS de la orden. Cualquier otra combinación es un atajo prohibido. */
 const TRANSICIONES: Readonly<Record<EstadoOrden, readonly EstadoOrden[]>> = {
   BORRADOR: ['VALIDADA', 'CANCELADA', 'OBSOLETA'],
   VALIDADA: ['PROGRAMADA', 'CANCELADA', 'OBSOLETA', 'EXPIRADA'],
   PROGRAMADA: ['EN_COLA', 'CANCELADA', 'OBSOLETA', 'EXPIRADA'],
   EN_COLA: ['EN_EJECUCION', 'CANCELADA', 'OBSOLETA', 'EXPIRADA'],
-  EN_EJECUCION: ['EJECUTADA_SIMULADA', 'FALLIDA'],
+  EN_EJECUCION: ['EJECUTADA_SIMULADA', 'FALLIDA', 'EXPIRADA'], // la ventana pudo vencer mientras el trabajo estaba tomado
   FALLIDA: ['EN_COLA', 'COMPENSADA', 'CANCELADA'],
   EJECUTADA_SIMULADA: ['COMPENSADA'],
   CANCELADA: [],
