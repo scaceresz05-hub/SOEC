@@ -6,7 +6,7 @@
  */
 import type { RecordedEvent } from '@soec/contracts';
 
-export type TipoRecurso = 'ESTRATEGIA_CREATIVA' | 'CAMPANIA' | 'PIEZA' | 'VARIANTE' | 'ENTRADA_CALENDARIO';
+export type TipoRecurso = 'ESTRATEGIA_CREATIVA' | 'CAMPANIA' | 'PIEZA' | 'VARIANTE' | 'ENTRADA_CALENDARIO' | 'PROPUESTA_OPTIMIZACION';
 export type DecisionAprobacion = 'APROBADA' | 'RECHAZADA' | 'CAMBIOS_SOLICITADOS';
 
 export interface Aprobacion {
