@@ -9,7 +9,9 @@
   "dependencies": {
     "@soec/contracts": "workspace:*",
     "@soec/motor-creativo": "workspace:*",
-    "@soec/adaptadores": "workspace:*"
+    "@soec/adaptadores": "workspace:*",
+    "@soec/control": "workspace:*",
+    "@soec/plataforma-capacidades": "workspace:*"
   },
   "devDependencies": { "@soec/event-store": "workspace:*", "@soec/motor-estrategico": "workspace:*", "@soec/estrategia-creativa": "workspace:*", "@soec/contenido": "workspace:*" }
 }

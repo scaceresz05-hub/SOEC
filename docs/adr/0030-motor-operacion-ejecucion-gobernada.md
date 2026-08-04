@@ -55,11 +55,31 @@ Nuevo paquete **`@soec/motor-operacion`**:
   probada (13 tests: validación autoritativa, vigencia-perdida-antes-del-efecto, concurrencia de lease,
   idempotencia de efectos, presupuesto, cancelación, compensación, reintento, expiración, reconciliación,
   replay frío, cross-tenant, inmutabilidad M8).
-- (−) Deuda declarada (no bloqueante): el ejecutor usa un puerto simulado determinista propio en lugar de
-  cablear directamente el orquestador/sandbox M4 (que se enchufa detrás del puerto); el retry es por
-  `maxIntentos` (no cablea aún `decidirRetry`/backoff de `@soec/adaptadores`); no integra todavía el
-  gobierno de PAUSA de `@soec/control`; el reconciliador cubre los casos centrales (no las ~8 clases
-  exhaustivas). Todo ello es cableado aditivo posterior sobre esta base.
+## Adenda — cierre interno (dictamen `AUDITORIA_M7_REQUIERE_CIERRE_INTERNO`)
+
+Los elementos declarados como "deuda" eran criterios LOCKED. Cerrados los de mayor peso arquitectónico:
+
+- **Integración real con el sandbox M4** (`app/adaptador-sandbox-m4.ts`): el ejecutor deja de ser un
+  segundo motor; `AdaptadorSandboxM4` implementa el puerto conduciendo `OrquestadorAdaptadores` +
+  sandbox autoritativo + `AdaptadorFake` en `modoSolicitado='SIMULADO'` (health fail-closed, circuit
+  breaker, concurrencia, cancelación, evidencia operativa de M4; naturaleza SIMULADA garantizada por el
+  sandbox). Sin proveedor/SDK/credencial real. Probado end-to-end (éxito y fallo temporal→retry).
+- **Idempotencia LÓGICA separada del intento técnico** (`dominio/idempotencia.ts`): `claveEfecto` ya NO
+  incluye el intento (efecto lógico estable: org+orden+pieza/v+variante/v+capacidad); el intento técnico
+  se registra aparte. Reintento/timeout/replay convergen en UN efecto. Misma clave + contenido distinto
+  ⇒ `CONFLICTO_IDEMPOTENCIA` (huella de contenido). Probado.
+- **PAUSA como gate autoritativo** (reuso de `@soec/control`): `exigirNoPausado` bloquea programar/encolar/
+  reclamar/ejecutar por alcance (organización/programa/capacidad, con precedencia global); reanudar
+  desbloquea sin borrar historial. Probado.
+
+### Deuda restante (para las siguientes rondas, honesta)
+- Reserva→confirmación/liberación de presupuesto como ciclo idempotente versionado (hoy: verificación
+  antes del efecto + consumo post-éxito).
+- Reconciliador exhaustivo (~15 clases de la matriz del Bloque Maestro; hoy cubre las centrales).
+- Compensación como agregado de primera clase con su propia máquina de estados.
+- Retry con `decidirRetry`/backoff de `@soec/adaptadores` y revalidación de TODOS los gates por intento.
+- Matriz completa de 30 escenarios adversariales + matriz de fallos parciales por frontera + replay frío
+  integral por agregado + endurecimiento de contratos M8.
 
 ## Alcance respetado
 

@@ -14,6 +14,7 @@ import type { Attribution, EventInput, EventStore, RequestContext } from '@soec/
 import { ConcurrencyError } from '@soec/contracts';
 import type { LecturaCreativa } from '@soec/motor-creativo';
 import { type PoliticaPresupuesto, estimarConservador, evaluarPresupuesto } from '@soec/adaptadores';
+import { PausaService, type Alcance } from '@soec/control';
 import {
   EVENTOS_ORDEN,
   type DatosOrden,
@@ -26,9 +27,9 @@ import {
   transicionValida,
 } from '../dominio/orden';
 import { EVENTOS_TRABAJO, type TrabajoState, reclamable, trabajoStreamId, reconstruirTrabajo } from '../dominio/cola';
-import { claveEfecto, trabajoId as trabajoIdDe } from '../dominio/idempotencia';
+import { claveEfecto, huellaEfecto, trabajoId as trabajoIdDe } from '../dominio/idempotencia';
 import { EVIDENCIA_OPERACIONAL_VERSION, type EvidenciaOperacional, blindarEvidencia } from '../dominio/evidencia';
-import { ComandoOperacionInvalidoError, OrdenNoEncontradaError, TransicionInvalidaError, TrabajoNoReclamableError } from '../dominio/errors';
+import { ComandoOperacionInvalidoError, OperacionPausadaError, OrdenNoEncontradaError, TransicionInvalidaError, TrabajoNoReclamableError } from '../dominio/errors';
 import type { PuertoEjecucionSimulada } from '../contratos';
 
 const EVENTOS_INDICE = { registrada: 'orden-indice.registrada' } as const;
@@ -65,14 +66,33 @@ export interface OpcionesOperacion {
 }
 
 export class OperacionService {
+  private readonly pausa: PausaService;
   constructor(
     private readonly store: EventStore,
     private readonly creativa: LecturaCreativa,
     private readonly ejecutor: PuertoEjecucionSimulada,
     private readonly opciones: OpcionesOperacion = {},
-  ) {}
+  ) {
+    this.pausa = new PausaService(store);
+  }
 
   private org(ctx: RequestContext): string { return String(ctx.organizationId); }
+
+  /** Alcances de PAUSA relevantes para una orden: organización, programa y capacidad. */
+  private alcancesDe(org: string, d: DatosOrden): readonly Alcance[] {
+    return [
+      { tipo: 'organizacion', valor: org },
+      { tipo: 'programa', valor: d.calendario.programaId },
+      { tipo: 'capacidad', valor: d.capacidad },
+    ];
+  }
+
+  /** Gate de PAUSA: impide programar/encolar/reclamar/ejecutar/reconciliar-hacia-ejecución si hay pausa. */
+  private async exigirNoPausado(ctx: RequestContext, d: DatosOrden): Promise<void> {
+    if (await this.pausa.estaPausado(ctx, this.alcancesDe(this.org(ctx), d))) {
+      throw new OperacionPausadaError('operación pausada por el gobierno de PAUSA (@soec/control)');
+    }
+  }
 
   async cargarOrden(ctx: RequestContext, ordenId: string): Promise<OrdenState> {
     const org = this.org(ctx);
@@ -124,7 +144,7 @@ export class OperacionService {
       capacidad: e.capacidad, pieza: e.pieza, variante: e.variante,
       calendario: { programaId: e.programaId, entradaId: e.entradaCalendarioId }, contextoId: e.contextoId, segmento: e.segmento, canalLogico: e.canalLogico,
       instantePlanificado: e.instantePlanificado, zonaHoraria: e.zonaHoraria, politicaVersion: e.politicaVersion,
-      idempotencyKey: claveEfecto(this.org(ctx), ordenId, e.pieza, e.variante, e.capacidad, 1),
+      idempotencyKey: claveEfecto(this.org(ctx), ordenId, e.pieza, e.variante, e.capacidad),
     };
     await this.appendOrden(ctx, ordenId, st.version, EVENTOS_ORDEN.creada, datos, a, o);
     await this.asegurarEnIndice(ctx, ordenId, a, o);
@@ -151,6 +171,7 @@ export class OperacionService {
   async programar(ctx: RequestContext, ordenId: string, ahora: string, a: Attribution, o: string): Promise<OrdenState> {
     const st = await this.exigir(ctx, ordenId);
     if (st.estado !== 'VALIDADA') return st;
+    await this.exigirNoPausado(ctx, st.datos!);
     const inst = Date.parse(st.datos!.instantePlanificado);
     const ventana = this.opciones.ventanaExpiracionMs ?? Infinity;
     if (Number.isFinite(inst) && Date.parse(ahora) - inst > ventana) {
@@ -165,6 +186,7 @@ export class OperacionService {
   async encolar(ctx: RequestContext, ordenId: string, a: Attribution, o: string): Promise<TrabajoState> {
     const st = await this.exigir(ctx, ordenId);
     if (st.estado !== 'PROGRAMADA' && st.estado !== 'FALLIDA') throw new TransicionInvalidaError(`no se puede encolar desde ${st.estado}`);
+    await this.exigirNoPausado(ctx, st.datos!);
     const intento = st.intentos + 1;
     const tid = trabajoIdDe(this.org(ctx), ordenId, intento);
     await this.encolarTrabajo(ctx, tid, ordenId, intento, st.datos!.instantePlanificado, a, o);
@@ -189,6 +211,8 @@ export class OperacionService {
     const org = this.org(ctx);
     const tw = reconstruirTrabajo(org, trabajoIdArg, await this.store.readStream(ctx, trabajoStreamId(org, trabajoIdArg)));
     if (!reclamable(tw, ahora)) throw new TrabajoNoReclamableError(`trabajo ${trabajoIdArg} no reclamable (estado ${tw.estado})`);
+    const ordenPrev = await this.exigir(ctx, tw.ordenId);
+    await this.exigirNoPausado(ctx, ordenPrev.datos!); // PAUSA impide reclamar/ejecutar
     const ttl = this.opciones.leaseTtlMs ?? 30000;
     const venceEn = new Date(Date.parse(ahora) + ttl).toISOString();
     // Reclamo: concurrencia optimista ⇒ dos workers, uno gana el lease, el otro ConcurrencyError.
@@ -225,17 +249,25 @@ export class OperacionService {
       }
     }
 
-    // Efecto EXACTAMENTE UNA VEZ por claveEfecto.
-    const clave = claveEfecto(org, tw.ordenId, d.pieza, d.variante, d.capacidad, tw.intentoLogico);
-    if (await this.efectoAplicado(ctx, clave)) {
-      await this.emitirEvidencia(ctx, cur, tw.intentoLogico, 'DUPLICADA', null, 'efecto ya aplicado', a, o);
+    // Efecto EXACTAMENTE UNA VEZ por la clave LÓGICA (sin intento). Distinto contenido ⇒ CONFLICTO.
+    const clave = claveEfecto(org, tw.ordenId, d.pieza, d.variante, d.capacidad);
+    const huella = huellaEfecto(d.pieza, d.variante, d.capacidad);
+    const huellaPrevia = await this.efectoHuella(ctx, clave);
+    if (huellaPrevia !== null) {
+      if (huellaPrevia !== huella) {
+        await this.emitirEvidencia(ctx, cur, tw.intentoLogico, 'RECHAZADA', 'CONFLICTO_IDEMPOTENCIA', 'misma clave, contenido distinto', a, o);
+        await this.transicionar(ctx, cur.ordenId, 'FALLIDA', 'conflicto de idempotencia', a, o);
+        await this.fallarTrabajo(ctx, trabajoIdArg, 'CONFLICTO_IDEMPOTENCIA', a, o);
+        return this.cargarOrden(ctx, tw.ordenId);
+      }
+      await this.emitirEvidencia(ctx, cur, tw.intentoLogico, 'DUPLICADA', null, 'efecto lógico ya aplicado', a, o);
       await this.transicionar(ctx, cur.ordenId, 'EJECUTADA_SIMULADA', 'efecto ya aplicado (idempotente)', a, o);
       await this.completarTrabajo(ctx, trabajoIdArg, 'DUPLICADA', a, o);
       return this.cargarOrden(ctx, tw.ordenId);
     }
-    const r = await this.ejecutor.ejecutar({ organizacionId: org, ordenId: tw.ordenId, capacidad: d.capacidad, canalLogico: d.canalLogico, claveEfecto: clave, intento: tw.intentoLogico });
+    const r = await this.ejecutor.ejecutar({ organizacionId: org, ordenId: tw.ordenId, capacidad: d.capacidad, canalLogico: d.canalLogico, claveEfecto: clave, intento: tw.intentoLogico, observadoEn: o });
     if (r.resultado === 'EJECUTADA_SIMULADA') {
-      await this.store.append(ctx, efectoStreamId(org, clave), 0, [{ type: EVENTOS_EFECTO.aplicado, payload: { clave }, attribution: a, occurredAt: o }]);
+      await this.store.append(ctx, efectoStreamId(org, clave), 0, [{ type: EVENTOS_EFECTO.aplicado, payload: { clave, huella }, attribution: a, occurredAt: o }]);
       await this.registrarConsumo(ctx, unidades, a, o);
     }
     await this.emitirEvidencia(ctx, cur, tw.intentoLogico, r.resultado, r.codigoError, 'ejecución simulada', a, o);
@@ -279,8 +311,11 @@ export class OperacionService {
   }
 
   // ── Idempotencia de efectos / consumo simulado ──────────────────────────────────────────────────────
-  private async efectoAplicado(ctx: RequestContext, clave: string): Promise<boolean> {
-    return (await this.store.readStream(ctx, efectoStreamId(this.org(ctx), clave))).length > 0;
+  /** Huella del efecto lógico ya aplicado bajo esa clave, o null si no se aplicó. */
+  private async efectoHuella(ctx: RequestContext, clave: string): Promise<string | null> {
+    const evs = await this.store.readStream(ctx, efectoStreamId(this.org(ctx), clave));
+    const e = evs.find((x) => x.type === EVENTOS_EFECTO.aplicado);
+    return e ? (e.payload as { huella: string }).huella : null;
   }
 
   private async registrarConsumo(ctx: RequestContext, unidades: number, a: Attribution, o: string): Promise<void> {

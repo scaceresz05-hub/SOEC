@@ -782,9 +782,15 @@ importers:
       '@soec/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@soec/control':
+        specifier: workspace:*
+        version: link:../control
       '@soec/motor-creativo':
         specifier: workspace:*
         version: link:../motor-creativo
+      '@soec/plataforma-capacidades':
+        specifier: workspace:*
+        version: link:../plataforma-capacidades
     devDependencies:
       '@soec/contenido':
         specifier: workspace:*

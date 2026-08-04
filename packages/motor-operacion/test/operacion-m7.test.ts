@@ -11,9 +11,10 @@ import { MotorEstrategicoService, type ClaseAfirmacion } from '@soec/motor-estra
 import { PipelineCreativoService, LecturaCreativaService, MotorCreativoService, esPropuesta, type EntradaPipeline, type ProductorPieza } from '@soec/motor-creativo';
 import { EstrategiaCreativaArtefactoService, AprobacionService, type ContenidoArtefacto } from '@soec/estrategia-creativa';
 import { type ContenidoBrief, type PayloadProducido, type PiezaFuente } from '@soec/contenido';
+import { PausaService, ALCANCE_GLOBAL } from '@soec/control';
 import {
-  OperacionService, LecturaOperativaService, ReconciliadorService, AdaptadorEjecucionSimulado,
-  trabajoId as trabajoIdDe, ordenStreamId, type EntradaOrden, type EscenarioSimulado, type PeticionEjecucion, type PuertoEjecucionSimulada, type ResultadoEjecucion, type ResultadoIntento,
+  OperacionService, LecturaOperativaService, ReconciliadorService, AdaptadorEjecucionSimulado, AdaptadorSandboxM4,
+  trabajoId as trabajoIdDe, ordenStreamId, claveEfecto, type EntradaOrden, type EscenarioSimulado, type PeticionEjecucion, type PuertoEjecucionSimulada, type ResultadoEjecucion, type ResultadoIntento,
 } from '../src/index';
 
 const attr: Attribution = { source: 'm7', purpose: 'test', assumptions: ['t'], claimType: 'observational', regime: 'empirical', uncertainty: 'media' };
@@ -265,3 +266,54 @@ describe('M7 · reconciliación y replay frío', () => {
 
 // helper: stream id de trabajo (para el append directo del test de reconciliación)
 function trabajoStreamFake(tid: string): string { return `trabajo:org-a:${tid}`; }
+
+describe('M7 · integración M4 sandbox, PAUSA e idempotencia lógica', () => {
+  it('ejecuta a través del SANDBOX AUTORITATIVO de M4 (reuso, no segundo motor)', async () => {
+    const store = new InMemoryEventStore(); const c = ctx();
+    const v = await prepararM6(store, c);
+    const { ordenes, lectura } = montarM7(store, new AdaptadorSandboxM4());
+    const tid = await hastaEnCola(ordenes, c, v);
+    const fin = await ordenes.reclamarYEjecutar(c, tid, 'w1', EXEC, attr, O);
+    expect(fin.estado).toBe('EJECUTADA_SIMULADA');
+    const evs = await lectura.listarEvidencias(c, 'orden1');
+    expect(evs[0]?.resultado).toBe('EJECUTADA_SIMULADA');
+    expect(evs[0]?.naturaleza).toBe('SIMULADO');
+  });
+
+  it('el sandbox M4 con escenario de fallo temporal ⇒ FALLIDA y re-encola (retry gobernado)', async () => {
+    const store = new InMemoryEventStore(); const c = ctx();
+    const v = await prepararM6(store, c);
+    const { ordenes, lectura } = montarM7(store, new AdaptadorSandboxM4({ publicacion_social: 'FALLO_TEMPORAL' }), { maxIntentos: 3 });
+    const tid = await hastaEnCola(ordenes, c, v);
+    await ordenes.reclamarYEjecutar(c, tid, 'w1', EXEC, attr, O);
+    const st = await lectura.cargarOrden(c, 'orden1');
+    expect(st.estado).toBe('EN_COLA'); // re-encolada para el intento 2
+    expect((await lectura.cargarTrabajo(c, trabajoIdDe('org-a', 'orden1', 2))).existe).toBe(true);
+  });
+
+  it('PAUSA (global) impide programar/encolar/reclamar; reanudar desbloquea; no borra historial', async () => {
+    const store = new InMemoryEventStore(); const c = ctx();
+    const v = await prepararM6(store, c);
+    const { ordenes } = montarM7(store);
+    await ordenes.crearOrden(c, 'orden1', entradaOrden(v), attr, O);
+    await ordenes.validar(c, 'orden1', attr, O);
+    const pausa = new PausaService(store);
+    await pausa.pausar(c, ALCANCE_GLOBAL, 'freno de emergencia', 'director', attr, O);
+    await expect(ordenes.programar(c, 'orden1', O, attr, O)).rejects.toThrow();
+    await pausa.reanudar(c, ALCANCE_GLOBAL, 'director', attr, O);
+    expect((await ordenes.programar(c, 'orden1', O, attr, O)).estado).toBe('PROGRAMADA'); // historial intacto
+  });
+
+  it('misma clave lógica con contenido distinto ⇒ CONFLICTO_IDEMPOTENCIA (no ejecuta)', async () => {
+    const store = new InMemoryEventStore(); const c = ctx();
+    const v = await prepararM6(store, c);
+    const { ordenes, lectura } = montarM7(store);
+    const tid = await hastaEnCola(ordenes, c, v);
+    // Pre-aplica el efecto lógico con una huella DISTINTA bajo la misma clave.
+    const clave = claveEfecto('org-a', 'orden1', { id: 'paq1', version: v }, { id: 'v1', version: 1 }, 'publicacion_social');
+    await store.append(c, `efecto:org-a:${clave}`, 0, [{ type: 'efecto.aplicado', payload: { clave, huella: 'HUELLA_DISTINTA' }, attribution: attr, occurredAt: O }]);
+    const fin = await ordenes.reclamarYEjecutar(c, tid, 'w1', EXEC, attr, O);
+    expect(fin.estado).toBe('FALLIDA');
+    expect((await lectura.listarEvidencias(c, 'orden1')).some((e) => e.codigoError === 'CONFLICTO_IDEMPOTENCIA')).toBe(true);
+  });
+});

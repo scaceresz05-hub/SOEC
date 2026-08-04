@@ -15,6 +15,7 @@ export * from './dominio/evidencia';
 export * from './dominio/errors';
 export * from './contratos';
 export { AdaptadorEjecucionSimulado } from './app/adaptador-simulado';
+export { AdaptadorSandboxM4 } from './app/adaptador-sandbox-m4';
 export { OperacionService, type EntradaOrden, type OpcionesOperacion } from './app/operacion-service';
 export { LecturaOperativaService } from './app/lectura-operativa-service';
 export { ReconciliadorService, type HallazgoReconciliacion, type ClaseHallazgo } from './app/reconciliador-service';

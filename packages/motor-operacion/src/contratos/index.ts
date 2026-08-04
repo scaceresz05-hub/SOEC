@@ -23,6 +23,8 @@ export interface PeticionEjecucion {
   readonly canalLogico: string;
   readonly claveEfecto: string;
   readonly intento: number;
+  /** Instante observado (inyectado); el sandbox M4 lo usa como `observadoEn`. */
+  readonly observadoEn: string;
 }
 
 export interface ResultadoEjecucion {
