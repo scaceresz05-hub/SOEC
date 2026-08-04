@@ -4,7 +4,7 @@
  * inmutabilidad de las lecturas M8. Integración real M5→M6→M7.
  */
 import { describe, expect, it } from 'vitest';
-import { ActorId, OrganizationId, type Attribution, type EventInput, type EventStore, type RecordedEvent, type RequestContext } from '@soec/contracts';
+import { ActorId, OrganizationId, type Attribution, type EventStore, type RecordedEvent, type RequestContext } from '@soec/contracts';
 import { InMemoryEventStore } from '@soec/event-store';
 import { MotorEstrategicoService, type ClaseAfirmacion } from '@soec/motor-estrategico';
 import { PipelineCreativoService, LecturaCreativaService, MotorCreativoService, esPropuesta, type EntradaPipeline, type ProductorPieza } from '@soec/motor-creativo';
@@ -36,16 +36,6 @@ class AdaptadorMutable implements PuertoEjecucionSimulada {
     const m = MAPA[this.escenario];
     return { resultado: m.resultado, codigoError: m.codigoError, reintentable: m.reintentable, naturaleza: 'SIMULADA' };
   }
-}
-class StoreFallaEvento implements EventStore {
-  constructor(private readonly inner: EventStore, private readonly triggers: Map<string, number>) {}
-  async append(c: RequestContext, s: string, v: number, events: readonly EventInput[]) {
-    for (const e of events) { const r = this.triggers.get(e.type) ?? 0; if (r > 0) { this.triggers.set(e.type, r - 1); throw new Error(`fallo simulado: ${e.type}`); } }
-    return this.inner.append(c, s, v, events);
-  }
-  readStream(c: RequestContext, s: string): Promise<readonly RecordedEvent[]> { return this.inner.readStream(c, s); }
-  reconstructAt(c: RequestContext, s: string, at: string): Promise<readonly RecordedEvent[]> { return this.inner.reconstructAt(c, s, at); }
-  currentVersion(c: RequestContext, s: string): Promise<number> { return this.inner.currentVersion(c, s); }
 }
 
 const piezaLista: PiezaFuente = { version: 1, tituloInterno: 't', tesis: 'te', estructura: [], mensaje: 'm', cuerpo: 'Ayudamos a ordenar la operación.', llamadaAccion: 'cta', hechosUtilizados: [], afirmaciones: [], referencias: [], supuestos: [], advertencias: [], idioma: 'es', procedencia: 'x', estado: 'valida' };
@@ -152,37 +142,7 @@ describe('M7 · reconciliador exhaustivo', () => {
   });
 });
 
-describe('M7 · fallos parciales por frontera (reparan sin duplicar el efecto lógico)', () => {
-  const EXEC_LATE = '2026-09-01T13:00:00.000Z'; // lease vencido ⇒ el trabajo se puede re-reclamar
-  const bordes = ['orden.creada', 'trabajo.encolado', 'reserva.reservada', 'efecto.aplicado', 'evidencia.operacional'];
-  for (const tipo of bordes) {
-    it(`fallo en '${tipo}' ⇒ reintento repara; efecto lógico exactamente una vez; orden ejecutada`, async () => {
-      const inner = new InMemoryEventStore(); const c = ctx();
-      const v = await prepararM6(inner, c);
-      const store = new StoreFallaEvento(inner, new Map([[tipo, 1]]));
-      const { ordenes, lectura, reconciliador } = montarM7(store);
-      const reintentar = async (fn: () => Promise<unknown>) => { try { await fn(); } catch { await fn(); } };
-      await reintentar(() => ordenes.crearOrden(c, 'orden1', entradaOrden(v), attr, O));
-      await reintentar(() => ordenes.validar(c, 'orden1', attr, O));
-      await reintentar(() => ordenes.programar(c, 'orden1', O, attr, O));
-      await reintentar(() => ordenes.encolar(c, 'orden1', attr, O));
-      const tid = trabajoIdDe('org-a', 'orden1', 1);
-      try {
-        await ordenes.reclamarYEjecutar(c, tid, 'w1', EXEC, attr, O);
-      } catch {
-        // Fallo DENTRO del reclamo (orden queda EN_EJECUCION, lease tomado): la RECUPERACIÓN pasa por el
-        // reconciliador (EN_EJECUCION→FALLIDA, lease vencido) + re-encola; luego se ejecuta el nuevo intento.
-        await reconciliador.reconciliar(c, EXEC_LATE, attr, O);
-        await ordenes.encolar(c, 'orden1', attr, O);
-        await ordenes.reclamarYEjecutar(c, trabajoIdDe('org-a', 'orden1', 2), 'w1', EXEC_LATE, attr, O);
-      }
-      expect((await ordenes.cargarOrden(c, 'orden1')).estado).toBe('EJECUTADA_SIMULADA');
-      void lectura;
-      // Efecto lógico EXACTAMENTE una vez (evento único bajo la clave lógica).
-      expect((await inner.readStream(c, `efecto:org-a:${CLAVE(v)}`)).filter((e) => e.type === 'efecto.aplicado')).toHaveLength(1);
-    });
-  }
-});
+// La matriz completa de fallos parciales por frontera (18 bordes) vive en `fronteras-m7.test.ts`.
 
 describe('M7 · replay frío integral e inmutabilidad M8', () => {
   it('reconstruye orden/reserva/compensación/evidencia idénticas desde un store nuevo (tras compensar)', async () => {

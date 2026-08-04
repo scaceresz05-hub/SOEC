@@ -52,10 +52,10 @@ Nuevo paquete **`@soec/motor-operacion`**:
 ## Consecuencias
 
 - (+) La cadena M6→orden→scheduler→cola→ejecución simulada→evidencia→reconciliación está conectada y
-  probada (42 tests: validación autoritativa, vigencia-perdida-antes-del-efecto, concurrencia de lease,
-  idempotencia lógica + CONFLICTO, ciclo presupuestario reserva/confirma/libera, cancelación, compensación
-  de primera clase, retry canónico con backoff, expiración, reconciliación exhaustiva, fallos parciales por
-  frontera, replay frío integral, cross-tenant, PAUSA, clasificación M8 e inmutabilidad — ver matriz de 30).
+  probada (84 tests en 6 archivos: validación autoritativa, idempotencia lógica + CONFLICTO, ciclo
+  presupuestario, compensación de primera clase, retry canónico con re-evaluación de gates por intento,
+  reconciliador exhaustivo de 12+ clases, matriz de 18 fallos parciales por frontera con conteos, matriz de
+  30 escenarios con test exacto, replay frío integral, clasificación M8 e inmutabilidad — ver Adenda 3).
 ## Adenda — cierre interno (dictamen `AUDITORIA_M7_REQUIERE_CIERRE_INTERNO`)
 
 Los elementos declarados como "deuda" eran criterios LOCKED. Cerrados los de mayor peso arquitectónico:
@@ -102,46 +102,123 @@ Cerrados el resto de los criterios LOCKED, sin nueva arquitectura y sobre la mis
   expiración por intento intentaba en caliente (crash si un worker tomaba un trabajo con la ventana ya
   vencida). Añadida a la tabla de transiciones y cubierta por test.
 
-### Matriz de 30 escenarios adversariales (versionada) → prueba permanente
+### Matriz de 30 escenarios adversariales
 
-Cada escenario del Bloque Maestro está mapeado a un test permanente. Archivos:
-`test/operacion-m7.test.ts` (O) y `test/hardening-m7.test.ts` (H).
+La versión definitiva de esta matriz —con el NOMBRE EXACTO de cada test y sus aserciones— está en la
+**Adenda 3** (reauditoría). Se conserva aquí solo la referencia para no duplicar.
 
-| # | Escenario | Mecanismo/garantía | Prueba |
-|---|-----------|--------------------|--------|
-| 1 | Orden de org A creada/reclamada por org B | Aislamiento multi-tenant (stream lleva la org) | O · cross-tenant |
-| 2 | Pieza aprobada pero OBSOLETA antes de ejecutar | Re-validación M6 (`vigenciaContexto`) antes del efecto | O · obsolescencia-antes-del-efecto |
-| 3 | Variante pierde aprobación estando en cola | Gate M6 (`listarPiezasAprobadas` exige variante aprobada) | H · variante revocada EN_COLA |
-| 4 | Calendario cancelado tras crear la orden | Gate M6 rechaza entrada CANCELADA (defensa en profundidad) | H · entrada de calendario CANCELADA |
-| 5 | Dos workers reclaman el mismo trabajo | Lease con concurrencia optimista | O · concurrencia de lease |
-| 6 | Lease expira durante la ejecución | Reconciliador (EN_EJECUCION abandonada → FALLIDA) | O · reconciliación · H · fronteras (efecto/evidencia) |
-| 7 | Timeout seguido de respuesta tardía | Idempotencia lógica (un efecto) + DUPLICADA | O · idempotencia DUPLICADA |
-| 8 | Cancelación durante backoff | Gate PAUSA/estado re-evaluado; sin falso éxito | H · reclamar tras cancelar · PAUSA durante backoff |
-| 9 | Reintento tras perder vigencia | Cada reintento re-valida M6 (re-pasa por el reclamo) | H · backoff re-valida y ejecuta |
-| 10 | Presupuesto agotado entre planificación y ejecución | `evaluarPresupuesto` antes del efecto → RECHAZADA | H · tope agotado → RECHAZADA |
-| 11 | Reserva de presupuesto duplicada | `reservaId` lógico + reserva idempotente | H · ciclo presupuestario · replay frío |
-| 12 | Ejecución exitosa pero falla evidencia | Fallo parcial por frontera + reconciliador | H · frontera `evidencia.operacional` |
-| 13 | Evidencia creada pero falla cierre de orden | Fallo parcial + recuperación por reconciliador | H · frontera `efecto.aplicado` |
-| 14 | Fallo parcial en índice/read-model | Índice idempotente; reintento repara | H · frontera `orden.creada`/`trabajo.encolado` |
-| 15 | Reinicio con trabajos EN_EJECUCION | Reconciliador (lease vencido → FALLIDA → re-encola) | O · reconciliación · H · fronteras en-ejecución |
-| 16 | Replay frío desde log serializado | `exportar()`/`desdeInstantanea()`; reducers puros | O · replay frío · H · replay frío integral |
-| 17 | Dos reconciliadores concurrentes | Convergen (concurrencia optimista) | H · reconciliador concurrente |
-| 18 | Evento duplicado | Reducers idempotentes (id determinista) | H · ciclo presupuestario (reserva idempotente) |
-| 19 | Idempotency key reutilizada con contenido distinto | Huella de contenido → CONFLICTO_IDEMPOTENCIA | O · CONFLICTO_IDEMPOTENCIA |
-| 20 | Compensación duplicada | Agregado de compensación idempotente | H · doble compensación converge |
-| 21 | Orden terminal reprogramada | FSM prohíbe transiciones desde terminal | H · orden CANCELADA no-reprograma |
-| 22 | Fecha pasada sin import histórico | Scheduler → EXPIRADA; gate de expiración por intento | O · scheduler expirado · H · ventana vencida al reclamar |
-| 23 | Error sensible que intenta filtrarse | Evidencia sin secretos/cuerpos/stack (normalizada) | H · evidencia sin secretos |
-| 24 | Ejecución marcada REAL por adaptador simulado | Sandbox autoritativo fija naturaleza SIMULADA | O · sandbox M4 · H · evidencia (nunca REAL) |
-| 25 | Resultado manipulado tras el retorno | Snapshots M8 deep-frozen | O/H · inmutabilidad M8 |
-| 26 | Falso éxito tras cancelación | Reclamo verifica EN_COLA; si no, falla sin efecto | H · reclamar tras cancelar |
-| 27 | Cross-tenant vía IDs conocidos | Aislamiento por org en todos los streams | O · cross-tenant |
-| 28 | Obsolescencia entre dos reintentos | Re-validación M6 por intento | H · backoff re-valida · O · obsolescencia |
-| 29 | Listado devuelve ejecuciones parciales | Clasificación M8 (PARCIAL/NO_RECONCILIADA, `medible`) | H · clasificación semántica M8 |
-| 30 | M8 intenta modificar una ejecución | `LecturaOperativa` es solo-lectura + snapshots congelados | O/H · inmutabilidad M8 |
+## Adenda 3 — reauditoría y cierre focalizado (dictamen `AUDITORIA_M7_REQUIERE_REAUDITORIA_Y_CIERRE_FOCALIZADO`)
 
-Cobertura total: `test/operacion-m7.test.ts` (17) + `test/hardening-m7.test.ts` (25) = 42 tests; `pnpm verify`
-global verde (186 archivos / 1163 tests).
+La auditoría externa objetó (con razón) que el informe afirmaba MÁS cobertura de la demostrada: el
+reconciliador enumeraba 4 clases, la matriz de 30 y la de fronteras no citaban tests exactos ni aserciones,
+y varios gates de retry no estaban probados individualmente. Se cerró **demostrando y completando** la
+cobertura, sin nueva arquitectura. Cobertura total M7: **84 tests** en 6 archivos; `pnpm verify` global
+verde (190 archivos / 1205 tests). Archivos y siglas: `operacion-m7.test.ts` (O), `hardening-m7.test.ts`
+(H), `reconciliador-matriz-m7.test.ts` (R), `fronteras-m7.test.ts` (F), `retry-gates-m7.test.ts` (G),
+`m8-contratos-m7.test.ts` (M8).
+
+Correcciones de fondo surgidas de la reauditoría (no solo tests):
+- **Reconciliación FORWARD**: una orden `EN_EJECUCION` cuyo efecto YA se aplicó se completa hacia
+  `EJECUTADA_SIMULADA` (confirma consumo, cierra) en lugar de marcarse `FALLIDA` — antes se perdía el efecto.
+- **Consumo idempotente por `rid`** + reparación `CONSUMO_FALTANTE`: si `reserva.confirmada` ocurre pero
+  `consumo.registrado` falla, el reconciliador registra el consumo faltante (sin doble conteo).
+- **Presupuesto en reintento**: la reserva ya comprometida de la misma ejecución lógica se HONRA sin volver
+  a sumar la estimación (se corrige un doble conteo del propio compromiso).
+- **`encolar` robusto** ante contador de intentos desincronizado (salta ids ya usados) y **reconciliador**
+  que localiza el último trabajo por escaneo (no asume `st.intentos`).
+- **`emitirEvidencia` idempotente**: reutiliza un stream de evidencia huérfano y solo completa el enlace.
+
+### Matriz EJECUTABLE del reconciliador (12 clases + consumo) — archivo R
+
+| Clase de inconsistencia | Detector | Clasificación | Test (R) |
+|---|---|---|---|
+| ORDEN_PROGRAMADA_SIN_TRABAJO | programada sin trabajo | REPARADA (encola) | `ORDEN_PROGRAMADA_SIN_TRABAJO ⇒ REPARADA (encola) [esc. 15]` |
+| ORDEN_EN_EJECUCION_ABANDONADA | lease vencido, sin efecto | REPARADA (FALLIDA) | `ORDEN_EN_EJECUCION_ABANDONADA (lease vencido, sin efecto) ⇒ REPARADA (FALLIDA) [esc. 6]` |
+| ORDEN_EJECUTADA_SIN_EVIDENCIA | ejecutada sin traza | REQUIERE_INTERVENCION | `ORDEN_EJECUTADA_SIN_EVIDENCIA ⇒ REQUIERE_INTERVENCION (no fabrica traza) [esc. 12]` |
+| ORDEN_VIGENCIA_PERDIDA | M6/aprobación/calendario perdidos, pre-efecto | REPARADA (OBSOLETA) | `ORDEN_VIGENCIA_PERDIDA (aprobación revocada, pre-efecto) ⇒ REPARADA (OBSOLETA) [esc. 3/4/9]` |
+| EFECTO_SIN_CONSUMO | efecto aplicado, cierre falló | REPARADA (confirma+cierra) | `EFECTO_SIN_CONSUMO (efecto aplicado, cierre falló) ⇒ REPARADA (confirma + cierra) [esc. 11/13]` |
+| CONSUMO_FALTANTE | reserva confirmada sin consumo | REPARADA (registra) | (F · frontera `consumo`) y detector (K1) |
+| CONSUMO_INCOHERENTE | consumo > confirmado | REQUIERE_INTERVENCION | `CONSUMO_INCOHERENTE (consumo > confirmado) ⇒ REQUIERE_INTERVENCION [esc. 6/read-model]` |
+| TRABAJO_EN_ORDEN_TERMINAL | trabajo activo con orden terminal | REPARADA (falla trabajo) | `TRABAJO_EN_ORDEN_TERMINAL (trabajo activo con orden cancelada) ⇒ REPARADA (falla el trabajo) [esc. 22/26]` |
+| TRABAJO_HUERFANO | trabajo sin orden | REPARADA (falla trabajo) | `TRABAJO_HUERFANO (trabajo sin orden) ⇒ REPARADA (falla el trabajo) [esc. 1/read-model]` |
+| RESERVA_HUERFANA | reserva sin ejecución, orden terminal | REPARADA (libera) | `RESERVA_HUERFANA (reserva sin ejecución, orden cancelada) ⇒ REPARADA (libera) [esc. 10/11]` |
+| COMPENSACION_INCOMPLETA | compensación EN_EJECUCION | REPARADA (a término) | `COMPENSACION_INCOMPLETA (quedó EN_EJECUCION) ⇒ REPARADA (la lleva a término) [esc. 20]` |
+| INDICE_INCOMPLETO | orden con reserva ausente del índice | REPARADA (reindexar) | `INDICE_INCOMPLETO (orden con reserva ausente del índice) ⇒ REPARADA (reindexar) [esc. 14]` |
+| EVIDENCIA_INCOHERENTE | evidencia naturaleza ≠ SIMULADO | REQUIERE_INTERVENCION | `EVIDENCIA_INCOHERENTE (naturaleza ≠ SIMULADO) ⇒ REQUIERE_INTERVENCION [esc. 24]` |
+
+Convergencia concurrente y no-op tras replay frío: R · `dos reconciliadores concurrentes convergen…` y
+`tras reparar y hacer replay frío, un nuevo reconciliador no encuentra nada que reparar`.
+
+### Matriz de fallos parciales — 18 fronteras (archivo F)
+
+Un test parametrizado (`frontera '<nombre>': falla → repara → efecto y consumo exactamente una vez → orden
+ejecutada`) recorre las 18 fronteras: `crear-orden`, `validar (transición #1)`, `programar (transición #2)`,
+`encolar-trabajo`, `indice-orden`, `lease (reclamar)`, `en-ejecucion (transición #4)`, `intento`, `reserva`,
+`indice-reserva`, `marca-presupuesto`, `efecto (sandbox/resultado)`, `confirmacion`, `consumo`, `evidencia`,
+`referencia-evidencia`, `cierre-orden (transición #5)`, `cierre-trabajo`. Cada caso falla la ocurrencia exacta
+UNA vez y acredita: estado parcial → reparación (retry idempotente / reconciliación) → nuevo intento no-op →
+**conteos** (`efecto.aplicado`=1, `consumoTotal`=3, reserva `CONFIRMADA`, versión de orden > 0). Además F ·
+`convergencia concurrente…` (dos reparadores no duplican el efecto) y F · `replay frío tras reparar una
+frontera reproduce el mismo resultado`. Las fronteras de `liberación`/`compensación`/`reconciliación` se
+cubren en R (RESERVA_HUERFANA, COMPENSACION_INCOMPLETA) y en el propio arnés de reconciliación.
+
+### Re-evaluación de gates entre intentos (archivo G)
+
+| Gate mutado durante el backoff | Efecto en el intento 2 | Test (G) |
+|---|---|---|
+| PAUSA | detiene (lanza), sin efecto | `PAUSA activada durante el backoff ⇒ el intento 2 se detiene (sin efecto)` |
+| vigencia M6 (variante) | FALLIDA, sin efecto | `vigencia M6 perdida (variante revocada) durante el backoff ⇒ intento 2 FALLIDA (sin efecto)` |
+| aprobación de pieza | FALLIDA, sin efecto | `aprobación de PIEZA revocada durante el backoff ⇒ intento 2 FALLIDA (sin efecto)` |
+| calendario | FALLIDA, sin efecto | `entrada de calendario cancelada durante el backoff ⇒ intento 2 FALLIDA (sin efecto)` |
+| expiración | EXPIRADA, sin efecto | `ventana de expiración vencida durante el backoff ⇒ intento 2 EXPIRADA (sin efecto)` |
+| cancelación | CANCELADA, sin efecto | `cancelación durante el backoff ⇒ intento 2 no produce efecto; la orden queda CANCELADA` |
+| presupuesto | reserva HONRADA, sin doble reserva | `presupuesto: la reserva del intento 1 se HONRA en el reintento…` |
+| capacidad/health/breaker/kill-switch | adaptador RE-INVOCADO; clase no reintentable detiene | `el adaptador se re-invoca en el intento 2; una clase NO reintentable… lo detiene sin efecto` |
+
+(Los cuatro gates del sandbox M4 se re-evalúan porque el adaptador se re-invoca en cada intento; su lógica
+interna está probada en `@soec/adaptadores`.)
+
+### Contratos M8 (archivo M8)
+
+`ejecutada SIN evidencia ⇒ PARCIAL y NO medible`; `EN_EJECUCION ⇒ NO_RECONCILIADA y NO medible`; `una orden
+con stream pero ausente del índice NO aparece en el listado M8 (huérfana excluida)`; `los snapshots M8 son
+profundamente inmutables…`; `tras ejecutar+compensar, el listado M8 y el consumo son IDÉNTICOS desde un store
+nuevo (log serializado)` — preserva estado, consumo, reserva y compensación tras replay frío.
+
+### Matriz de 30 escenarios adversariales → test exacto
+
+| # | Escenario | Test exacto (archivo · it) |
+|---|-----------|----------------------------|
+| 1 | Org A creada/reclamada por org B | O · `cross-tenant: org B no puede reclamar el trabajo de org A` |
+| 2 | Pieza OBSOLETA antes de ejecutar | O · `vigencia perdida entre encolar y ejecutar ⇒ no hay efecto (FALLIDA)…` |
+| 3 | Variante pierde aprobación en cola | H · `variante revocada estando la orden EN_COLA ⇒ el gate M6 rechaza…` ; R · `ORDEN_VIGENCIA_PERDIDA…` |
+| 4 | Calendario cancelado tras crear | H · `entrada de calendario CANCELADA (defensa en profundidad)…` ; G · `entrada de calendario cancelada durante el backoff…` |
+| 5 | Dos workers mismo trabajo | O · `dos workers concurrentes reclaman el mismo trabajo ⇒ uno gana, el otro ConcurrencyError…` |
+| 6 | Lease expira durante ejecución | R · `ORDEN_EN_EJECUCION_ABANDONADA (lease vencido, sin efecto)…` ; O · `reconcilia una orden EN_EJECUCION abandonada…` |
+| 7 | Timeout + respuesta tardía | O · `timeout+re-reclamo con lease vencido ⇒ el efecto no se duplica (DUPLICADA)` |
+| 8 | Cancelación durante backoff | G · `cancelación durante el backoff ⇒ intento 2 no produce efecto…` |
+| 9 | Reintento tras perder vigencia | G · `vigencia M6 perdida (variante revocada) durante el backoff…` |
+| 10 | Presupuesto agotado antes de ejecutar | H · `éxito ⇒ reserva CONFIRMADA…; agotar el tope ⇒ RECHAZADA sin reservar` |
+| 11 | Reserva duplicada | R · `EFECTO_SIN_CONSUMO…` ; F · frontera `reserva`/`indice-reserva` (idempotente) |
+| 12 | Ejecución exitosa pero falla evidencia | F · frontera `evidencia` ; R · `ORDEN_EJECUTADA_SIN_EVIDENCIA…` |
+| 13 | Evidencia creada pero falla cierre | F · frontera `referencia-evidencia`/`cierre-orden` ; R · `EFECTO_SIN_CONSUMO…` |
+| 14 | Fallo parcial en índice/read-model | F · frontera `indice-orden` ; R · `INDICE_INCOMPLETO…` |
+| 15 | Reinicio con trabajos EN_EJECUCION | R · `ORDEN_PROGRAMADA_SIN_TRABAJO…` ; F · frontera `en-ejecucion`/`intento` |
+| 16 | Replay frío desde log serializado | R · `…replay frío, un nuevo reconciliador no encuentra nada…` ; M8 · `…IDÉNTICOS desde un store nuevo…` |
+| 17 | Dos reconciliadores concurrentes | R · `dos reconciliadores concurrentes convergen…` |
+| 18 | Evento duplicado | H · `éxito ⇒ reserva CONFIRMADA y consumo una vez…` (reducers idempotentes) ; F · convergencia concurrente |
+| 19 | Idempotency key con contenido distinto | O · `misma clave lógica con contenido distinto ⇒ CONFLICTO_IDEMPOTENCIA (no ejecuta)` |
+| 20 | Compensación duplicada | H · `compensar ejecución exitosa ⇒ COMPENSADA…; doble compensación converge` ; R · `COMPENSACION_INCOMPLETA…` |
+| 21 | Orden terminal reprogramada | H · `orden CANCELADA (terminal) no puede reprogramarse ni re-encolarse (FSM)` |
+| 22 | Fecha pasada / expiración | O · `scheduler: instante expirado ⇒ EXPIRADA` ; H · `ventana vencida al reclamar…` ; G · `ventana de expiración vencida durante el backoff…` |
+| 23 | Error sensible que se filtra | H · `la evidencia NO contiene secretos/cuerpos y su naturaleza es SIMULADA (nunca REAL)` |
+| 24 | Ejecución marcada REAL por adaptador | O · `ejecuta a través del SANDBOX AUTORITATIVO de M4…` ; R · `EVIDENCIA_INCOHERENTE (naturaleza ≠ SIMULADO)…` |
+| 25 | Resultado manipulado tras retorno | M8 · `los snapshots M8 son profundamente inmutables; mutarlos falla…` |
+| 26 | Falso éxito tras cancelación | H · `reclamar tras CANCELAR ⇒ no hay falso éxito…` ; R · `TRABAJO_EN_ORDEN_TERMINAL…` |
+| 27 | Cross-tenant vía IDs conocidos | O · `cross-tenant: org B no puede reclamar el trabajo de org A` |
+| 28 | Obsolescencia entre dos reintentos | G · `vigencia M6 perdida (variante revocada) durante el backoff…` |
+| 29 | Listado devuelve ejecuciones parciales | M8 · `ejecutada SIN evidencia ⇒ PARCIAL y NO medible` ; `EN_EJECUCION ⇒ NO_RECONCILIADA…` |
+| 30 | M8 intenta modificar una ejecución | M8 · `los snapshots M8 son profundamente inmutables…` ; `…huérfana excluida` |
 
 ## Alcance respetado
 

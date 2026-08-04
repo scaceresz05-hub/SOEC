@@ -211,8 +211,12 @@ export class OperacionService {
     const st = await this.exigir(ctx, ordenId);
     if (st.estado !== 'PROGRAMADA' && st.estado !== 'FALLIDA') throw new TransicionInvalidaError(`no se puede encolar desde ${st.estado}`);
     await this.exigirNoPausado(ctx, st.datos!);
-    const intento = st.intentos + 1;
-    const tid = trabajoIdDe(this.org(ctx), ordenId, intento);
+    // Intento = siguiente id LIBRE. Robusto ante desincronización del contador (p. ej. si `intento_registrado`
+    // falló tras crear el trabajo): se salta cualquier trabajo ya existente para no reencolar sobre él.
+    let intento = st.intentos + 1;
+    const org = this.org(ctx);
+    while (reconstruirTrabajo(org, trabajoIdDe(org, ordenId, intento), await this.store.readStream(ctx, trabajoStreamId(org, trabajoIdDe(org, ordenId, intento)))).existe) intento++;
+    const tid = trabajoIdDe(org, ordenId, intento);
     // Backoff: si se indica `disponibleDesde` (reintento), el trabajo no es reclamable hasta ese instante.
     await this.encolarTrabajo(ctx, tid, ordenId, intento, disponibleDesde ?? st.datos!.instantePlanificado, a, o);
     await this.transicionar(ctx, st.ordenId, 'EN_COLA', 'encolada', a, o); // PROGRAMADA→EN_COLA o FALLIDA→EN_COLA (reintento)
@@ -292,8 +296,13 @@ export class OperacionService {
       return this.cargarOrden(ctx, tw.ordenId);
     }
 
-    // Presupuesto: estimación conservadora → validación del límite → RESERVA.
-    if (this.opciones.presupuesto) {
+    // Presupuesto: estimación conservadora → validación del límite → RESERVA. Si la reserva de ESTA ejecución
+    // lógica YA existe (reintento tras fallo temporal), su compromiso ya está contado ⇒ se HONRA sin volver a
+    // sumar la estimación (evita doble conteo del propio compromiso). Sólo se valida el límite al reservar por
+    // primera vez.
+    const reservaPrevia = await this.cargarReserva(ctx, rid);
+    const yaComprometida = reservaPrevia.existe && (reservaPrevia.estado === 'RESERVADA' || reservaPrevia.estado === 'CONFIRMADA');
+    if (this.opciones.presupuesto && !yaComprometida) {
       const veredicto = evaluarPresupuesto(this.opciones.presupuesto, await this.comprometido(ctx), estimarConservador(null, unidades));
       if (!veredicto.permitido) {
         await this.emitirEvidencia(ctx, cur, tw.intentoLogico, 'RECHAZADA', 'PRESUPUESTO_EXCEDIDO', 'sin presupuesto', a, o);
@@ -398,15 +407,28 @@ export class OperacionService {
     return e ? (e.payload as { huella: string }).huella : null;
   }
 
-  private async registrarConsumo(ctx: RequestContext, unidades: number, a: Attribution, o: string): Promise<void> {
+  /** Registra el consumo de una reserva, IDEMPOTENTE por `rid` (evita doble consumo y permite reparación). */
+  private async registrarConsumo(ctx: RequestContext, rid: string, unidades: number, a: Attribution, o: string): Promise<void> {
     const org = this.org(ctx);
     const events = await this.store.readStream(ctx, consumoStreamId(org));
-    await this.store.append(ctx, consumoStreamId(org), events.length, [{ type: EVENTOS_CONSUMO.registrado, payload: { unidades }, attribution: a, occurredAt: o }]);
+    if (events.some((e) => e.type === EVENTOS_CONSUMO.registrado && (e.payload as { rid?: string }).rid === rid)) return; // ya consumido
+    await this.store.append(ctx, consumoStreamId(org), events.length, [{ type: EVENTOS_CONSUMO.registrado, payload: { rid, unidades }, attribution: a, occurredAt: o }]);
   }
 
   private async consumido(ctx: RequestContext): Promise<number> {
     const events = await this.store.readStream(ctx, consumoStreamId(this.org(ctx)));
     return events.filter((e) => e.type === EVENTOS_CONSUMO.registrado).reduce((s, e) => s + ((e.payload as { unidades: number }).unidades ?? 0), 0);
+  }
+
+  /** ¿Hay una entrada de consumo para esta reserva? (para reconciliar consumo faltante). */
+  async consumoRegistrado(ctx: RequestContext, rid: string): Promise<boolean> {
+    const events = await this.store.readStream(ctx, consumoStreamId(this.org(ctx)));
+    return events.some((e) => e.type === EVENTOS_CONSUMO.registrado && (e.payload as { rid?: string }).rid === rid);
+  }
+
+  /** Registra el consumo faltante de una reserva CONFIRMADA (reparación idempotente por el reconciliador). */
+  async asegurarConsumo(ctx: RequestContext, rid: string, unidades: number, a: Attribution, o: string): Promise<void> {
+    await this.registrarConsumo(ctx, rid, unidades, a, o);
   }
 
   // ── Ciclo de reserva presupuestaria (RESERVA→CONFIRMA/LIBERA), idempotente y versionado ──────────────
@@ -444,7 +466,7 @@ export class OperacionService {
     const r = await this.cargarReserva(ctx, rid);
     if (!r.existe || r.estado !== 'RESERVADA') return; // idempotente: confirmar dos veces converge
     await this.store.append(ctx, reservaStreamId(org, rid), r.version, [{ type: EVENTOS_RESERVA.confirmada, payload: {}, attribution: a, occurredAt: o }]);
-    await this.registrarConsumo(ctx, unidades, a, o); // consumo confirmado UNA sola vez (tras RESERVADA→CONFIRMADA)
+    await this.registrarConsumo(ctx, rid, unidades, a, o); // consumo confirmado UNA sola vez (idempotente por rid)
   }
 
   async liberarReserva(ctx: RequestContext, rid: string, motivo: string, a: Attribution, o: string): Promise<void> {
@@ -468,10 +490,18 @@ export class OperacionService {
       aprobacionRef: `aprob:${d.pieza.id}@${d.pieza.version}`, vigencia: 'VIGENTE', naturaleza: 'SIMULADO', observadoEn: o,
     });
     const ref = `${orden.ordenId}:ev${orden.evidenciaRefs.length + 1}`;
-    // La evidencia se guarda en su propio stream inmutable + se referencia desde la orden.
-    await this.store.append(ctx, `evidencia:${orden.organizacionId}:${ref}`, 0, [{ type: 'evidencia.operacional', payload: ev, attribution: a, occurredAt: o }]);
+    // La evidencia se guarda en su propio stream inmutable + se referencia desde la orden. Ambos pasos son
+    // IDEMPOTENTES: si un intento previo escribió la evidencia pero no la enlazó (fallo entre los dos
+    // appends), se reutiliza el stream y solo se completa el enlace — sin duplicar ni colisionar.
+    const evStream = `evidencia:${orden.organizacionId}:${ref}`;
+    const existentes = await this.store.readStream(ctx, evStream);
+    if (!existentes.some((e) => e.type === 'evidencia.operacional')) {
+      await this.store.append(ctx, evStream, existentes.length, [{ type: 'evidencia.operacional', payload: ev, attribution: a, occurredAt: o }]);
+    }
     const fresca = await this.cargarOrden(ctx, orden.ordenId);
-    await this.appendOrden(ctx, orden.ordenId, fresca.version, EVENTOS_ORDEN.evidencia, { evidenciaRef: ref }, a, o);
+    if (!fresca.evidenciaRefs.includes(ref)) {
+      await this.appendOrden(ctx, orden.ordenId, fresca.version, EVENTOS_ORDEN.evidencia, { evidenciaRef: ref }, a, o);
+    }
   }
 
   private async completarTrabajo(ctx: RequestContext, tid: string, resultado: string, a: Attribution, o: string): Promise<void> {
@@ -498,6 +528,74 @@ export class OperacionService {
   async listarOrdenesIds(ctx: RequestContext): Promise<readonly string[]> {
     const events = await this.store.readStream(ctx, indiceStreamId(this.org(ctx)));
     return events.filter((e) => e.type === EVENTOS_INDICE.registrada).map((e) => (e.payload as { ordenId: string }).ordenId);
+  }
+
+  // ── Helpers de LECTURA para el reconciliador (encapsulan la semántica interna sin duplicarla) ─────────
+
+  /** Re-evalúa la vigencia M6 (aprobación+calendario+contexto) de una orden existente. Autoritativo. */
+  async evaluarVigenciaOrden(ctx: RequestContext, ordenId: string): Promise<{ ok: boolean; motivo: string }> {
+    const st = await this.exigir(ctx, ordenId);
+    const d = st.datos!;
+    return this.pruebaVigencia(ctx, { pieza: d.pieza, variante: d.variante, programaId: d.calendario.programaId, entradaCalendarioId: d.calendario.entradaId, contextoId: d.contextoId });
+  }
+
+  /** ¿El efecto LÓGICO de esta orden ya se aplicó exactamente una vez? */
+  async efectoAplicadoDe(ctx: RequestContext, ordenId: string): Promise<boolean> {
+    const st = await this.cargarOrden(ctx, ordenId);
+    if (!st.existe || !st.datos) return false;
+    const d = st.datos;
+    return (await this.efectoHuella(ctx, claveEfecto(this.org(ctx), ordenId, d.pieza, d.variante, d.capacidad))) !== null;
+  }
+
+  /** Clave lógica, reserva y compensación deterministas de una orden (para reconciliación). */
+  clavesDe(ctx: RequestContext, ordenId: string, d: DatosOrden): { clave: string; rid: string; cid: string } {
+    const org = this.org(ctx);
+    const clave = claveEfecto(org, ordenId, d.pieza, d.variante, d.capacidad);
+    return { clave, rid: reservaIdDe(org, ordenId, clave), cid: compensacionIdDe(org, ordenId, clave) };
+  }
+
+  /** Consumo total registrado (unidades lógicas confirmadas). */
+  consumoTotal(ctx: RequestContext): Promise<number> {
+    return this.consumido(ctx);
+  }
+
+  /** ¿Está el ordenId registrado en el índice de órdenes? */
+  async estaEnIndice(ctx: RequestContext, ordenId: string): Promise<boolean> {
+    const events = await this.store.readStream(ctx, indiceStreamId(this.org(ctx)));
+    return events.some((e) => e.type === EVENTOS_INDICE.registrada && (e.payload as { ordenId: string }).ordenId === ordenId);
+  }
+
+  /** Re-registra la orden en el índice (idempotente). Repara un read-model de listado incompleto. */
+  async reindexarOrden(ctx: RequestContext, ordenId: string, a: Attribution, o: string): Promise<void> {
+    await this.asegurarEnIndice(ctx, ordenId, a, o);
+  }
+
+  /** Marca FALLIDO un trabajo (para reconciliar trabajos activos colgando de órdenes terminales). */
+  async fallarTrabajoReconciliacion(ctx: RequestContext, tid: string, motivo: string, a: Attribution, o: string): Promise<void> {
+    await this.fallarTrabajo(ctx, tid, motivo, a, o);
+  }
+
+  /**
+   * Reconciliación FORWARD: una orden EN_EJECUCION cuyo efecto LÓGICO YA se aplicó (p. ej. falló el cierre
+   * tras aplicar el efecto) NO debe marcarse FALLIDA — se perdería el efecto real. Se completa hacia
+   * EJECUTADA_SIMULADA: confirma la reserva pendiente (consumo exactamente una vez), deja evidencia de
+   * reconciliación si falta, y cierra el trabajo. NO re-aplica el efecto. Devuelve true si actuó.
+   */
+  async completarEjecucionReconciliada(ctx: RequestContext, ordenId: string, a: Attribution, o: string): Promise<boolean> {
+    const st = await this.exigir(ctx, ordenId);
+    if (st.estado !== 'EN_EJECUCION') return false;
+    const d = st.datos!;
+    const { clave, rid } = this.clavesDe(ctx, ordenId, d);
+    if ((await this.efectoHuella(ctx, clave)) === null) return false; // sin efecto aplicado ⇒ no aplica
+    const r = await this.cargarReserva(ctx, rid);
+    if (r.existe && r.estado === 'RESERVADA') await this.confirmarReserva(ctx, rid, r.unidades, a, o);
+    const fresca = await this.cargarOrden(ctx, ordenId);
+    if (fresca.evidenciaRefs.length === 0) {
+      await this.emitirEvidencia(ctx, fresca, fresca.intentos, 'EJECUTADA_SIMULADA', null, 'reconciliación: cierre con efecto aplicado', a, o);
+    }
+    await this.transicionar(ctx, ordenId, 'EJECUTADA_SIMULADA', 'reconciliación: efecto ya aplicado', a, o);
+    await this.completarTrabajo(ctx, trabajoIdDe(this.org(ctx), ordenId, fresca.intentos), 'EJECUTADA_SIMULADA', a, o);
+    return true;
   }
 }
 
