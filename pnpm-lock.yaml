@@ -774,6 +774,31 @@ importers:
         specifier: workspace:*
         version: link:../event-store
 
+  packages/motor-operacion:
+    dependencies:
+      '@soec/adaptadores':
+        specifier: workspace:*
+        version: link:../adaptadores
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/motor-creativo':
+        specifier: workspace:*
+        version: link:../motor-creativo
+    devDependencies:
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../contenido
+      '@soec/estrategia-creativa':
+        specifier: workspace:*
+        version: link:../estrategia-creativa
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      '@soec/motor-estrategico':
+        specifier: workspace:*
+        version: link:../motor-estrategico
+
   packages/negocio:
     dependencies:
       '@soec/contracts':
