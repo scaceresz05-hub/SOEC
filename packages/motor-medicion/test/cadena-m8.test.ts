@@ -21,11 +21,11 @@ describe('M8 · cadena operacional de aprendizaje', () => {
 
     // Evaluación: resultado + hipótesis + atribución + recomendación.
     const ev = await t.evaluaciones.evaluar(c, 'eval1', evalEntrada('obs1'), attr, O);
-    expect(ev.cuerpo?.resultado.estado).toBe('SUPERADO'); // valor 0.06 > meta 0.05
-    expect(ev.cuerpo?.hipotesis?.estado).toBe('RESPALDADA');
-    expect(ev.cuerpo?.hipotesis?.alcance).toBe('LOCAL_AL_EXPERIMENTO'); // nunca general desde un experimento
-    expect(ev.cuerpo?.atribucion?.afirmaCausalidadReal).toBe(false);
-    expect(ev.cuerpo?.recomendacion.estado).toBe('RECOMENDACION');
+    expect(ev.cuerpo.resultado?.estado).toBe('SUPERADO'); // valor 0.06 > meta 0.05
+    expect(ev.cuerpo.hipotesis?.estado).toBe('RESPALDADA');
+    expect(ev.cuerpo.hipotesis?.alcance).toBe('LOCAL_AL_EXPERIMENTO'); // nunca general desde un experimento
+    expect(ev.cuerpo.atribucion?.afirmaCausalidadReal).toBe(false);
+    expect(ev.cuerpo.recomendacion?.estado).toBe('RECOMENDACION');
 
     // Aprendizaje canónico (local, sin capa reutilizable).
     const apr = await t.aprendizajesOp.aprenderDesde(c, 'apr1', 'eval1', attr, O);

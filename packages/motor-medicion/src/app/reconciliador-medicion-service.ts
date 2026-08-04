@@ -15,17 +15,18 @@ import { EvaluacionService } from './evaluacion-service';
 import { AprendizajeOperacionalService } from './aprendizaje-op-service';
 
 export type ClaseHallazgoMedicion =
-  | 'OBSERVACION_SIN_EJECUCION_VALIDA'
-  | 'OBSERVACION_SIMULADA_MARCADA_REAL'
-  | 'READ_MODEL_INCOMPLETO'
   | 'EJECUCION_SIN_OBSERVACION'
-  | 'APRENDIZAJE_SIN_EVALUACION'
-  | 'APRENDIZAJE_CON_EVALUACION_OBSOLETA'
-  | 'EVALUACION_DUPLICADA'
-  | 'EVALUACION_SIN_EXPLICACION'
+  | 'OBSERVACION_SIN_EJECUCION_VALIDA'
   | 'KPI_INCONSISTENTE'
   | 'UNIDAD_INCOMPATIBLE'
-  | 'RESULTADO_SIN_EVIDENCIA';
+  | 'RESULTADO_SIN_EVIDENCIA'
+  | 'APRENDIZAJE_SIN_EVALUACION'
+  | 'EVALUACION_DUPLICADA'
+  | 'CONSUMO_SIN_RESULTADO'
+  | 'OBSERVACION_SIMULADA_MARCADA_REAL'
+  | 'APRENDIZAJE_CON_EVALUACION_OBSOLETA'
+  | 'READ_MODEL_INCOMPLETO'
+  | 'EVALUACION_SIN_EXPLICACION';
 
 export type Clasificacion = 'REPARADA' | 'NO_REQUIERE_ACCION' | 'NO_REPARABLE' | 'REQUIERE_INTERVENCION';
 
@@ -87,9 +88,11 @@ export class ReconciliadorMedicionService {
     }
 
     // (4) Ejecución COMPLETA de M7 sin observación asociada ⇒ requiere intervención (M8 no fabrica el hecho).
+    //     Si además CONSUMIÓ presupuesto (presupuestoReservado>0) se marca CONSUMO_SIN_RESULTADO.
     for (const orden of await this.lecturaM7.listarOrdenes(ctx, 'EJECUTADA_SIMULADA')) {
       if (orden.clasificacion === 'COMPLETA' && !observadas.has(orden.ordenId)) {
-        push({ clase: 'EJECUCION_SIN_OBSERVACION', clasificacion: 'REQUIERE_INTERVENCION', ref: orden.ordenId, detalle: 'ejecución completa sin observación (consumo sin resultado registrado)' });
+        push({ clase: 'EJECUCION_SIN_OBSERVACION', clasificacion: 'REQUIERE_INTERVENCION', ref: orden.ordenId, detalle: 'ejecución completa sin observación' });
+        if ((orden.presupuestoReservado ?? 0) > 0) push({ clase: 'CONSUMO_SIN_RESULTADO', clasificacion: 'REQUIERE_INTERVENCION', ref: orden.ordenId, detalle: 'ejecución con consumo pero sin resultado registrado' });
       }
     }
 
@@ -98,15 +101,17 @@ export class ReconciliadorMedicionService {
     const porObservacion = new Map<string, number>();
     for (const id of await this.evaluaciones.listarIds(ctx)) {
       const st = await this.evaluaciones.cargar(ctx, id);
-      if (!st.existe || !st.cuerpo) continue;
+      if (!st.existe) continue;
       const c = st.cuerpo;
       porObservacion.set(c.observacionId, (porObservacion.get(c.observacionId) ?? 0) + 1);
-      if (!c.explicacion?.trim()) push({ clase: 'EVALUACION_SIN_EXPLICACION', clasificacion: 'REQUIERE_INTERVENCION', ref: id, detalle: 'evaluación sin explicación' });
+      // Una evaluación CERRADA (EMITIDA/…) sin explicación es incoherente. (Las ABIERTAS aún no cerraron.)
+      if (st.estado !== 'ABIERTA' && !c.explicacion?.trim()) push({ clase: 'EVALUACION_SIN_EXPLICACION', clasificacion: 'REQUIERE_INTERVENCION', ref: id, detalle: 'evaluación cerrada sin explicación' });
 
       const obs = await this.observaciones.cargar(ctx, c.observacionId);
       if (obs.existe && obs.datos) {
         if (obs.datos.kpiId !== c.kpiId) push({ clase: 'KPI_INCONSISTENTE', clasificacion: 'REQUIERE_INTERVENCION', ref: id, detalle: 'el KPI de la evaluación no coincide con el de la observación' });
-        if (st.estado === 'EMITIDA' && c.resultado.estado !== 'NO_EVALUABLE' && obs.datos.evidenciaOperacionalRef === null && obs.estado === 'VALIDADA') {
+        const resultadoEvaluable = c.resultado !== null && c.resultado.estado !== 'NO_EVALUABLE';
+        if (st.estado === 'EMITIDA' && resultadoEvaluable && obs.datos.evidenciaOperacionalRef === null && obs.estado === 'VALIDADA') {
           push({ clase: 'RESULTADO_SIN_EVIDENCIA', clasificacion: 'REQUIERE_INTERVENCION', ref: id, detalle: 'evaluación con resultado pero sin evidencia operacional' });
         }
         if (!(await this.observaciones.estaEnIndice(ctx, c.observacionId))) {
@@ -117,11 +122,12 @@ export class ReconciliadorMedicionService {
     }
     for (const [obsId, n] of porObservacion) if (n > 1) push({ clase: 'EVALUACION_DUPLICADA', clasificacion: 'REQUIERE_INTERVENCION', ref: obsId, detalle: `${n} evaluaciones para la misma observación` });
 
-    // (6) Aprendizajes: sin evaluación existente, o vinculados a una evaluación OBSOLETA (deben revisarse).
+    // (6) Aprendizajes: sin evaluación existente, o vinculados a una evaluación NO vigente (OBSOLETA/
+    //     REQUIERE_REVISION) — el aprendizaje debe revisarse.
     for (const v of await this.aprendizajesOp.listarVinculos(ctx)) {
       const ev = await this.evaluaciones.cargar(ctx, v.evaluacionId);
       if (!ev.existe) push({ clase: 'APRENDIZAJE_SIN_EVALUACION', clasificacion: 'REQUIERE_INTERVENCION', ref: v.aprendizajeId, detalle: 'aprendizaje sin evaluación de respaldo' });
-      else if (ev.estado === 'OBSOLETA') push({ clase: 'APRENDIZAJE_CON_EVALUACION_OBSOLETA', clasificacion: 'REQUIERE_INTERVENCION', ref: v.aprendizajeId, detalle: 'aprendizaje vigente con evaluación/hipótesis obsoleta → revisar' });
+      else if (ev.estado === 'OBSOLETA' || ev.estado === 'REQUIERE_REVISION') push({ clase: 'APRENDIZAJE_CON_EVALUACION_OBSOLETA', clasificacion: 'REQUIERE_INTERVENCION', ref: v.aprendizajeId, detalle: `aprendizaje vigente con evaluación ${ev.estado} → revisar` });
     }
 
     return h;

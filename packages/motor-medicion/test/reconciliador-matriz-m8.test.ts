@@ -51,6 +51,14 @@ describe('M8 · matriz del reconciliador de medición — 11 clases', () => {
     expect(clase(h, 'EJECUCION_SIN_OBSERVACION')?.clasificacion).toBe('REQUIERE_INTERVENCION');
   });
 
+  it('CONSUMO_SIN_RESULTADO (ejecución con consumo sin resultado) ⇒ REQUIERE_INTERVENCION', async () => {
+    const store = new InMemoryEventStore(); const c = ctx();
+    const t = await montarTodo(store, c);
+    await ejecutarOrden(t.ordenes, c, t.v); // la ejecución marca presupuesto reservado (consumo)
+    const h = await t.reconciliador.reconciliar(c, attr, O);
+    expect(clase(h, 'CONSUMO_SIN_RESULTADO')?.clasificacion).toBe('REQUIERE_INTERVENCION');
+  });
+
   it('READ_MODEL_INCOMPLETO (observación referenciada ausente del índice) ⇒ REPARADA (reindexa)', async () => {
     const store = new InMemoryEventStore(); const c = ctx();
     const t = await montarTodo(store, c);
@@ -107,11 +115,13 @@ describe('M8 · matriz del reconciliador de medición — 11 clases', () => {
     expect(clase(h, 'RESULTADO_SIN_EVIDENCIA')?.clasificacion).toBe('REQUIERE_INTERVENCION');
   });
 
-  it('EVALUACION_SIN_EXPLICACION (inyectada) ⇒ REQUIERE_INTERVENCION', async () => {
+  it('EVALUACION_SIN_EXPLICACION (cerrada sin recomendación) ⇒ REQUIERE_INTERVENCION', async () => {
     const store = new InMemoryEventStore(); const c = ctx();
     const t = await montarTodo(store, c);
-    const cuerpo = { observacionId: 'obsZ', hipotesisId: null, kpiId: 'ctr', segmento: 'pymes', resultado: { estado: 'NO_EVALUABLE' }, hipotesis: null, atribucion: null, recomendacion: { estado: 'ABSTENCION', tipo: 'ampliar_evidencia' }, explicacion: '' };
-    await raw(store, c, 'evaluacion-op:org-a:evalVacia', 'evaluacion.emitida', cuerpo);
+    const s = 'evaluacion-op:org-a:evalVacia';
+    // Emitida (cerrada) SIN el paso de recomendación ⇒ explicación vacía (incoherente).
+    await raw(store, c, s, 'evaluacion.medicion', { observacionId: 'obsZ', hipotesisId: null, kpiId: 'ctr', segmento: 'pymes', contexto: 'ctx1', medicion: { valor: 0.06, calidad: 'alta', cobertura: 1, unidad: 'ratio', naturaleza: 'SIMULADA' } });
+    await raw(store, c, s, 'evaluacion.cerrada', {});
     await raw(store, c, 'evaluacion-indice:org-a', 'evaluacion-indice.registrada', { evaluacionId: 'evalVacia' });
     const h = await t.reconciliador.reconciliar(c, attr, O);
     expect(clase(h, 'EVALUACION_SIN_EXPLICACION')?.clasificacion).toBe('REQUIERE_INTERVENCION');

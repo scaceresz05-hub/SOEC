@@ -13,11 +13,11 @@ import { EstrategiaCreativaArtefactoService, AprobacionService, type ContenidoAr
 import { type ContenidoBrief, type PayloadProducido, type PiezaFuente } from '@soec/contenido';
 import { OperacionService, LecturaOperativaService, AdaptadorEjecucionSimulado, trabajoId as trabajoIdDe, type EntradaOrden } from '@soec/motor-operacion';
 import {
-  ObservacionService, EvaluacionService, AprendizajeOperacionalService, LecturaM9Service, ReconciliadorMedicionService,
+  ObservacionService, EvaluacionService, MemoriaService, ConsolidacionService, AprendizajeOperacionalService, LecturaM9Service, ReconciliadorMedicionService,
   type EntradaObservacion, type EntradaEvaluacion,
 } from '../src/index';
 
-export { InMemoryEventStore, ObservacionService, EvaluacionService, AprendizajeOperacionalService, LecturaM9Service, ReconciliadorMedicionService, MotorEstrategicoService };
+export { InMemoryEventStore, ObservacionService, EvaluacionService, MemoriaService, ConsolidacionService, AprendizajeOperacionalService, LecturaM9Service, ReconciliadorMedicionService, MotorEstrategicoService };
 export type { RequestContext, EventStore, Attribution, EntradaObservacion, EntradaEvaluacion };
 
 export const attr: Attribution = { source: 'm8', purpose: 'test', assumptions: ['t'], claimType: 'observational', regime: 'empirical', uncertainty: 'media' };
@@ -65,7 +65,7 @@ export class StoreFallaEnOcurrencia implements EventStore {
 }
 
 /** Monta M5→M6→M7 y M8. Registra la hipótesis 'hip1' (VERDADERO). Devuelve servicios + versión de pieza. */
-export async function montarTodo(store: EventStore, c: RequestContext) {
+export async function montarTodo(store: EventStore, c: RequestContext, opcionesM7: Record<string, unknown> = {}) {
   const m5 = new MotorEstrategicoService(store);
   const motor = new MotorCreativoService(store, m5);
   await afirmar(m5, c, 'icp', 'ICP'); await afirmar(m5, c, 'pv', 'PROPUESTA_VALOR'); await afirmar(m5, c, 'obj', 'OBJETIVO');
@@ -82,15 +82,17 @@ export async function montarTodo(store: EventStore, c: RequestContext) {
   await pipeline.calendarizar(c, pipe, attr, O);
 
   const creativa = new LecturaCreativaService(store, m5);
-  const ordenes = new OperacionService(store, creativa, new AdaptadorEjecucionSimulado());
+  const ordenes = new OperacionService(store, creativa, new AdaptadorEjecucionSimulado(), opcionesM7);
   const lecturaM7 = new LecturaOperativaService(store, ordenes);
 
   const observaciones = new ObservacionService(store, lecturaM7);
-  const evaluaciones = new EvaluacionService(store, observaciones, m5);
+  const memoriaSvc = new MemoriaService(store);
+  const evaluaciones = new EvaluacionService(store, observaciones, m5, memoriaSvc);
+  const consolidaciones = new ConsolidacionService(store, evaluaciones);
   const aprendizajesOp = new AprendizajeOperacionalService(store, evaluaciones);
-  const lecturaM9 = new LecturaM9Service(store, observaciones, evaluaciones, aprendizajesOp);
+  const lecturaM9 = new LecturaM9Service(store, observaciones, evaluaciones, aprendizajesOp, memoriaSvc, consolidaciones);
   const reconciliador = new ReconciliadorMedicionService(observaciones, evaluaciones, aprendizajesOp, lecturaM7);
-  return { store, m5, ordenes, lecturaM7, observaciones, evaluaciones, aprendizajesOp, lecturaM9, reconciliador, v };
+  return { store, m5, ordenes, lecturaM7, observaciones, memoriaSvc, evaluaciones, consolidaciones, aprendizajesOp, lecturaM9, reconciliador, v };
 }
 
 /** Construye SOLO las fachadas de lectura/servicios M8 sobre un store existente (para replay frío). No escribe. */
@@ -100,11 +102,13 @@ export function montarLectura(store: EventStore) {
   const ordenes = new OperacionService(store, creativa, new AdaptadorEjecucionSimulado());
   const lecturaM7 = new LecturaOperativaService(store, ordenes);
   const observaciones = new ObservacionService(store, lecturaM7);
-  const evaluaciones = new EvaluacionService(store, observaciones, m5);
+  const memoriaSvc = new MemoriaService(store);
+  const evaluaciones = new EvaluacionService(store, observaciones, m5, memoriaSvc);
+  const consolidaciones = new ConsolidacionService(store, evaluaciones);
   const aprendizajesOp = new AprendizajeOperacionalService(store, evaluaciones);
-  const lecturaM9 = new LecturaM9Service(store, observaciones, evaluaciones, aprendizajesOp);
+  const lecturaM9 = new LecturaM9Service(store, observaciones, evaluaciones, aprendizajesOp, memoriaSvc, consolidaciones);
   const reconciliador = new ReconciliadorMedicionService(observaciones, evaluaciones, aprendizajesOp, lecturaM7);
-  return { m5, ordenes, lecturaM7, observaciones, evaluaciones, aprendizajesOp, lecturaM9, reconciliador };
+  return { m5, ordenes, lecturaM7, observaciones, memoriaSvc, evaluaciones, consolidaciones, aprendizajesOp, lecturaM9, reconciliador };
 }
 
 /** Ejecuta una orden de M7 hasta EJECUTADA_SIMULADA. Devuelve el ordenId. */
@@ -156,6 +160,21 @@ export async function observar(observaciones: ObservacionService, c: RequestCont
   await observaciones.registrar(c, id, obsEntrada(ordenId, over), attr, O);
   return observaciones.validar(c, id, attr, O);
 }
+
+/** Ejecuta orden + observa + evalúa; devuelve el evaluacionId. Para matrices de consolidación. */
+export async function prepararEval(
+  t: Awaited<ReturnType<typeof montarTodo>>, c: RequestContext, evalId: string, ordenId: string,
+  obsOver: Partial<EntradaObservacion> = {}, evalOver: Partial<EntradaEvaluacion> = {},
+): Promise<string> {
+  await ejecutarOrden(t.ordenes, c, t.v, ordenId);
+  const obsId = `obs_${evalId}`;
+  await observar(t.observaciones, c, obsId, ordenId, obsOver);
+  await t.evaluaciones.evaluar(c, evalId, evalEntrada(obsId, evalOver), attr, O);
+  return evalId;
+}
+
+/** Clave de comparación canónica (coincide con los valores por defecto de obsEntrada/evalEntrada). */
+export const CLAVE_CANONICA = { hipotesisId: 'hip1', segmento: 'pymes', kpiId: 'ctr', definicionMetrica: 'ctr:ratio', ventana: '7d', naturaleza: 'SIMULADA', politicaAtribucion: 'directa', contexto: 'ctx1' };
 
 /** Entrada de evaluación por defecto (evidencia a favor domina, suficiente y pertinente). */
 export const evalEntrada = (observacionId: string, over: Partial<EntradaEvaluacion> = {}): EntradaEvaluacion => ({

@@ -51,8 +51,8 @@ describe('M8 · 30 escenarios adversariales', () => {
     const ordenId = await ejecutarOrden(t.ordenes, c, t.v);
     await observar(t.observaciones, c, 'obs1', ordenId);
     const ev = await t.evaluaciones.evaluar(c, 'eval1', evalEntrada('obs1', { expectativa: expectativa('otro_kpi') }), attr, O);
-    expect(ev.cuerpo?.resultado.estado).toBe('NO_EVALUABLE');
-    expect(ev.cuerpo?.explicacion).toMatch(/no comparable/i);
+    expect(ev.cuerpo.resultado?.estado).toBe('NO_EVALUABLE');
+    expect(ev.cuerpo.explicacion).toMatch(/no comparable/i);
   });
 
   it('06 · KPI de otro tenant vía IDs ⇒ aislado (cross-tenant no válida)', async () => {
@@ -89,7 +89,7 @@ describe('M8 · 30 escenarios adversariales', () => {
     const ordenId = await ejecutarOrden(t.ordenes, c, t.v);
     await observar(t.observaciones, c, 'obs1', ordenId);
     const ev = await t.evaluaciones.evaluar(c, 'eval1', evalEntrada('obs1'), attr, O);
-    expect(ev.cuerpo?.hipotesis?.estado).toBe('REFUTADA');
+    expect(ev.cuerpo.hipotesis?.estado).toBe('REFUTADA');
   });
 
   it('10 · variante no perteneciente al experimento ⇒ M8 materializa la variante REAL de M7', async () => {
@@ -107,7 +107,7 @@ describe('M8 · 30 escenarios adversariales', () => {
     await observar(t.observaciones, c, 'obs1', ordenId);
     await t.m5.retirar(c, 'hip1', 'obsoleta', attr, O);
     const ev = await t.evaluaciones.evaluar(c, 'eval1', evalEntrada('obs1'), attr, O);
-    expect(ev.cuerpo?.hipotesis?.estado).toBe('NO_EVALUABLE');
+    expect(ev.cuerpo.hipotesis?.estado).toBe('NO_EVALUABLE');
   });
 
   it('12 · evidencia contradictoria dominante ⇒ hipótesis REFUTADA', async () => {
@@ -115,11 +115,10 @@ describe('M8 · 30 escenarios adversariales', () => {
     expect(r.estado).toBe('REFUTADA');
   });
 
-  it('13 · una sola ejecución NO se generaliza al mercado ⇒ consolidación INSUFICIENTE, no transferible', async () => {
-    const evH = evaluarHipotesis({ hipotesisId: 'h', hipotesisVersion: 1, estadoM5: 'VERDADERO', resultado: 'SUPERADO', evidenciaAFavor: 3, evidenciaEnContra: 0, observacionesExcluidas: 0, suficiente: true, pertinente: true });
-    const cons = consolidar(CLAVE, [{ clave: CLAVE, evaluacion: evH }]);
-    expect(cons.estado).toBe('INSUFICIENTE');
-    expect(cons.transferible).toBe(false);
+  it('13 · una sola ejecución NO se generaliza al mercado ⇒ consolidación LOCAL, no transferible', async () => {
+    const cons = consolidar(CLAVE, [{ evaluacionId: 'e1', observacionId: 'o1', clave: CLAVE, estadoHipotesis: 'RESPALDADA' }]);
+    expect(cons.estado).toBe('RESPALDADA');
+    expect(cons.alcance).toBe('LOCAL'); // un experimento no transfiere
   });
 
   it('14 · atribución NUNCA se presenta como causalidad real', async () => {
@@ -130,11 +129,11 @@ describe('M8 · 30 escenarios adversariales', () => {
   });
 
   it('15 · métricas incompatibles combinadas ⇒ NO_COMPARABLES (prohibido promediar)', async () => {
-    const evH = evaluarHipotesis({ hipotesisId: 'h', hipotesisVersion: 1, estadoM5: 'VERDADERO', resultado: 'SUPERADO', evidenciaAFavor: 3, evidenciaEnContra: 0, observacionesExcluidas: 0, suficiente: true, pertinente: true });
-    const otra: ClaveComparacion = { ...CLAVE, kpiId: 'cpa', ventana: '30d' };
-    const cons = consolidar(CLAVE, [{ clave: CLAVE, evaluacion: evH }, { clave: otra, evaluacion: evH }]);
+    const otra1: ClaveComparacion = { ...CLAVE, kpiId: 'cpa' };
+    const otra2: ClaveComparacion = { ...CLAVE, ventana: '30d' };
+    const cons = consolidar(CLAVE, [{ evaluacionId: 'e1', observacionId: 'o1', clave: otra1, estadoHipotesis: 'RESPALDADA' }, { evaluacionId: 'e2', observacionId: 'o2', clave: otra2, estadoHipotesis: 'RESPALDADA' }]);
     expect(cons.estado).toBe('NO_COMPARABLES');
-    expect(cons.incompatibilidades).toContain('kpiId');
+    expect(cons.excluidas.length).toBe(2);
   });
 
   it('16 · aprendizaje generado desde NO_EVALUABLE ⇒ AUSENCIA de aprendizaje (null)', async () => {
@@ -224,7 +223,7 @@ describe('M8 · 30 escenarios adversariales', () => {
     await observar(t.observaciones, c, 'obs1', ordenId);
     // (la matriz por frontera prueba el fallo/replay; aquí se acredita que la evaluación referencia a la observación)
     const ev = await t.evaluaciones.evaluar(c, 'eval1', evalEntrada('obs1'), attr, O);
-    expect(ev.cuerpo?.observacionId).toBe('obs1');
+    expect(ev.cuerpo.observacionId).toBe('obs1');
     expect((await t.reconciliador.reconciliar(c, attr, O)).some((x) => x.clase === 'APRENDIZAJE_SIN_EVALUACION')).toBe(false);
   });
 

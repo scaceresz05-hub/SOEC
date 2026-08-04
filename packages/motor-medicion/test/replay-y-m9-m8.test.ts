@@ -6,7 +6,7 @@
  * incompletos, excluye huérfanas, preserva compensación/consumo, e idéntico tras replay frío.
  */
 import { describe, expect, it } from 'vitest';
-import { InMemoryEventStore, ctx, attr, O, montarTodo, montarLectura, ejecutarOrden, observar, evalEntrada } from './_setup';
+import { InMemoryEventStore, ctx, attr, O, montarTodo, montarLectura, ejecutarOrden, observar, evalEntrada, prepararEval, CLAVE_CANONICA } from './_setup';
 
 describe('M8 · replay frío integral', () => {
   it('reconstruye observación/evaluación/aprendizaje/memoria/lecturas M9 IDÉNTICAS desde un store nuevo', async () => {
@@ -61,6 +61,41 @@ describe('M8 · contratos M9', () => {
     expect(Object.isFrozen(evs)).toBe(true);
     expect(() => ((evs[0] as { estado: string }).estado = 'HACK')).toThrow();
     expect((await t.lecturaM9.listarEvaluaciones(c))[0]?.estado).toBe('EMITIDA');
+  });
+
+  it('expone consolidaciones inmutables (con incluidas/excluidas/alcance/contradicciones)', async () => {
+    const store = new InMemoryEventStore(); const c = ctx();
+    const t = await montarTodo(store, c);
+    await prepararEval(t, c, 'e1', 'orden1');
+    await prepararEval(t, c, 'e2', 'orden2');
+    await t.consolidaciones.consolidar(c, 'cons1', CLAVE_CANONICA, ['e1', 'e2'], attr, O);
+    const cs = await t.lecturaM9.listarConsolidaciones(c);
+    expect(cs[0]?.estado).toBe('RESPALDADA');
+    expect(cs[0]?.alcance).toBe('TRANSFERIBLE');
+    expect(Object.isFrozen(cs)).toBe(true);
+    expect(() => ((cs[0] as { estado: string }).estado = 'HACK')).toThrow();
+  });
+
+  it('congelamiento PROFUNDO: mutar un array u objeto anidado del snapshot falla', async () => {
+    const store = new InMemoryEventStore(); const c = ctx();
+    const t = await montarTodo(store, c);
+    const o1 = await ejecutarOrden(t.ordenes, c, t.v);
+    await observar(t.observaciones, c, 'obs1', o1);
+    await t.evaluaciones.evaluar(c, 'eval1', evalEntrada('obs1'), attr, O);
+    const evs = await t.lecturaM9.listarEvaluaciones(c);
+    expect(Object.isFrozen(evs[0]?.contradicciones)).toBe(true); // array anidado congelado
+    expect(() => ((evs[0]!.contradicciones as string[]).push('x'))).toThrow();
+    expect(() => ((evs[0]!.recomendacion as { tipo: string }).tipo = 'HACK')).toThrow(); // objeto anidado
+  });
+
+  it('cross-tenant: M9 de org-b no ve las observaciones/evaluaciones de org-a', async () => {
+    const store = new InMemoryEventStore(); const cA = ctx('org-a'); const cB = ctx('org-b');
+    const t = await montarTodo(store, cA);
+    const o1 = await ejecutarOrden(t.ordenes, cA, t.v);
+    await observar(t.observaciones, cA, 'obs1', o1);
+    await t.evaluaciones.evaluar(cA, 'eval1', evalEntrada('obs1'), attr, O);
+    expect((await t.lecturaM9.listarObservaciones(cB)).length).toBe(0);
+    expect((await t.lecturaM9.listarEvaluaciones(cB)).length).toBe(0);
   });
 
   it('la memoria distingue respaldadas/refutadas/inconclusas y aprendizajes vigentes/invalidados', async () => {

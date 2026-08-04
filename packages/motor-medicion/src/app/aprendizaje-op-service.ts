@@ -37,30 +37,32 @@ export class AprendizajeOperacionalService {
    */
   async aprenderDesde(ctx: RequestContext, aprendizajeId: string, evaluacionId: string, a: Attribution, o: string): Promise<{ aprendizajeId: string } | null> {
     const ev = await this.evaluaciones.cargar(ctx, evaluacionId);
-    if (!ev.existe || ev.estado !== 'EMITIDA' || !ev.cuerpo) return null;
+    if (!ev.existe || ev.estado !== 'EMITIDA') return null; // sólo desde una evaluación VIGENTE
     const c = ev.cuerpo;
-    // Guardarraíl: no se aprende desde lo NO_EVALUABLE/INCONSISTENTE.
-    if (c.resultado.estado === 'NO_EVALUABLE' || c.resultado.estado === 'INCONSISTENTE') return null;
+    const resultadoEstado = c.resultado?.estado;
+    // Guardarraíl: no se aprende desde lo NO_EVALUABLE/INCONSISTENTE (ni sin resultado).
+    if (!resultadoEstado || resultadoEstado === 'NO_EVALUABLE' || resultadoEstado === 'INCONSISTENTE') return null;
     if (c.hipotesis && c.hipotesis.estado === 'NO_EVALUABLE') return null;
 
-    const ganador = c.resultado.estado === 'SUPERADO' || c.resultado.estado === 'CUMPLIDO' ? 'variante'
-      : c.resultado.estado === 'NO_CUMPLIDO' ? 'control' : null;
+    const ganador = resultadoEstado === 'SUPERADO' || resultadoEstado === 'CUMPLIDO' ? 'variante'
+      : resultadoEstado === 'NO_CUMPLIDO' ? 'control' : null;
+    const r = c.resultado!;
     const suficiente = c.hipotesis?.estado === 'RESPALDADA' || c.hipotesis?.estado === 'REFUTADA';
     const entrada: EntradaAprendizaje = {
       observado: {
         experimentoId: evaluacionId, ganador,
-        valorControl: c.resultado.esperado.baseline, valorVariante: c.resultado.observado ?? c.resultado.esperado.baseline,
-        observaciones: c.atribucion?.eventosIncluidos ?? 0, evidencia: c.resultado.explicacion,
+        valorControl: r.esperado.baseline, valorVariante: r.observado ?? r.esperado.baseline,
+        observaciones: c.atribucion?.eventosIncluidos ?? 0, evidencia: r.explicacion,
       },
       interpretacion: {
-        texto: `LOCAL al experimento: resultado ${c.resultado.estado}, hipótesis ${c.hipotesis?.estado ?? 'sin hipótesis'}`,
+        texto: `LOCAL al experimento: resultado ${r.estado}, hipótesis ${c.hipotesis?.estado ?? 'sin hipótesis'}`,
         supuestos: ['dato SIMULADO/ESTIMADO', 'válido solo para este experimento hasta consolidar'],
         confianza: c.hipotesis?.confianza === 'media' ? 'media' : 'baja',
       },
       conclusion: {
-        enunciado: c.recomendacion.fundamento,
+        enunciado: c.recomendacion?.fundamento ?? 'sin recomendación',
         soporte: suficiente ? 'evidencia_suficiente' : 'evidencia_insuficiente',
-        accionRecomendada: c.recomendacion.tipo,
+        accionRecomendada: c.recomendacion?.tipo ?? 'no_actuar',
       },
       // Sin capa reutilizable: un solo experimento NO es transferible (lo decide la consolidación).
     };

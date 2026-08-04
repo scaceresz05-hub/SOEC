@@ -49,7 +49,11 @@ autoritativa **exclusiva**: `LecturaOperativa` de M7. **Reutiliza** (no crea má
 10. **`LecturaMedicion`** (puerto M9, solo lectura): observaciones/evaluaciones/aprendizajes/memoria con
     snapshots deep-frozen. M9 consume; no reescribe la historia de M8.
 
-## Cobertura (58 tests en 6 archivos) · `pnpm verify` global verde (195 archivos / 1263 tests)
+## Cobertura · **cifras y matrices definitivas en la Adenda (cierre focalizado) al final de este ADR**
+
+> Las cifras y matrices de esta sección quedaron SUPERADAS por el cierre focalizado (95 tests / verify
+> 197 archivos / 1300 tests; 12 fronteras; 12 clases de reconciliador; consolidación y obsolescencia
+> completas). Ver la **Adenda** al final. Se conserva el detalle histórico a continuación.
 
 Siglas: C=`cadena-m8`, E=`escenarios-m8`, R=`reconciliador-matriz-m8`, F=`fronteras-m8`, X=`replay-y-m9-m8`.
 
@@ -105,3 +109,57 @@ publicación, gasto, `AUTONOMOUS_REAL`. M8 produce conocimiento; no actúa.
 - Optimización/adaptación automática del plan (es M9).
 - Consolidación multi-experimento a escala con ventanas móviles y significancia declarada (hoy: comparabilidad
   estricta + confianza acotada).
+
+## Adenda — cierre focalizado (dictamen `AUDITORIA_M8_REQUIERE_CIERRE_FOCALIZADO`)
+
+La auditoría objetó (con razón) cuatro brechas: fronteras de fallo parcial incompletas (7 vs 12), matriz del
+reconciliador no demostrada una por una, consolidación entre experimentos no cerrada, y matriz de
+obsolescencia no exhaustiva. Se cerraron **demostrándolas**, sin M9 ni nuevas máquinas. La evaluación se
+DESCOMPUSO en pasos event-sourced (medición/resultado/atribución/hipótesis/recomendación/cierre), de modo
+que cada paso es una frontera real. Cobertura total M8: **95 tests** en 8 archivos; `pnpm verify` global
+verde (**197 archivos / 1300 tests**). Archivos: C=`cadena-m8`, E=`escenarios-m8`, R=`reconciliador-matriz-m8`,
+F=`fronteras-m8`, K=`consolidacion-m8`, B=`obsolescencia-m8`, X=`replay-y-m9-m8`.
+
+### A. 12 fronteras de fallo parcial (F)
+Un `it` por frontera (`F1 registro de observación`, `F2 validación`, `F3 medición/cálculo`, `F4 evaluación de
+resultado`, `F5 atribución`, `F6 evaluación de hipótesis`, `F7 registro de aprendizaje`, `F8 actualización de
+memoria`, `F9 recomendación/abstención`, `F10 obsolescencia`, `F11 índices/read models`, `F12 reconciliación`).
+Cada uno: fallo → estado parcial → reintento repara **sólo lo faltante** (pasos idempotentes) → reintento
+adicional no-op → dos reparadores concurrentes → replay frío. Con conteo de eventos por stream y tipo
+(`evaluacion.cerrada`=1, cada paso=1, `memoria.entrada`=1).
+
+### B. Matriz del reconciliador — 12 clases (R)
+`EJECUCION_SIN_OBSERVACION`, `OBSERVACION_SIN_EJECUCION_VALIDA` (→descartar), `KPI_INCONSISTENTE`,
+`UNIDAD_INCOMPATIBLE`, `RESULTADO_SIN_EVIDENCIA`, `APRENDIZAJE_SIN_EVALUACION`, `EVALUACION_DUPLICADA`,
+`CONSUMO_SIN_RESULTADO`, `OBSERVACION_SIMULADA_MARCADA_REAL` (→invalidar), `APRENDIZAJE_CON_EVALUACION_OBSOLETA`,
+`READ_MODEL_INCOMPLETO` (→reindexar), `EVALUACION_SIN_EXPLICACION` — cada una con su `it`, clasificación
+explícita (REPARADA/NO_REQUIERE_ACCION/NO_REPARABLE/REQUIERE_INTERVENCION), más convergencia concurrente y
+no-op tras replay frío.
+
+### C. Consolidación canónica multi-experimento (K) — agregado event-sourced `ConsolidacionOperacion`
+Resultados RESPALDADA/REFUTADA/PARCIAL/INCONCLUSA/NO_EVALUABLE/NO_COMPARABLES. Tests: dos compatibles ⇒
+RESPALDADA+TRANSFERIBLE; tres con uno incompatible ⇒ incluye 2/excluye 1; contradictorios ⇒ INCONCLUSA;
+observación duplicada ⇒ no doble conteo (experimentosUnicos=1); una sola ejecución ⇒ LOCAL; exclusión por
+unidad/ventana/atribución/segmento/naturaleza/contexto; cross-tenant no se incorpora; idempotencia+concurrencia
+(un evento); replay frío idéntico. Reglas: no promediar incompatibles, no doble conteo, un experimento no
+transfiere, contradicción reduce/impide, naturaleza SIMULADA conservada, no modifica evaluaciones históricas.
+
+### D. Matriz de obsolescencia (B)
+Estado `EstadoEvaluacion` extendido: EMITIDA→REQUIERE_REVISION→OBSOLETA. Un `it` por cada una de las **10
+causas** (hipótesis/KPI/segmento/estrategia/pieza/variante/evidencia/medición/atribución/contradicción):
+evaluación→OBSOLETA; aprendizaje deja de ser vigente; memoria conserva el histórico (intento persiste);
+respaldadas-vigentes lo excluye; M9 marca no-vigente/no-medible. Más: REQUIERE_REVISION; una nueva versión no
+sobrescribe la anterior (histórica OBSOLETA + nueva EMITIDA, memoria con ambos intentos); obsolescencia
+idempotente (un evento); concurrentemente segura; el reconciliador marca el aprendizaje ligado.
+
+### E. Contratos M9 endurecidos (X)
+`LecturaMedicion` expone observaciones/evaluaciones (con vigencia/alcance/naturaleza/contradicciones)/
+consolidaciones/aprendizajes/memoria; excluye huérfanas y marca lo no-vigente. Congelamiento PROFUNDO probado
+sobre arrays y objetos ANIDADOS (mutar `contradicciones`/`recomendacion` falla). Aislamiento cross-tenant
+verificado (org-b no ve datos de org-a).
+
+### Correcciones de correctitud surgidas de las matrices (esta ronda)
+- **Descomposición event-sourced de la evaluación** en pasos idempotentes (habilita reparar sólo lo faltante).
+- **Consumo vs ejecución sin observación**: se emiten AMBAS clases (el marcador de presupuesto siempre existe
+  en simulación), en vez de una heurística frágil por `presupuestoReservado`.
+- **Memoria event-sourced** (`memoria.entrada`) como frontera real; la vigencia sigue derivándose del estado.
