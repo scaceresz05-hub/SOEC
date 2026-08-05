@@ -5,10 +5,10 @@
 import { ActorId, OrganizationId, type Attribution, type RequestContext } from '@soec/contracts';
 import { InMemoryEventStore } from '@soec/event-store';
 import {
-  AutorizacionesService, KillSwitchService, PlanificadorService, LecturaIntegracionesService, CatalogoService, PresupuestoService,
+  AutorizacionesService, KillSwitchService, PlanificadorService, LecturaIntegracionesService, CatalogoService, PresupuestoService, LecturaCIAProductoService, ReconciliadorCIAService,
 } from '../src/index';
 
-export { InMemoryEventStore, AutorizacionesService, KillSwitchService, PlanificadorService, LecturaIntegracionesService, CatalogoService, PresupuestoService };
+export { InMemoryEventStore, AutorizacionesService, KillSwitchService, PlanificadorService, LecturaIntegracionesService, CatalogoService, PresupuestoService, LecturaCIAProductoService, ReconciliadorCIAService };
 
 export const attr: Attribution = { source: 'cia', purpose: 'test', assumptions: ['t'], claimType: 'observational', regime: 'empirical', uncertainty: 'media' };
 export const O = '2026-08-04T00:00:00.000Z';
@@ -27,6 +27,8 @@ export interface Montaje {
   readonly planificador: PlanificadorService;
   readonly lectura: LecturaIntegracionesService;
   readonly catalogo: CatalogoService;
+  readonly producto: LecturaCIAProductoService;
+  readonly reconciliador: ReconciliadorCIAService;
 }
 
 export function montar(store: InMemoryEventStore = new InMemoryEventStore()): Montaje {
@@ -36,5 +38,7 @@ export function montar(store: InMemoryEventStore = new InMemoryEventStore()): Mo
   const planificador = new PlanificadorService(store, autorizaciones, kill, undefined, presupuesto);
   const lectura = new LecturaIntegracionesService(autorizaciones, planificador);
   const catalogo = new CatalogoService();
-  return { store, autorizaciones, kill, presupuesto, planificador, lectura, catalogo };
+  const producto = new LecturaCIAProductoService(catalogo, lectura, autorizaciones, planificador, presupuesto, kill);
+  const reconciliador = new ReconciliadorCIAService(autorizaciones, planificador, presupuesto, kill);
+  return { store, autorizaciones, kill, presupuesto, planificador, lectura, catalogo, producto, reconciliador };
 }

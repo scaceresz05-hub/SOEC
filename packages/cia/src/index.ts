@@ -32,3 +32,5 @@ export * from './app/autorizaciones-service';
 export * from './app/kill-switch-service';
 export * from './app/planificador-service';
 export * from './app/lectura-integraciones-service';
+export * from './app/lectura-producto-service';
+export * from './app/reconciliador-cia-service';
