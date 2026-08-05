@@ -1,38 +1,43 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import './globals.css';
+import { decisiones } from '../lib/soec/consultas';
 
 export const metadata = {
-  title: 'SOEC — Comprender el estado de mi empresa',
-  description: 'SOEC informa y estructura; la decisión final corresponde a la persona.',
+  title: 'SOEC — Tu Director de Marketing',
+  description: 'SOEC trabaja por tus objetivos. Tú defines el rumbo y apruebas las decisiones; del resto se ocupa SOEC.',
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  let pendientes = 0;
+  try { pendientes = (await decisiones()).length; } catch { pendientes = 0; }
   return (
     <html lang="es">
       <body>
         <header className="topbar">
-          <Link href="/" className="brand">
-            SOEC
-          </Link>
-          <nav>
-            <Link href="/login">Sesión</Link>
-            <Link href="/select-organization">Organizaciones</Link>
-            <Link href="/evaluacion">Evaluación</Link>
-            <Link href="/director-workspace">Director Workspace</Link>
-            <Link href="/director-autonomo">Director Autónomo</Link>
-            <Link href="/director-autonomo/programas">Programas</Link>
-            <Link href="/control">Centro de control</Link>
-            <Link href="/piloto">Piloto</Link>
-            <Link href="/marketing">Marketing</Link>
-            <Link href="/contenido">Contenido</Link>
-            <Link href="/canales">Publicación</Link>
-            <Link href="/medicion">Medición</Link>
-          </nav>
+          <div className="inner">
+            <Link href="/" className="brand">
+              <span className="dot" aria-hidden="true" />
+              <span>SOEC<small>Dirección de Marketing</small></span>
+            </Link>
+            <nav className="mainnav" aria-label="Principal">
+              <Link href="/">Inicio</Link>
+              <Link href="/decisiones">Decisiones{pendientes > 0 && <span className="badge">·{pendientes}</span>}</Link>
+              <Link href="/explicaciones">Por qué</Link>
+            </nav>
+          </div>
         </header>
-        <main className="contenido">{children}</main>
+        <nav className="subnav" aria-label="Configuración">
+          <div className="row">
+            <Link href="/objetivos">Objetivos</Link>
+            <Link href="/autonomia">Autonomía</Link>
+            <Link href="/timeline">Actividad</Link>
+            <Link href="/onboarding">Poner en marcha</Link>
+          </div>
+        </nav>
+        <main>{children}</main>
         <footer className="pie">
-          SOEC informa y estructura. La decisión y la acción son de la persona.
+          SOEC trabaja en modo simulado: propone y explica; tú decides. Nada se publica, gasta ni ejecuta de forma real.
         </footer>
       </body>
     </html>

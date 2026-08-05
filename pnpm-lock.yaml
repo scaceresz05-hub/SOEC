@@ -129,6 +129,33 @@ importers:
 
   apps/web:
     dependencies:
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../../packages/contenido
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@soec/estrategia-creativa':
+        specifier: workspace:*
+        version: link:../../packages/estrategia-creativa
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../../packages/event-store
+      '@soec/motor-creativo':
+        specifier: workspace:*
+        version: link:../../packages/motor-creativo
+      '@soec/motor-estrategico':
+        specifier: workspace:*
+        version: link:../../packages/motor-estrategico
+      '@soec/motor-medicion':
+        specifier: workspace:*
+        version: link:../../packages/motor-medicion
+      '@soec/motor-operacion':
+        specifier: workspace:*
+        version: link:../../packages/motor-operacion
+      '@soec/motor-optimizacion':
+        specifier: workspace:*
+        version: link:../../packages/motor-optimizacion
       next:
         specifier: 15.1.6
         version: 15.1.6(@babel/core@7.29.7)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)

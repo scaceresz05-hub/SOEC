@@ -40,6 +40,7 @@ export class ReconciliadorOptimizacionService {
     const org = this.org(ctx);
     const h: HallazgoOpt[] = [];
     const push = (x: HallazgoOpt) => h.push(x);
+    void ahora; void this.politicaOscilacion; // instante/política reservados para reglas de oscilación futuras
 
     for (const cicloId of await this.optimizacion.listarIds(ctx)) {
       const st = await this.optimizacion.cargar(ctx, cicloId);

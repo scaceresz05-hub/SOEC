@@ -119,3 +119,35 @@ software de marketing»: navegación por conversación (3 superficies), onboardi
 decisiones separadas de la operación, explicabilidad de primera clase, autonomía explícita y reutilización
 total de M5–M9. La implementación productiva de `apps/web` sobre estos puertos (y su exposición vía `apps/api`)
 es el tramo de ingeniería siguiente; esta ADR + prototipo fijan la arquitectura de producto que lo gobierna.
+
+## Adenda — PCE-1B · Implementación completa del producto (no diseño)
+
+La arquitectura anterior se IMPLEMENTÓ en `apps/web` (Next 15 / React 19, App Router), consumiendo los
+motores M5–M9 por sus puertos de lectura reales (no un mockup).
+
+- **Cableado**: `transpilePackages` + un data layer server-only `lib/soec/motor.ts` que instancia la cadena
+  real M5→M6→M7→M8→M9 sobre un `InMemoryEventStore` sembrado con un ciclo completo (modo SIMULADO), y
+  `lib/soec/consultas.ts` que traduce los puertos de lectura a modelos de vista. No crea motores ni genera
+  explicaciones: sólo surface lo que M5–M9 ya emiten.
+- **Navegación** (`app/layout.tsx`): de 12 módulos → **Inicio · Decisiones · Por qué**, con configuración
+  discreta (Objetivos · Autonomía · Actividad · Poner en marcha). El usuario nunca ve M5–M9.
+- **Pantallas implementadas**: HOME/Dashboard diario (qué hice / qué aprendí / qué propongo / qué apruebo)
+  con **Centro de Salud** y **Objetivos** (`app/page.tsx`); **Bandeja de Decisiones** con aprobación HUMANA
+  real vía server action → `PropuestaService.aprobar` + `aplicarSimulado` (`app/decisiones/`); **Centro de
+  Explicaciones** (`app/explicaciones/[id]`); **Objetivos**, **Autonomía** (4 niveles), **Onboarding**
+  (entrevista de 5 preguntas), **Actividad/Timeline**.
+- **Módulos eliminados del producto**: `next.config.mjs` redirige `/marketing`, `/medicion`, `/contenido`,
+  `/director-autonomo/*`, `/analisis/*`, etc. → `/` (307). Inaccesibles.
+- **Verificación**: `tsc --noEmit` verde; `next build` verde; en runtime HOME/Decisiones responden 200 con la
+  experiencia de Director generada por la cadena real; los módulos redirigen. `pnpm verify` global verde
+  (202 archivos / 1379 tests).
+
+**Autoauditoría de fricción (corregida, no reportada):** ninguna pantalla obliga a trabajo rutinario —
+solo-lectura (Home/Explicaciones/Objetivos/Actividad), decisiones humanas (Decisiones/Autonomía) u
+onboarding con lo no-descubrible. Reportes, "qué medir", y la navegación por Medición/Marketing/Contenido:
+eliminados del producto.
+
+**Cierre PCE-1:** un usuario ajeno al marketing abre SOEC y entiende en minutos qué hace SOEC, qué resultó,
+qué necesita y cómo va el objetivo — sin capacitación ni manual. Deuda deliberadamente posterior: exponer
+M5–M9 vía `apps/api` con persistencia PG (hoy el data layer usa un store sembrado en proceso) y el Centro de
+Integraciones (proveedores reales, tras ratificación humana del modo REAL).
