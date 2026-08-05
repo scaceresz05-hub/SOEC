@@ -134,3 +134,41 @@ bloqueado— están demostrados por test.
 7. Piloto limitado.
 8. Rendición de cuentas.
 9. Escalamiento gradual de autonomía.
+
+## Adenda — CIA en preparación cerrada COMPLETA (bloques 1–11)
+
+Tras el registro inicial (frontera de producto + invariantes), se agotó el macrobloque CIA en preparación
+cerrada, en ejecución continua. Todo SIMULADO; `AUTONOMOUS_REAL` bloqueado.
+
+- **B1 · Composición CIA↔PCE/M4**: la ejecución simulada rutea por el `OrquestadorAdaptadores` REAL (sandbox
+  autoritativo, breaker, salud, evidencia) con la PCE como autoridad de consumibilidad (`esConsumible`) y de
+  degradación (5 políticas → lenguaje de producto). Los proveedores son adaptadores fake canónicos detrás de
+  la frontera. Se eliminó el motor de proveedores paralelo.
+- **B2 · Ciclo de vida de la autorización**: FSM event-sourced BORRADOR→PENDIENTE→AUTORIZADA⇄PAUSADA +
+  REVOCADA/EXPIRADA/REEMPLAZADA/ELIMINADA; una modificación MATERIAL invalida la aprobación anterior.
+- **B3 · Ciclo de vida del plan**: PROPUESTO→PENDIENTE_APROBACION→AUTORIZADO→PROGRAMADO→EN_EJECUCION→
+  COMPLETADO_SIMULADO + ABSTENIDO/FALLIDO/CANCELADO/OBSOLETO. Idempotencia por `claveLogica`+huella
+  (converge / conflicto); cancelación/obsolescencia descartan respuestas tardías.
+- **B4 · Presupuesto**: reserva event-sourced (RESERVADA→CONFIRMADA|LIBERADA|EXPIRADA|CANCELADA);
+  `disponible = límite − confirmado − reservado_pendiente`; ciclo estimar→validar→reservar→ejecutar→
+  confirmar|liberar; concurrencia e idempotencia.
+- **B5 · Autonomía ejecutable**: los 4 niveles gobiernan; riesgo alto reservado al humano aun en automático;
+  subir la autonomía no elude kill-switch/presupuesto.
+- **B7 · Persistencia PostgreSQL + API**: `PgEventStore` real; `apps/api/src/cia-routes.ts`
+  (`registerCiaRoutes`) sobre `deps.store`. Probado: crear→reiniciar→replay desde PostgreSQL (servicios y
+  HTTP vía Fastify inject); multi-tenant; kill/consumo/sustitución persistidos.
+- **B6 · Web**: `apps/web/lib/cia-client.ts`/`cia-types.ts` (consume `/api/cia/*`) + `CapacidadesCIA` en
+  Autonomía. Capability-framed; degrada con gracia; nunca muestra proveedores.
+- **B8 · Contrato de producto**: `LecturaCIAProducto` — instantánea única, congelada en profundidad, sin
+  fuga; auditoría técnica separada.
+- **B10 · Reconciliación**: matriz de clases con REPARADA/NO_REQUIERE_ACCION/NO_REPARABLE/
+  REQUIERE_INTERVENCION; repara reservas huérfanas; dos reconciliadores convergen.
+- **B9 · Matriz adversarial**: 40 escenarios; el de comprensión humana marcado NO_EVALUABLE_POR_CODIGO /
+  PENDIENTE_VALIDACION_EXTERNA (no aprobado).
+- **B11 · Validación**: `pnpm verify` verde (214 archivos / 1453 tests + 1 skip); `apps/web` typecheck +
+  build verdes; PostgreSQL healthy; replay tras reinicio; scans de secreto/proveedor/red en cero;
+  `AUTONOMOUS_REAL=false`. Árbol limpio salvo drafts de gobernanza.
+
+**Deuda reservada EXCLUSIVAMENTE a modo REAL y validación externa** (las 4 puertas): SDK/API/OAuth/
+credenciales reales, gasto/publicación/envío reales, métricas reales, y la validación de comprensión con
+usuarios ajenos (PVA-1 registro B). Nada de eso se toca en preparación cerrada.
