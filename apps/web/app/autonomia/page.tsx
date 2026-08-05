@@ -1,3 +1,5 @@
+import CapacidadesCIA from './CapacidadesCIA';
+
 export const dynamic = 'force-dynamic';
 
 const NIVELES = [
@@ -25,6 +27,7 @@ export default function Autonomia() {
       <div className="note" style={{ marginTop: 18 }}>
         Sea cual sea el nivel, cualquier acción con efecto real seguirá exigiendo tu ratificación. Hoy todo ocurre en modo simulado; el nivel se gobierna con la misma infraestructura de autonomía de SOEC.
       </div>
+      <CapacidadesCIA />
     </div>
   );
 }
