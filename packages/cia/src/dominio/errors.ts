@@ -14,3 +14,5 @@ export class ModoRealBloqueadoError extends CiaError {}
 export class CapacidadDesconocidaError extends CiaError {}
 /** Comando inválido (falta un dato obligatorio o un acto humano requerido). */
 export class ComandoCiaInvalidoError extends CiaError {}
+/** Misma clave lógica con contenido distinto: conflicto de idempotencia gobernado. */
+export class ConflictoIdempotenciaError extends CiaError {}

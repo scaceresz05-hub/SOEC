@@ -5,10 +5,10 @@
 import { ActorId, OrganizationId, type Attribution, type RequestContext } from '@soec/contracts';
 import { InMemoryEventStore } from '@soec/event-store';
 import {
-  AutorizacionesService, KillSwitchService, PlanificadorService, LecturaIntegracionesService, CatalogoService,
+  AutorizacionesService, KillSwitchService, PlanificadorService, LecturaIntegracionesService, CatalogoService, PresupuestoService,
 } from '../src/index';
 
-export { InMemoryEventStore, AutorizacionesService, KillSwitchService, PlanificadorService, LecturaIntegracionesService, CatalogoService };
+export { InMemoryEventStore, AutorizacionesService, KillSwitchService, PlanificadorService, LecturaIntegracionesService, CatalogoService, PresupuestoService };
 
 export const attr: Attribution = { source: 'cia', purpose: 'test', assumptions: ['t'], claimType: 'observational', regime: 'empirical', uncertainty: 'media' };
 export const O = '2026-08-04T00:00:00.000Z';
@@ -23,6 +23,7 @@ export interface Montaje {
   readonly store: InMemoryEventStore;
   readonly autorizaciones: AutorizacionesService;
   readonly kill: KillSwitchService;
+  readonly presupuesto: PresupuestoService;
   readonly planificador: PlanificadorService;
   readonly lectura: LecturaIntegracionesService;
   readonly catalogo: CatalogoService;
@@ -31,8 +32,9 @@ export interface Montaje {
 export function montar(store: InMemoryEventStore = new InMemoryEventStore()): Montaje {
   const autorizaciones = new AutorizacionesService(store);
   const kill = new KillSwitchService(store);
-  const planificador = new PlanificadorService(store, autorizaciones, kill);
+  const presupuesto = new PresupuestoService(store, autorizaciones);
+  const planificador = new PlanificadorService(store, autorizaciones, kill, undefined, presupuesto);
   const lectura = new LecturaIntegracionesService(autorizaciones, planificador);
   const catalogo = new CatalogoService();
-  return { store, autorizaciones, kill, planificador, lectura, catalogo };
+  return { store, autorizaciones, kill, presupuesto, planificador, lectura, catalogo };
 }

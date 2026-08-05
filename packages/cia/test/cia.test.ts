@@ -111,7 +111,7 @@ describe('CIA · kill-switch prevalece', () => {
     await m.kill.desactivar(c, 'ORG', attr, O);
     const r2 = await m.planificador.planificar(c, 'k-2', { capacidadId: 'dar-a-conocer-marca', objetivo: 'x', costoEstimado: 1000 }, attr, O);
     expect(r2.decision.permitido).toBe(true);
-    expect(r2.plan.estado).toBe('EJECUTADA_SIMULADA');
+    expect(r2.plan.estado).toBe('COMPLETADO_SIMULADO');
   });
 
   it('un kill puesto DESPUÉS de planificar impide la ejecución al aprobar (la pausa prevalece)', async () => {
@@ -120,7 +120,7 @@ describe('CIA · kill-switch prevalece', () => {
     await m.planificador.planificar(c, 'k-3', { capacidadId: 'dar-a-conocer-marca', objetivo: 'x', costoEstimado: 1000 }, attr, O);
     await m.kill.activar(c, 'dar-a-conocer-marca', attr, O); // pausa la capacidad
     const st = await m.planificador.aprobar(c, 'k-3', HUMANO, attr, O);
-    expect(st.estado).toBe('RECHAZADA'); // no se ejecuta pese a la aprobación
+    expect(st.estado).toBe('CANCELADO'); // no se ejecuta pese a la aprobación (kill prevalece)
   });
 });
 
@@ -130,7 +130,7 @@ describe('CIA · límite (presupuesto) frena de verdad', () => {
     await m.autorizaciones.autorizar(c, 'captar-clientes-publicidad', { limite: 10000, nivelAutonomia: 'EJECUTAR_AUTOMATICO', actorHumano: HUMANO }, attr, O);
     const r = await m.planificador.planificar(c, 'b-1', { capacidadId: 'captar-clientes-publicidad', objetivo: 'x', costoEstimado: 50000 }, attr, O);
     expect(r.decision.motivo).toBe('excede_limite');
-    expect(r.plan.estado).toBe('PLANIFICADA'); // queda pendiente, no ejecutado
+    expect(r.plan.estado).toBe('PENDIENTE_APROBACION'); // queda pendiente, no ejecutado
     expect((await m.lectura.decisiones(c)).some((d) => d.planId === 'b-1')).toBe(true);
   });
 
@@ -146,7 +146,8 @@ describe('CIA · límite (presupuesto) frena de verdad', () => {
 describe('CIA · el nivel de autonomía decide aprobación vs. automático', () => {
   it('SOLO_OBSERVAR no planifica acción', () => {
     const cap = CATALOGO_MARKETING[0]!;
-    const auth = { ...estadoInicialAutorizacion('org-a', cap.id), existe: true, estado: 'AUTORIZADA' as const, limite: 100000, nivelAutonomia: 'SOLO_OBSERVAR' as const };
+    const cond = { limite: 100000, nivelAutonomia: 'SOLO_OBSERVAR' as const, periodo: 'MENSUAL', alcance: 'organizacion', riesgo: 'bajo' as const };
+    const auth = { ...estadoInicialAutorizacion('org-a', cap.id), existe: true, estado: 'AUTORIZADA' as const, condiciones: cond, aprobadas: cond };
     const d = decidirPlan(auth, { organizationId: 'org-a', version: 0, activos: [] }, cap, 10);
     expect(d.permitido).toBe(false);
     expect(d.motivo).toBe('solo_observar');
@@ -156,9 +157,9 @@ describe('CIA · el nivel de autonomía decide aprobación vs. automático', () 
     await m.autorizaciones.autorizar(c, 'dar-a-conocer-marca', { limite: 100000, nivelAutonomia: 'EJECUTAR_CON_APROBACION', actorHumano: HUMANO }, attr, O);
     const r = await m.planificador.planificar(c, 'a-1', { capacidadId: 'dar-a-conocer-marca', objetivo: 'x', costoEstimado: 1000 }, attr, O);
     expect(r.decision.requiereAprobacion).toBe(true);
-    expect(r.plan.estado).toBe('PLANIFICADA');
+    expect(r.plan.estado).toBe('PENDIENTE_APROBACION');
     const st = await m.planificador.aprobar(c, 'a-1', HUMANO, attr, O);
-    expect(st.estado).toBe('EJECUTADA_SIMULADA');
+    expect(st.estado).toBe('COMPLETADO_SIMULADO');
   });
 });
 
@@ -179,7 +180,7 @@ describe('CIA · reconstrucción por eventos (cold replay)', () => {
     // servicios nuevos sobre el MISMO store: mismo estado
     const m2 = montar(store);
     const plan = await m2.planificador.cargar(c, 'rp-1');
-    expect(plan.estado).toBe('EJECUTADA_SIMULADA');
+    expect(plan.estado).toBe('COMPLETADO_SIMULADO');
     const auth = await m2.autorizaciones.cargar(c, 'enviar-correo');
     expect(auth.consumidoSimulado).toBe(100);
   });

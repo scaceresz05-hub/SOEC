@@ -8,7 +8,7 @@
  */
 import type { RequestContext } from '@soec/contracts';
 import { buscarCapacidad } from '../dominio/catalogo';
-import { disponibleSimulado } from '../dominio/autorizacion';
+import { disponibleSimulado, limiteEfectivo } from '../dominio/autorizacion';
 import { AutorizacionesService } from './autorizaciones-service';
 import { PlanificadorService } from './planificador-service';
 
@@ -59,8 +59,8 @@ export class LecturaIntegracionesService {
       out.push({
         capacidadId: id,
         titulo: cap?.titulo ?? id,
-        estado: st.estado === 'AUTORIZADA' ? 'Activa' : st.estado === 'SUSPENDIDA' ? 'En pausa' : 'Pendiente',
-        limite: st.limite,
+        estado: st.estado === 'AUTORIZADA' ? 'Activa' : st.estado === 'PAUSADA' ? 'En pausa' : 'Pendiente',
+        limite: limiteEfectivo(st),
         consumidoSimulado: st.consumidoSimulado,
         disponible: disponibleSimulado(st),
       });
@@ -74,7 +74,7 @@ export class LecturaIntegracionesService {
     const out: DecisionIntegracionVista[] = [];
     for (const planId of planIds) {
       const p = await this.planificador.cargar(ctx, planId);
-      if (p.estado === 'PLANIFICADA' && p.requiereAprobacion) {
+      if (p.estado === 'PENDIENTE_APROBACION') {
         const cap = buscarCapacidad(p.capacidadId);
         out.push({ planId, titulo: cap?.titulo ?? p.capacidadId, objetivo: p.objetivo, costoEstimado: p.costoEstimado });
       }
