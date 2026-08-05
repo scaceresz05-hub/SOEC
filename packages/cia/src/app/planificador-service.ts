@@ -10,9 +10,10 @@
 import { ConcurrencyError, type Attribution, type EventInput, type EventStore, type RequestContext } from '@soec/contracts';
 import { buscarCapacidad } from '../dominio/catalogo';
 import {
-  EVENTOS_PLAN, planStreamId, reconstruirPlan, decidirPlan, elegirProveedor, simularProveedor,
+  EVENTOS_PLAN, planStreamId, reconstruirPlan, decidirPlan, elegirProveedor,
   type Decision, type PlanState,
 } from '../dominio/plan';
+import { EjecutorCapacidadCIA } from './ejecutor-capacidad-service';
 import { estaBloqueada } from '../dominio/kill-switch';
 import { disponibleSimulado } from '../dominio/autorizacion';
 import { assertSimulado, type ModoEjecucion } from '../dominio/guardarrailes';
@@ -30,6 +31,7 @@ export class PlanificadorService {
     private readonly store: EventStore,
     private readonly autorizaciones: AutorizacionesService,
     private readonly kill: KillSwitchService,
+    private readonly ejecutor: EjecutorCapacidadCIA = new EjecutorCapacidadCIA(),
   ) {}
 
   private org(ctx: RequestContext): string { return String(ctx.organizationId); }
@@ -141,8 +143,19 @@ export class PlanificadorService {
       return this.cargar(ctx, planId);
     }
 
-    const evidencia = simularProveedor(st.proveedorElegidoRef ?? elegirProveedor(cap), cap, st.costoEstimado);
-    await this.append(ctx, planId, EVENTOS_PLAN.ejecutadaSimulada, { evidenciaSimulada: evidencia }, a, o);
+    // Ejecución por el orquestador M4 REAL, en SIMULADO (composición CIA↔PCE/M4, no un motor paralelo).
+    const res = await this.ejecutor.ejecutar(ctx, {
+      capacidadTipoPCE: cap.capacidadTipoPCE,
+      proveedorElegidoRef: st.proveedorElegidoRef ?? elegirProveedor(cap),
+      operacion: 'ejecutar',
+      instante: o,
+    });
+    if (!res.ejecutado) {
+      // Degradación/abstención gobernada por la PCE/M4: no se ejecuta; se registra en lenguaje de producto.
+      await this.append(ctx, planId, EVENTOS_PLAN.rechazada, {}, a, o);
+      return this.cargar(ctx, planId);
+    }
+    await this.append(ctx, planId, EVENTOS_PLAN.ejecutadaSimulada, { evidenciaSimulada: res.mensajeProducto }, a, o);
     if (cap.unidadLimite !== 'SIN_GASTO' && st.costoEstimado > 0) {
       await this.autorizaciones.registrarConsumoSimulado(ctx, cap.id, st.costoEstimado, a, o);
     }

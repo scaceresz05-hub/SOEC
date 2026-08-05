@@ -7,7 +7,9 @@
   "exports": { ".": "./src/index.ts" },
   "scripts": { "typecheck": "tsc --noEmit" },
   "dependencies": {
-    "@soec/contracts": "workspace:*"
+    "@soec/contracts": "workspace:*",
+    "@soec/plataforma-capacidades": "workspace:*",
+    "@soec/adaptadores": "workspace:*"
   },
   "devDependencies": {
     "@soec/event-store": "workspace:*"

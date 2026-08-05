@@ -356,9 +356,15 @@ importers:
 
   packages/cia:
     dependencies:
+      '@soec/adaptadores':
+        specifier: workspace:*
+        version: link:../adaptadores
       '@soec/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@soec/plataforma-capacidades':
+        specifier: workspace:*
+        version: link:../plataforma-capacidades
     devDependencies:
       '@soec/event-store':
         specifier: workspace:*
