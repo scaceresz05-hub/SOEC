@@ -44,6 +44,9 @@ importers:
       '@soec/capacidades':
         specifier: workspace:*
         version: link:../../packages/capacidades
+      '@soec/cia':
+        specifier: workspace:*
+        version: link:../../packages/cia
       '@soec/contenido':
         specifier: workspace:*
         version: link:../../packages/contenido

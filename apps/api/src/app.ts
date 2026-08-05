@@ -103,6 +103,7 @@ import { registerDirectorAutonomoProgramasRoutes } from './director-autonomo-pro
 import { registerEvaluacionRoutes } from './evaluacion-routes';
 import { registerGeneracionRoutes } from './generacion-routes';
 import { registerCommercialKnowledgeRoutes } from './commercial-knowledge-routes';
+import { registerCiaRoutes } from './cia-routes';
 import { EstrategiaCreativaInvalidaError } from '@soec/estrategia-creativa';
 import { ComandoCrmInvalidoError, HipotesisNoEncontradaError } from '@soec/crm-comercial';
 import {
@@ -387,6 +388,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerEvaluacionRoutes(target, deps.store, clock);
     registerGeneracionRoutes(target, deps.store, clock, deps.generationRateLimit); // Motor de Generación (M3, Tramo J)
     registerCommercialKnowledgeRoutes(target, deps.store, clock); // Conocimiento comercial / CRM (M3, A-1)
+    registerCiaRoutes(target, deps.store); // Centro de Integraciones Autónomas (CIA, preparación cerrada)
 
     target.post('/events', async (req, reply) => {
       const ctx = contextFrom(req);
