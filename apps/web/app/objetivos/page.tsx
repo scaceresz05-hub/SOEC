@@ -20,7 +20,12 @@ export default async function Objetivos() {
           </div>
         ))}
       </div>
-      <p className="sim">El KPI de cada objetivo lo elijo yo y lo mido con evidencia. No te pido que decidas <b>qué medir</b>.</p>
+      <p className="lede" style={{ fontSize: '14.5px', marginTop: '16px' }}>
+        Cuando tienes varios objetivos, avanzo cada uno según la evidencia que voy reuniendo: primero el que ya
+        está listo para decidir. Si dos compiten por el mismo presupuesto, no elijo a tus espaldas — te lo traigo
+        como una decisión.
+      </p>
+      <p className="sim">La forma de medir cada objetivo la elijo yo y la sigo con evidencia. No te pido que decidas <b>qué medir</b>.</p>
     </div>
   );
 }

@@ -11,11 +11,11 @@ export async function aprobar(propuestaId: string) {
   const s = await getSoec();
   await s.propuestas.aprobar(s.ctx, propuestaId, HUMANO, A, O);
   await s.propuestas.aplicarSimulado(s.ctx, propuestaId, POL_OSC, AHORA, A, O);
-  revalidatePath('/'); revalidatePath('/decisiones'); revalidatePath('/timeline');
+  revalidatePath('/'); revalidatePath('/decisiones');
 }
 
 export async function rechazar(propuestaId: string) {
   const s = await getSoec();
   await s.propuestas.rechazar(s.ctx, propuestaId, HUMANO, A, O);
-  revalidatePath('/'); revalidatePath('/decisiones'); revalidatePath('/timeline');
+  revalidatePath('/'); revalidatePath('/decisiones');
 }

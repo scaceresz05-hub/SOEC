@@ -25,8 +25,8 @@ export async function inicio() {
 
   const hecho: TrabajoHecho[] = [
     { icono: 'ok', titulo: 'Publiqué la campaña de reconocimiento para pymes', detalle: `${ordenes.length} ejecución(es) completada(s), todo según lo previsto.`, cuando: 'ayer' },
-    ...(memo.aprendizajesVigentes.length ? [{ icono: 'aprendi' as const, titulo: 'Aprendí algo sobre tu audiencia', detalle: 'El gancho directo funcionó mejor. Aún es un solo experimento: no lo doy por general.', cuando: 'hoy' }] : []),
-    { icono: 'medi', titulo: 'Medí los resultados y preparé la próxima iteración', detalle: respaldada ? 'La hipótesis quedó respaldada (naturaleza simulada).' : 'Sigo reuniendo evidencia.', cuando: 'hoy' },
+    ...(memo.aprendizajesVigentes.length ? [{ icono: 'aprendi' as const, titulo: 'Aprendí algo sobre tu público', detalle: 'El mensaje más directo funcionó mejor. Es una sola prueba: todavía no lo doy por seguro.', cuando: 'hoy' }] : []),
+    { icono: 'medi', titulo: 'Medí los resultados y preparé el siguiente paso', detalle: respaldada ? 'La prueba confirmó lo que esperábamos (simulado).' : 'Sigo reuniendo evidencia.', cuando: 'hoy' },
   ];
   return { hecho, decisiones: await decisiones(), objetivos: await objetivos(), salud: await salud(), memo };
 }
@@ -64,13 +64,14 @@ export async function explicacion(propuestaId: string) {
   return {
     titulo: alt?.razon ? capitalizar(alt.razon) : 'Propuesta',
     filas: [
-      { k: 'Qué hice', v: 'Ejecuté (simulado) la campaña y medí el KPI.' },
-      { k: 'Por qué', v: ev?.explicacion ?? cuerpo.explicacion },
-      { k: 'Evidencia', v: `${ev?.resultado ?? '—'} · ${(alt?.evidencia ?? []).join(', ') || 'evaluación respaldada'}` },
-      { k: 'Qué descarté', v: 'Ampliar a otro segmento (evidencia insuficiente) y cambiar el mensaje (rompería el experimento).' },
-      { k: 'Qué aprendí', v: 'Funciona en este contexto; no lo generalizo desde un solo experimento.' },
-      { k: 'Recomiendo', v: cuerpo.impactoEsperado || 'Repetir para confirmar antes de escalar.', tono: 'pos' as const },
-      { k: 'No recomiendo', v: 'Tratarlo como verdad general ni subir el presupuesto de golpe.', tono: 'neg' as const },
+      { k: 'Qué hice', v: 'Ejecuté (simulado) la campaña y medí cuántas personas respondieron.' },
+      { k: 'Por qué', v: llano(cuerpo.explicacion) },
+      { k: 'Evidencia', v: ev?.resultado === 'SUPERADO' ? 'La medición (simulada) superó la meta: hicieron clic más personas de las esperadas.' : 'Reuní evidencia suficiente para poder decidir.' },
+      { k: 'Qué descarté', v: 'Ampliar a otro tipo de cliente (todavía sin evidencia) y cambiar el mensaje (arruinaría la prueba en curso).' },
+      { k: 'Qué aprendí', v: 'Funciona en este caso; no lo doy por cierto en general a partir de una sola prueba.' },
+      { k: 'Recomiendo', v: 'Repetir para confirmar antes de invertir más.', tono: 'pos' as const },
+      { k: 'No recomiendo', v: 'Tratarlo como una verdad general ni subir el presupuesto de golpe.', tono: 'neg' as const },
+      { k: 'Si no funciona', v: 'Te lo digo con la misma claridad, vuelvo a la versión anterior y te explico qué aprendí del error.' },
       { k: 'Necesito de ti', v: 'Tu aprobación para preparar la nueva versión del plan.' },
     ],
   };
@@ -83,8 +84,8 @@ export async function objetivos(): Promise<ObjetivoVista[]> {
   const evals = await s.lecturaM8.listarEvaluaciones(c);
   const superado = evals.some((e) => e.resultado === 'SUPERADO' && e.vigente);
   return [
-    { nombre: 'Dar a conocer la marca entre pymes', metaTexto: 'meta CTR 5,0%', avance: superado ? 100 : 60, valor: superado ? 'Vamos por delante — 6,0% observado' : 'En curso', estado: 'en_marcha' },
-    { nombre: 'Bajar el costo por contacto', metaTexto: 'meta 30 días', avance: 34, valor: 'Aún reuniendo evidencia suficiente', estado: 'midiendo' },
+    { nombre: 'Dar a conocer la marca entre pymes', metaTexto: 'Meta: que 5 de cada 100 que lo vean hagan clic', avance: superado ? 100 : 60, valor: superado ? 'Vas por delante: 6 de cada 100 (tu meta eran 5)' : 'En curso', estado: 'en_marcha' },
+    { nombre: 'Bajar el costo por contacto', metaTexto: 'Meta: gastar menos por cada persona que llega, en 30 días', avance: 34, valor: 'Aún reuniendo evidencia suficiente', estado: 'midiendo' },
   ];
 }
 
@@ -100,19 +101,18 @@ export async function salud(): Promise<SaludVista> {
   return { estado: 'normal', titulo: 'Todo en orden', detalle: 'No necesito nada de ti ahora mismo.' };
 }
 
-/** Timeline: qué pasó, en lenguaje de "revisar el trabajo de un empleado". */
-export async function timeline() {
-  const s = await getSoec();
-  const c = s.ctx;
-  const mem = await s.lecturaSoec.memoriaDecisiones(c);
-  const props = await s.lecturaSoec.listarPropuestas(c);
-  const items = [
-    { cuando: 'Hoy', titulo: 'Preparé una propuesta para tu aprobación', detalle: 'Repetir el experimento ganador con más presupuesto.' },
-    { cuando: 'Hoy', titulo: 'Medí resultados y aprendí de la audiencia', detalle: 'CTR 6,0% (meta 5,0%). Naturaleza simulada.' },
-    { cuando: 'Ayer', titulo: 'Ejecuté la campaña de reconocimiento', detalle: 'Todo salió como esperábamos.' },
-    ...mem.map((m) => ({ cuando: 'Hoy', titulo: `Decisión registrada: ${m.decision.toLowerCase()}`, detalle: `Propuesta ${m.propuestaId}.` })),
-  ];
-  return { items, propuestas: props.length };
-}
-
 function capitalizar(t: string): string { return t.charAt(0).toUpperCase() + t.slice(1); }
+
+/**
+ * Traduce a lenguaje llano los tecnicismos que los motores emiten con identificadores técnicos
+ * (p. ej. el KPI 'ctr'). No altera el motor: sólo lo que ve una persona ajena al marketing.
+ */
+function llano(t: string): string {
+  return t
+    .replace(/\bCTR\b/gi, 'clics')
+    .replace(/\bKPI\b/gi, 'medida')
+    .replace(/\bICP\b/gi, 'público objetivo')
+    .replace(/\bhip[oó]tesis\b/gi, 'idea')
+    .replace(/\bexperimento\b/gi, 'prueba')
+    .replace(/\biteraci[oó]n\b/gi, 'paso');
+}

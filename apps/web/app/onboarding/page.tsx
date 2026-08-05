@@ -7,7 +7,7 @@ export default function Onboarding() {
     <div className="wrap panel">
       <p className="eyebrow">Poner a SOEC a trabajar</p>
       <h1 className="voice">Cuéntame lo justo. El resto lo descubro yo.</h1>
-      <p className="lede">Sólo te pregunto lo que nunca podría averiguar solo. Segmentos, mensajes, calendario, métricas y experimentos los aprendo yo.</p>
+      <p className="lede">Sólo te pregunto lo que nunca podría averiguar solo. A quién llegar, qué decir, cuándo publicar, qué medir y qué probar lo descubro yo.</p>
       <form className="card">
         <div className="q"><p className="ask">¿Cómo se llama tu empresa y qué vendes?</p><p className="hint">Con esto empiezo a construir tu contexto.</p>
           <input className="field" name="empresa" placeholder="Ej.: Aurora — software para ordenar la operación de pymes" /></div>

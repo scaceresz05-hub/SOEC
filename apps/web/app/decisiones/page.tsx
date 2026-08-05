@@ -28,11 +28,18 @@ export default async function Decisiones() {
                 <Link href={`/explicaciones/${d.id}`} className="btn ghost">Más información</Link>
               </div>
               <div className="foot">
-                Al aprobar, preparo la nueva versión del plan para la próxima iteración. · <Link href={`/explicaciones/${d.id}`}>Ver la explicación completa →</Link>
+                Al aprobar, preparo la nueva versión del plan para el siguiente paso. · <Link href={`/explicaciones/${d.id}`}>Ver la explicación completa →</Link>
               </div>
             </article>
           ))}
         </div>
+      )}
+      {items.length > 0 && (
+        <p className="lede" style={{ fontSize: '14.5px', marginTop: '16px' }}>
+          ¿Prefieres no decidir esto ahora? Puedo esperar sin bloquear el resto de tu trabajo — no me quedo
+          detenido. Y si quieres que en casos como este actúe sin preguntarte, súbeme la{' '}
+          <Link href="/autonomia">autonomía</Link> y me ocupo yo dentro de tus políticas.
+        </p>
       )}
       <p className="sim">SOEC se <b>abstiene</b> cuando la evidencia no alcanza: sólo te trae decisiones cuando de verdad las necesita.</p>
     </div>

@@ -31,7 +31,6 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           <div className="row">
             <Link href="/objetivos">Objetivos</Link>
             <Link href="/autonomia">Autonomía</Link>
-            <Link href="/timeline">Actividad</Link>
             <Link href="/onboarding">Poner en marcha</Link>
           </div>
         </nav>

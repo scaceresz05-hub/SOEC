@@ -12,7 +12,7 @@ const nextConfig = {
   // PCE-1: la navegación por MOTORES desaparece del producto. El usuario nunca ve módulos internos;
   // cualquier ruta de módulo redirige a la experiencia de Director. (Las páginas quedan inaccesibles.)
   async redirects() {
-    const modulos = ['/evaluacion', '/director-workspace', '/control', '/piloto', '/marketing', '/contenido', '/canales', '/medicion', '/historial'];
+    const modulos = ['/evaluacion', '/director-workspace', '/control', '/piloto', '/marketing', '/contenido', '/canales', '/medicion', '/historial', '/organizaciones', '/select-organization', '/timeline'];
     return [
       ...modulos.map((source) => ({ source, destination: '/', permanent: false })),
       { source: '/director-autonomo/:path*', destination: '/', permanent: false },
