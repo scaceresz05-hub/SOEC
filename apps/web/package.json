@@ -12,7 +12,16 @@
   "dependencies": {
     "next": "15.1.6",
     "react": "19.0.0",
-    "react-dom": "19.0.0"
+    "react-dom": "19.0.0",
+    "@soec/contracts": "workspace:*",
+    "@soec/event-store": "workspace:*",
+    "@soec/motor-estrategico": "workspace:*",
+    "@soec/motor-creativo": "workspace:*",
+    "@soec/estrategia-creativa": "workspace:*",
+    "@soec/contenido": "workspace:*",
+    "@soec/motor-operacion": "workspace:*",
+    "@soec/motor-medicion": "workspace:*",
+    "@soec/motor-optimizacion": "workspace:*"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",

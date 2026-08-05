@@ -1,0 +1,373 @@
+<title>SOEC — Tu Director de Marketing</title>
+<style>
+  :root{
+    --paper:#F7F5F1; --card:#FFFFFF; --ink:#23252A; --ink-soft:#565A62; --ink-faint:#8A8E97;
+    --line:#E7E3DA; --line-soft:#EFEBE2;
+    --brass:#9A6E28; --brass-soft:#B8863B; --brass-wash:#F3ECDD;
+    --ok:#3F7D5E; --ok-wash:#E6F0EA; --warn:#B07A1E; --warn-wash:#F6ECD7; --risk:#B4453A; --risk-wash:#F6E5E2;
+    --shadow:0 1px 2px rgba(30,25,15,.05), 0 8px 24px -12px rgba(30,25,15,.14);
+    --voice:"Iowan Old Style","Charter","Georgia",serif;
+    --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --paper:#14161A; --card:#1B1E23; --ink:#ECEAE4; --ink-soft:#AAB0B8; --ink-faint:#767C85;
+    --line:#2A2E35; --line-soft:#23262C;
+    --brass:#D9A94E; --brass-soft:#C79A45; --brass-wash:#2A2416;
+    --ok:#5FAE85; --ok-wash:#18271F; --warn:#D6A94A; --warn-wash:#282013; --risk:#D2685C; --risk-wash:#2A1A17;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 30px -14px rgba(0,0,0,.6);
+  }}
+  :root[data-theme="dark"]{
+    --paper:#14161A; --card:#1B1E23; --ink:#ECEAE4; --ink-soft:#AAB0B8; --ink-faint:#767C85;
+    --line:#2A2E35; --line-soft:#23262C; --brass:#D9A94E; --brass-soft:#C79A45; --brass-wash:#2A2416;
+    --ok:#5FAE85; --ok-wash:#18271F; --warn:#D6A94A; --warn-wash:#282013; --risk:#D2685C; --risk-wash:#2A1A17;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 30px -14px rgba(0,0,0,.6);
+  }
+  :root[data-theme="light"]{
+    --paper:#F7F5F1; --card:#FFFFFF; --ink:#23252A; --ink-soft:#565A62; --ink-faint:#8A8E97;
+    --line:#E7E3DA; --line-soft:#EFEBE2; --brass:#9A6E28; --brass-soft:#B8863B; --brass-wash:#F3ECDD;
+    --ok:#3F7D5E; --ok-wash:#E6F0EA; --warn:#B07A1E; --warn-wash:#F6ECD7; --risk:#B4453A; --risk-wash:#F6E5E2;
+    --shadow:0 1px 2px rgba(30,25,15,.05), 0 8px 24px -12px rgba(30,25,15,.14);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--ui);line-height:1.55;
+    -webkit-font-smoothing:antialiased;font-size:16px}
+  .wrap{max-width:760px;margin:0 auto;padding:0 20px 96px}
+  /* top bar */
+  header{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--paper) 88%,transparent);
+    backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line-soft)}
+  .bar{max-width:760px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:16px}
+  .mark{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:.02em}
+  .dot{width:22px;height:22px;border-radius:7px;background:
+    radial-gradient(120% 120% at 30% 25%,var(--brass-soft),var(--brass));box-shadow:inset 0 0 0 1px rgba(0,0,0,.06)}
+  .mark small{font-family:var(--ui);font-weight:500;color:var(--ink-faint);font-size:11px;
+    text-transform:uppercase;letter-spacing:.14em;display:block;line-height:1}
+  nav.tabs{margin-left:auto;display:flex;gap:2px;flex-wrap:wrap}
+  nav.tabs button{font:inherit;font-size:13.5px;color:var(--ink-soft);background:none;border:0;cursor:pointer;
+    padding:7px 12px;border-radius:8px;position:relative}
+  nav.tabs button:hover{color:var(--ink);background:var(--line-soft)}
+  nav.tabs button[aria-selected="true"]{color:var(--ink);font-weight:600}
+  nav.tabs button[aria-selected="true"]::after{content:"";position:absolute;left:12px;right:12px;bottom:-1px;
+    height:2px;border-radius:2px;background:var(--brass)}
+  .theme{border:1px solid var(--line);background:var(--card);color:var(--ink-soft);border-radius:8px;
+    width:32px;height:32px;cursor:pointer;font-size:14px;display:grid;place-items:center}
+  /* voice + eyebrow */
+  .eyebrow{font-size:11.5px;text-transform:uppercase;letter-spacing:.16em;color:var(--brass);font-weight:600;
+    margin:0 0 10px}
+  .voice{font-family:var(--voice);font-weight:400}
+  section.panel{padding-top:34px}section.panel[hidden]{display:none}
+  h1{font-family:var(--voice);font-weight:500;font-size:30px;line-height:1.18;margin:0 0 6px;text-wrap:balance;
+    letter-spacing:-.01em}
+  .lede{font-family:var(--voice);font-size:19px;color:var(--ink-soft);margin:0 0 26px;text-wrap:pretty}
+  h2.block{font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--ink-faint);font-weight:600;
+    margin:34px 0 12px;display:flex;align-items:center;gap:10px}
+  h2.block::after{content:"";flex:1;height:1px;background:var(--line-soft)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 18px;box-shadow:var(--shadow)}
+  .stack{display:flex;flex-direction:column;gap:12px}
+  /* work-done timeline */
+  .did{display:grid;grid-template-columns:auto 1fr;gap:14px;padding:14px 2px}
+  .did+.did{border-top:1px solid var(--line-soft)}
+  .tick{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-size:14px;flex:none}
+  .tick.ok{background:var(--ok-wash);color:var(--ok)} .tick.learn{background:var(--brass-wash);color:var(--brass)}
+  .tick.run{background:var(--line-soft);color:var(--ink-soft)}
+  .did p{margin:0} .did .t{font-weight:600;font-size:15px} .did .s{color:var(--ink-soft);font-size:14px}
+  .did time{color:var(--ink-faint);font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  /* decision card */
+  .decision{border-left:3px solid var(--brass)}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;letter-spacing:.03em;
+    padding:3px 9px;border-radius:100px;text-transform:uppercase}
+  .pill.warn{background:var(--warn-wash);color:var(--warn)} .pill.ok{background:var(--ok-wash);color:var(--ok)}
+  .pill.risk{background:var(--risk-wash);color:var(--risk)} .pill.mut{background:var(--line-soft);color:var(--ink-soft)}
+  .decision h3{font-family:var(--voice);font-weight:500;font-size:20px;margin:12px 0 6px;letter-spacing:-.01em}
+  .decision .why{color:var(--ink-soft);font-size:15px;margin:0 0 14px}
+  .why b{color:var(--ink);font-weight:600}
+  .actions{display:flex;gap:8px;flex-wrap:wrap}
+  .btn{font:inherit;font-size:14px;font-weight:600;padding:9px 15px;border-radius:9px;border:1px solid var(--line);
+    background:var(--card);color:var(--ink);cursor:pointer;transition:transform .06s ease}
+  .btn:active{transform:translateY(1px)} .btn:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+  .btn.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  .btn.ghost{color:var(--ink-soft)}
+  .foot{margin-top:14px;padding-top:13px;border-top:1px dashed var(--line);font-size:13px;color:var(--ink-faint);
+    display:flex;gap:8px;align-items:center}
+  .link{color:var(--brass);font-weight:600;background:none;border:0;cursor:pointer;font:inherit;font-size:13px;padding:0}
+  .link:hover{text-decoration:underline}
+  /* objective */
+  .obj{display:grid;grid-template-columns:1fr auto;gap:6px 16px;align-items:baseline}
+  .obj .name{font-weight:600;font-size:15px} .obj .meta{color:var(--ink-faint);font-size:13px;
+    font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+  .obj .val{font-family:var(--voice);font-size:15px;color:var(--ink-soft)}
+  .track{grid-column:1/-1;height:7px;border-radius:100px;background:var(--line-soft);overflow:hidden;margin:6px 0 2px}
+  .track>i{display:block;height:100%;border-radius:100px;background:linear-gradient(90deg,var(--brass-soft),var(--brass))}
+  .obj+.obj{margin-top:18px;padding-top:18px;border-top:1px solid var(--line-soft)}
+  /* explanation ledger */
+  .exp{display:grid;grid-template-columns:150px 1fr;gap:2px 18px}
+  .exp dt{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink-faint);font-weight:600;padding:11px 0}
+  .exp dd{margin:0;padding:11px 0;font-size:15px;color:var(--ink);border-top:1px solid var(--line-soft)}
+  .exp dt{border-top:1px solid var(--line-soft)}
+  .exp dt:first-of-type,.exp dd:first-of-type{border-top:0}
+  .exp .neg{color:var(--risk)} .exp .pos{color:var(--ok)}
+  /* onboarding */
+  .q{padding:16px 0} .q+.q{border-top:1px solid var(--line-soft)}
+  .q .ask{font-family:var(--voice);font-size:18px;margin:0 0 4px} .q .hint{color:var(--ink-faint);font-size:13.5px;margin:0}
+  .field{margin-top:10px;width:100%;font:inherit;font-size:15px;padding:10px 12px;border-radius:9px;
+    border:1px solid var(--line);background:var(--paper);color:var(--ink)}
+  .choices{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .chip{font:inherit;font-size:13.5px;padding:8px 13px;border-radius:100px;border:1px solid var(--line);
+    background:var(--card);color:var(--ink-soft);cursor:pointer}
+  .chip[aria-pressed="true"]{border-color:var(--brass);color:var(--ink);background:var(--brass-wash);font-weight:600}
+  .note{background:var(--brass-wash);border:1px solid color-mix(in srgb,var(--brass) 30%,transparent);
+    border-radius:12px;padding:14px 16px;font-size:14px;color:var(--ink);display:flex;gap:11px}
+  .note .dot{margin-top:2px;flex:none}
+  /* autonomy levels */
+  .lvl{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:15px 16px;
+    border:1px solid var(--line);border-radius:13px;cursor:pointer;background:var(--card);text-align:left;width:100%;font:inherit}
+  .lvl+.lvl{margin-top:9px}
+  .lvl[aria-checked="true"]{border-color:var(--brass);box-shadow:0 0 0 1px var(--brass) inset}
+  .radio{width:20px;height:20px;border-radius:50%;border:2px solid var(--line);flex:none;display:grid;place-items:center}
+  .lvl[aria-checked="true"] .radio{border-color:var(--brass)}
+  .lvl[aria-checked="true"] .radio::after{content:"";width:9px;height:9px;border-radius:50%;background:var(--brass)}
+  .lvl .lt{font-weight:600;font-size:15.5px} .lvl .ls{color:var(--ink-soft);font-size:13.5px;margin-top:1px}
+  /* toast */
+  #toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);opacity:0;pointer-events:none;
+    background:var(--ink);color:var(--paper);padding:12px 18px;border-radius:11px;font-size:14px;font-weight:500;
+    box-shadow:var(--shadow);transition:opacity .25s ease,transform .25s ease;z-index:50;max-width:88vw;text-align:center}
+  #toast.on{opacity:1;transform:translate(-50%,0)}
+  .sim{font-size:11.5px;color:var(--ink-faint);text-align:center;margin-top:40px;padding-top:18px;
+    border-top:1px solid var(--line-soft)}
+  .sim b{color:var(--brass)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  @media (max-width:560px){h1{font-size:25px}.exp{grid-template-columns:1fr}.exp dt{padding-bottom:0;border-top:1px solid var(--line-soft)}.exp dd{padding-top:3px;border-top:0}.bar{flex-wrap:wrap}}
+</style>
+
+<header>
+  <div class="bar">
+    <span class="mark"><span class="dot" aria-hidden="true"></span><span>SOEC<small>Dirección de Marketing</small></span></span>
+    <nav class="tabs" role="tablist" aria-label="Secciones">
+      <button role="tab" aria-selected="true" data-tab="inicio">Inicio</button>
+      <button role="tab" aria-selected="false" data-tab="decisiones">Decisiones <span id="badge" style="color:var(--brass);font-weight:700">·2</span></button>
+      <button role="tab" aria-selected="false" data-tab="porque">Por qué</button>
+      <button role="tab" aria-selected="false" data-tab="autonomia">Autonomía</button>
+      <button role="tab" aria-selected="false" data-tab="onboarding">Poner en marcha</button>
+    </nav>
+    <button class="theme" id="theme" title="Cambiar tema" aria-label="Cambiar tema">◐</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- INICIO -->
+  <section class="panel" id="inicio" role="tabpanel">
+    <p class="eyebrow">Jueves 4 de agosto · 08:12</p>
+    <h1>Buenos días, Sebastián.</h1>
+    <p class="lede">Mientras no estabas, avancé en tus objetivos y dejé listas dos decisiones que sólo tú puedes tomar.</p>
+
+    <h2 class="block">Lo que hice por ti</h2>
+    <div class="card stack" style="padding:6px 16px">
+      <div class="did"><span class="tick ok" aria-hidden="true">✓</span>
+        <div><p class="t">Publiqué la campaña de reconocimiento para pymes</p>
+        <p class="s">3 piezas, aprobadas y vigentes. Todo salió como esperábamos.</p></div><time>ayer 21:40</time></div>
+      <div class="did"><span class="tick learn" aria-hidden="true">✦</span>
+        <div><p class="t">Aprendí algo sobre tu audiencia</p>
+        <p class="s">El gancho directo mejoró el CTR frente al descriptivo. Todavía es un solo experimento — no lo doy por general.</p></div><time>hoy 03:10</time></div>
+      <div class="did"><span class="tick run" aria-hidden="true">↻</span>
+        <div><p class="t">Medí resultados y preparé la próxima iteración</p>
+        <p class="s">CTR observado 6,0% (meta 5,0%). Naturaleza simulada — no representa dinero real todavía.</p></div><time>hoy 03:12</time></div>
+    </div>
+
+    <h2 class="block">Necesito tu decisión</h2>
+    <div class="stack">
+      <article class="card decision">
+        <span class="pill warn">Requiere aprobación</span>
+        <h3>Repetir el experimento ganador, con más presupuesto</h3>
+        <p class="why">El gancho directo superó la meta de CTR. Propongo <b>repetirlo una vez más</b> antes de generalizar, con <b>+10 unidades</b> de presupuesto simulado. Riesgo bajo, reversible.</p>
+        <div class="actions">
+          <button class="btn primary" data-act="Aprobado. Preparo la nueva versión del plan.">Aprobar</button>
+          <button class="btn" data-act="Rechazado. No repetiré este experimento.">Rechazar</button>
+          <button class="btn ghost" data-act="Anotado: quieres más información antes de decidir.">Más información</button>
+          <button class="btn ghost" data-act="Pospuesto. Te lo recuerdo mañana.">Posponer</button>
+        </div>
+        <div class="foot">Basado en 1 experimento respaldado · <button class="link" data-goto="porque">Ver por qué lo recomiendo →</button></div>
+      </article>
+
+      <article class="card decision" style="border-left-color:var(--ink-faint)">
+        <span class="pill mut">No recomiendo actuar aún</span>
+        <h3>Ampliar a un segundo segmento (empresas medianas)</h3>
+        <p class="why">Hay una oportunidad, pero <b>la evidencia todavía es insuficiente</b> para ese segmento. Mi recomendación es <b>esperar</b>; te la muestro para que la conozcas, no para que actúes.</p>
+        <div class="actions">
+          <button class="btn" data-act="De acuerdo: esperamos más evidencia.">Mantener en espera</button>
+          <button class="btn ghost" data-act="Anotado: quieres forzar la ampliación pese a la evidencia.">Ampliar de todos modos</button>
+        </div>
+        <div class="foot">SOEC se abstiene cuando la evidencia no alcanza.</div>
+      </article>
+    </div>
+
+    <h2 class="block">Tus objetivos</h2>
+    <div class="card">
+      <div class="obj">
+        <div class="name">Dar a conocer la marca entre pymes</div>
+        <div class="meta">meta CTR 5,0%</div>
+        <div class="track"><i style="width:100%"></i></div>
+        <div class="val">Vamos por delante — 6,0% observado</div>
+        <div class="meta"><span class="pill ok" style="font-size:10.5px">En marcha</span></div>
+      </div>
+      <div class="obj">
+        <div class="name">Bajar el costo por contacto</div>
+        <div class="meta">meta 30 días</div>
+        <div class="track"><i style="width:34%"></i></div>
+        <div class="val">Aún reuniendo evidencia suficiente</div>
+        <div class="meta"><span class="pill mut" style="font-size:10.5px">Midiendo</span></div>
+      </div>
+    </div>
+    <p class="sim">Datos ilustrativos y <b>SIMULADOS</b>. SOEC no gasta, publica ni ejecuta nada real: propone, tú decides, y la aplicación crea una nueva versión del plan para revisión.</p>
+  </section>
+
+  <!-- DECISIONES -->
+  <section class="panel" id="decisiones" role="tabpanel" hidden>
+    <p class="eyebrow">Bandeja de decisiones</p>
+    <h1>Sólo lo que requiere tu criterio.</h1>
+    <p class="lede">Aquí no hay tareas ni operaciones — sólo decisiones que necesitan una persona. Del resto me ocupo yo.</p>
+    <div class="stack">
+      <article class="card decision">
+        <span class="pill warn">Requiere aprobación</span>
+        <h3>Repetir el experimento ganador, con más presupuesto</h3>
+        <p class="why">Recomiendo repetir el gancho directo (superó la meta) antes de generalizar. Coste simulado +10, riesgo bajo, reversible. Alcance: local a este experimento.</p>
+        <div class="actions">
+          <button class="btn primary" data-act="Aprobado. Preparo la nueva versión del plan.">Aprobar</button>
+          <button class="btn" data-act="Rechazado.">Rechazar</button>
+          <button class="btn ghost" data-act="Anotado: más información.">Más información</button>
+          <button class="btn ghost" data-act="Pospuesto.">Posponer</button>
+        </div>
+        <div class="foot"><button class="link" data-goto="porque">Ver la explicación completa →</button></div>
+      </article>
+      <article class="card decision" style="border-left-color:var(--risk)">
+        <span class="pill risk">Riesgo detectado</span>
+        <h3>Un cambio de rumbo repetido (ir y volver)</h3>
+        <p class="why">Detecté que estaríamos <b>alternando entre dos planes</b> sin evidencia nueva. Bloqueé el cambio automático para evitar oscilar. ¿Confirmas que quieres forzarlo?</p>
+        <div class="actions">
+          <button class="btn" data-act="Mantengo el bloqueo. Gracias por avisar.">Mantener bloqueo</button>
+          <button class="btn ghost" data-act="Anotado: forzar el cambio pese al riesgo de oscilación.">Forzar el cambio</button>
+        </div>
+        <div class="foot">Guarda de oscilación · te protejo de decisiones reactivas.</div>
+      </article>
+    </div>
+  </section>
+
+  <!-- POR QUÉ -->
+  <section class="panel" id="porque" role="tabpanel" hidden>
+    <p class="eyebrow">Por qué lo recomiendo</p>
+    <h1 class="voice">Repetir el experimento ganador.</h1>
+    <p class="lede">Toda recomendación mía viene con su razonamiento completo. Si algo no te convence, aquí está el detalle.</p>
+    <div class="card">
+      <dl class="exp">
+        <dt>Qué hice</dt><dd>Ejecuté (simulado) la campaña con el gancho directo y medí el CTR.</dd>
+        <dt>Por qué</dt><dd>El resultado superó la meta (6,0% vs 5,0%) con evidencia a favor dominante.</dd>
+        <dt>Evidencia</dt><dd>1 evaluación respaldada, calidad alta, cobertura completa.</dd>
+        <dt>Qué descarté</dt><dd>Ampliar a otro segmento (evidencia insuficiente) y cambiar el mensaje (multi-variable: rompería el experimento).</dd>
+        <dt>Qué aprendí</dt><dd>El gancho directo funciona <em>en este contexto</em>. No lo generalizo desde un solo experimento.</dd>
+        <dt>Recomiendo</dt><dd class="pos">Repetir una vez más para confirmar antes de escalar.</dd>
+        <dt>No recomiendo</dt><dd class="neg">Tratarlo como verdad general ni subir el presupuesto de golpe.</dd>
+        <dt>Necesito de ti</dt><dd>Tu aprobación para preparar la nueva versión del plan.</dd>
+      </dl>
+    </div>
+    <div class="note" style="margin-top:16px"><span class="dot" aria-hidden="true"></span>
+      <span>Una correlación no es causalidad y una mejora simulada no es evidencia de mejora real. Por eso propongo repetir, no dar por cerrado.</span></div>
+  </section>
+
+  <!-- AUTONOMÍA -->
+  <section class="panel" id="autonomia" role="tabpanel" hidden>
+    <p class="eyebrow">Cuánto quieres delegarme</p>
+    <h1>¿Cuánto me dejas decidir solo?</h1>
+    <p class="lede">Tú fijas el límite. Puedo sólo mirar, recomendarte, actuar con tu visto bueno, o actuar solo dentro de tus políticas. Puedes cambiarlo cuando quieras.</p>
+    <div role="radiogroup" aria-label="Nivel de autonomía">
+      <button class="lvl" role="radio" aria-checked="false" data-lvl="Solo observar">
+        <span class="radio" aria-hidden="true"></span>
+        <span><span class="lt">Solo observar</span><span class="ls" style="display:block">Miro y aprendo. No propongo nada.</span></span>
+        <span class="pill mut">Mínimo</span></button>
+      <button class="lvl" role="radio" aria-checked="false" data-lvl="Recomendar">
+        <span class="radio" aria-hidden="true"></span>
+        <span><span class="lt">Recomendar</span><span class="ls" style="display:block">Te traigo propuestas; tú decides todo.</span></span>
+        <span class="pill mut">Prudente</span></button>
+      <button class="lvl" role="radio" aria-checked="true" data-lvl="Ejecutar con aprobación">
+        <span class="radio" aria-hidden="true"></span>
+        <span><span class="lt">Ejecutar con tu aprobación</span><span class="ls" style="display:block">Preparo los cambios y los aplico cuando das el visto bueno.</span></span>
+        <span class="pill ok">Actual</span></button>
+      <button class="lvl" role="radio" aria-checked="false" data-lvl="Ejecutar automáticamente dentro de tus políticas">
+        <span class="radio" aria-hidden="true"></span>
+        <span><span class="lt">Ejecutar automáticamente</span><span class="ls" style="display:block">Actúo solo dentro de tus políticas; te aviso de excepciones y riesgos.</span></span>
+        <span class="pill warn">Máximo</span></button>
+    </div>
+    <div class="note" style="margin-top:18px"><span class="dot" aria-hidden="true"></span>
+      <span>Sea cual sea el nivel, cualquier acción con efecto real seguirá exigiendo tu ratificación. Hoy todo ocurre en modo simulado.</span></div>
+  </section>
+
+  <!-- ONBOARDING -->
+  <section class="panel" id="onboarding" role="tabpanel" hidden>
+    <p class="eyebrow">Poner a SOEC a trabajar</p>
+    <h1>Cuéntame lo justo. El resto lo descubro yo.</h1>
+    <p class="lede">Sólo te pregunto lo que nunca podría averiguar solo. Segmentos, mensajes, calendario, métricas y experimentos los aprendo yo.</p>
+    <div class="card">
+      <div class="q"><p class="ask">¿Cómo se llama tu empresa y qué vendes?</p><p class="hint">Con esto empiezo a construir tu contexto.</p>
+        <input class="field" placeholder="Ej.: Aurora — software para ordenar la operación de pymes"></div>
+      <div class="q"><p class="ask">¿Cuál es tu objetivo ahora?</p><p class="hint">Trabajo para cumplir objetivos, no para lanzar campañas.</p>
+        <div class="choices"><button class="chip" aria-pressed="true">Darme a conocer</button><button class="chip">Conseguir contactos</button><button class="chip">Vender más</button><button class="chip">Bajar el costo por contacto</button></div></div>
+      <div class="q"><p class="ask">¿Cuánto presupuesto le asignas?</p><p class="hint">Lo respeto siempre; si algo no cabe, me abstengo.</p>
+        <input class="field" placeholder="Ej.: 500 / mes (simulado por ahora)"></div>
+      <div class="q"><p class="ask">¿Hay algo que NO deba hacer?</p><p class="hint">Tus restricciones son ley para mí.</p>
+        <input class="field" placeholder="Ej.: no prometer resultados; no usar la palabra ‘garantizado’"></div>
+      <div class="q"><p class="ask">¿Qué me autorizas a hacer solo, y qué quieres aprobar tú?</p><p class="hint">Esto fija tu nivel de autonomía; lo cambias cuando quieras.</p>
+        <div class="choices"><button class="chip">Solo observar</button><button class="chip">Recomendar</button><button class="chip" aria-pressed="true">Ejecutar con mi aprobación</button><button class="chip">Ejecutar solo</button></div></div>
+    </div>
+    <div style="margin-top:16px" class="actions"><button class="btn primary" data-act="Listo. Empiezo a trabajar y te aviso cuando tenga algo que mostrarte.">Empezar a trabajar</button></div>
+    <p class="sim">Cinco preguntas. Nada de configurar módulos: SOEC no te pide lo que puede <b>obtener, inferir, aprender, medir o descubrir</b> por sí mismo.</p>
+  </section>
+
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  var tabs=[].slice.call(document.querySelectorAll('nav.tabs button'));
+  var panels={inicio:'inicio',decisiones:'decisiones',porque:'porque',autonomia:'autonomia',onboarding:'onboarding'};
+  function show(id){
+    tabs.forEach(function(b){b.setAttribute('aria-selected', b.dataset.tab===id?'true':'false');});
+    Object.keys(panels).forEach(function(k){document.getElementById(k).hidden = (k!==id);});
+    window.scrollTo({top:0,behavior:'instant'});
+  }
+  tabs.forEach(function(b){b.addEventListener('click',function(){show(b.dataset.tab);});});
+  document.addEventListener('click',function(e){
+    var g=e.target.closest('[data-goto]'); if(g){show(g.dataset.goto);}
+  });
+
+  var toast=document.getElementById('toast'),tt;
+  function say(msg){toast.textContent=msg;toast.classList.add('on');clearTimeout(tt);tt=setTimeout(function(){toast.classList.remove('on');},2600);}
+  document.addEventListener('click',function(e){
+    var a=e.target.closest('[data-act]'); if(a){say(a.dataset.act);}
+  });
+
+  // autonomy radio
+  var lvls=[].slice.call(document.querySelectorAll('.lvl'));
+  lvls.forEach(function(l){l.addEventListener('click',function(){
+    lvls.forEach(function(x){x.setAttribute('aria-checked','false');});
+    l.setAttribute('aria-checked','true');
+    say('Nivel actualizado: “'+l.dataset.lvl+'”. Lo tendré en cuenta.');
+  });});
+
+  // chips
+  document.querySelectorAll('.choices').forEach(function(group){
+    group.addEventListener('click',function(e){
+      var c=e.target.closest('.chip'); if(!c)return;
+      group.querySelectorAll('.chip').forEach(function(x){x.setAttribute('aria-pressed','false');});
+      c.setAttribute('aria-pressed','true');
+    });
+  });
+
+  // theme toggle
+  var root=document.documentElement,tb=document.getElementById('theme');
+  tb.addEventListener('click',function(){
+    var dark = root.getAttribute('data-theme')==='dark' ||
+      (!root.getAttribute('data-theme') && matchMedia('(prefers-color-scheme:dark)').matches);
+    root.setAttribute('data-theme', dark?'light':'dark');
+  });
+})();
+</script>

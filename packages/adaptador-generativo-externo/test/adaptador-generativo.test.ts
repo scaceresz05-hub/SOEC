@@ -52,7 +52,7 @@ describe('@soec/adaptador-generativo-externo · carcasa desactivada', () => {
     const reg: RegistroAdaptador = {
       organizationId: 'org-a', adaptadorId: ad.nombre, capacidadId: 'generacion-contenido', contratoId: 'generacion', contratoVersion: '1.0.0', implementacionVersion: '0.1.0',
       estado: 'AUTORIZADO', modo: 'REAL', secretRef: 'env:GEN', salud: 'SALUDABLE', compatibilidad: null, limites: null, circuitBreaker: CIRCUIT_BREAKER_CERRADO,
-      expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, descriptor, creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4,
+      expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, descriptor, nivelActivacion: 'SIMULADO', creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4,
     };
     // Ataque: monkey-patch de la instancia para intentar habilitar REAL.
     (ad as unknown as { soportaReal: () => boolean }).soportaReal = () => true;

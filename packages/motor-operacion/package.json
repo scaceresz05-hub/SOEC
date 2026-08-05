@@ -1,0 +1,17 @@
+{
+  "name": "@soec/motor-operacion",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "dependencies": {
+    "@soec/contracts": "workspace:*",
+    "@soec/motor-creativo": "workspace:*",
+    "@soec/adaptadores": "workspace:*",
+    "@soec/control": "workspace:*",
+    "@soec/plataforma-capacidades": "workspace:*"
+  },
+  "devDependencies": { "@soec/event-store": "workspace:*", "@soec/motor-estrategico": "workspace:*", "@soec/estrategia-creativa": "workspace:*", "@soec/contenido": "workspace:*" }
+}

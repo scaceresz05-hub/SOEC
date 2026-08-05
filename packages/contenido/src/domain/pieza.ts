@@ -17,6 +17,29 @@ export type EstadoPieza =
   | 'reemplazada'
   | 'archivada';
 
+/** Formatos creativos NEUTRALES (M6): intención/estructura, sin adaptar aún a canal/SDK. */
+export type FormatoPieza =
+  | 'publicacion_social'
+  | 'carrusel'
+  | 'video_corto'
+  | 'articulo'
+  | 'email'
+  | 'anuncio'
+  | 'landing'
+  | 'guion'
+  | 'pieza_educativa';
+
+/** Traza epistémica AUTORITATIVA de una afirmación usada en la pieza (M6): rastreable hasta M5. */
+export interface TrazaAfirmacion {
+  readonly afirmacionId: string;
+  readonly version: number;
+  readonly estado: string; // EstadoEvaluabilidad de M5 (tipado por el productor M6)
+  readonly sentido: string; // A_FAVOR / EN_CONTRA
+  readonly vigencia: 'VIGENTE' | 'OBSOLETO';
+  readonly proposito: string; // para qué se usa la afirmación
+  readonly mensajeId: string; // dónde aparece
+}
+
 export interface PiezaFuente {
   readonly version: number;
   readonly tituloInterno: string;
@@ -34,6 +57,23 @@ export interface PiezaFuente {
   /** Procedencia: qué versión de prompt/proveedor la produjo. */
   readonly procedencia: string;
   readonly estado: EstadoPieza;
+  // ── M6 · gobernanza creativa (ampliación ADITIVA; opcional) ──
+  readonly formato?: FormatoPieza;
+  readonly objetivo?: string;
+  readonly segmento?: string;
+  readonly briefId?: string;
+  readonly territorioId?: string;
+  readonly estrategiaCreativaId?: string;
+  readonly mensajesUtilizados?: readonly string[];
+  /** Referencias VERSIONADAS a afirmaciones de M5 (base de obsolescencia). */
+  readonly referenciasM5?: readonly { readonly afirmacionId: string; readonly version: number }[];
+  readonly resultadoValidacion?: 'VALIDO' | 'INVALIDO' | 'REQUIERE_REVISION';
+  readonly versionConocimiento?: number;
+  readonly naturaleza?: 'SIMULADO';
+  /** Traza autoritativa: cada afirmación usada, rastreable hasta M5. */
+  readonly trazabilidad?: readonly TrazaAfirmacion[];
+  /** Vigencia MATERIALIZADA respecto de M5 (la autoridad es la derivación; esto es su caché honesta). */
+  readonly vigencia?: 'VIGENTE' | 'OBSOLETO' | 'REQUIERE_REVISION';
 }
 
 const TRANSICIONES_PIEZA: Readonly<Record<EstadoPieza, readonly EstadoPieza[]>> = {

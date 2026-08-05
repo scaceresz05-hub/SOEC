@@ -14,6 +14,7 @@ import {
   type LimiteConcurrencia,
 } from './operativo-tipos';
 import type { DescriptorAdaptador } from './descriptor';
+import type { NivelActivacion } from '../m4d/activacion';
 
 export type EstadoRegistroAdaptador =
   | 'REGISTRADO'
@@ -47,6 +48,7 @@ export interface RegistroAdaptador {
   readonly revocadoMotivo: string | null;
   readonly reemplazadoPor: string | null;
   readonly descriptor: DescriptorAdaptador | null; // autoridad de capacidades (M4-C-C)
+  readonly nivelActivacion: NivelActivacion; // activación progresiva (M4-D); nace SIMULADO
   readonly creadoPor: string | null;
   readonly actualizadoPor: string | null;
   readonly existe: boolean;
@@ -72,6 +74,7 @@ export const EVENTOS_ADAPTADOR = {
   descriptorRegistrado: 'adaptador.descriptor_registrado',
   descriptorActualizado: 'adaptador.descriptor_actualizado',
   descriptorReemplazado: 'adaptador.descriptor_reemplazado',
+  nivelCambiado: 'adaptador.nivel_cambiado',
 } as const;
 
 export function adaptadorStreamId(org: string, adaptadorId: string): string {
@@ -97,6 +100,7 @@ export function estadoInicialAdaptadorRegistro(org: string, adaptadorId: string)
     revocadoMotivo: null,
     reemplazadoPor: null,
     descriptor: null,
+    nivelActivacion: 'SIMULADO',
     creadoPor: null,
     actualizadoPor: null,
     existe: false,
@@ -183,6 +187,8 @@ export function aplicarAdaptador(state: RegistroAdaptador, ev: RecordedEvent): R
     case EVENTOS_ADAPTADOR.descriptorActualizado:
     case EVENTOS_ADAPTADOR.descriptorReemplazado:
       return { ...next, descriptor: p.descriptor as DescriptorAdaptador, actualizadoPor: actor };
+    case EVENTOS_ADAPTADOR.nivelCambiado:
+      return { ...next, nivelActivacion: p.nivel as NivelActivacion, actualizadoPor: actor };
     default:
       return next;
   }

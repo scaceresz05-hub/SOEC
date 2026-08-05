@@ -9,7 +9,7 @@
 import type { RequestContext } from '@soec/contracts';
 import type { AdaptadorExterno, EstadoSalud, SalidaAdaptador, SaludReporte, SolicitudAdaptador } from '../port/adaptador-externo';
 import { claveGrabacion } from '../domain/evidencia';
-import { errorNormalizado } from '../domain/errores-normalizados';
+import { errorAborto, errorNormalizado } from '../domain/errores-normalizados';
 
 /** Grabaciones indexadas por la clave scoped `claveGrabacion(org, capacidadId, version, peticion)`. */
 export type Grabaciones = Readonly<Record<string, Readonly<Record<string, string>>>>;
@@ -33,10 +33,7 @@ export class AdaptadorGrabado implements AdaptadorExterno {
   }
 
   async ejecutar(ctx: RequestContext, solicitud: SolicitudAdaptador, signal?: AbortSignal): Promise<SalidaAdaptador> {
-    if (signal?.aborted) {
-      const clase = signal.reason === 'timeout' ? 'TIMEOUT' : 'CANCELADO';
-      return { estado: 'ERROR', salida: null, error: errorNormalizado(clase, clase === 'TIMEOUT' ? 'se agotó el plazo' : 'ejecución cancelada') };
-    }
+    if (signal?.aborted) return { estado: 'ERROR', salida: null, error: errorAborto(signal.reason) };
     const clave = claveGrabacion(String(ctx.organizationId), solicitud.capacidadId, this.version, solicitud.peticion);
     const salida = this.#grabaciones.get(clave);
     if (!salida) return { estado: 'ERROR', salida: null, error: errorNormalizado('NO_DISPONIBLE', 'no hay grabación para la solicitud (tenant/capacidad/versión)') };

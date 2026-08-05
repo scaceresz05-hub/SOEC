@@ -38,6 +38,11 @@ export function errorNormalizado(clase: ClaseErrorAdaptador, mensaje: string): E
   return { clase, mensaje, reintentable: REINTENTABLES.has(clase) };
 }
 
+/** Error normalizado por señal abortada: TIMEOUT si `reason === 'timeout'`, CANCELADO en otro caso. */
+export function errorAborto(reason: unknown): ErrorNormalizado {
+  return reason === 'timeout' ? errorNormalizado('TIMEOUT', 'se agotó el plazo') : errorNormalizado('CANCELADO', 'ejecución cancelada');
+}
+
 /**
  * Traduce una excepción arbitraria a la taxonomía sin filtrar contenido sensible. Reconoce la cancelación
  * (`AbortError` / señal abortada) y, por defecto, clasifica como DESCONOCIDO con un mensaje genérico —

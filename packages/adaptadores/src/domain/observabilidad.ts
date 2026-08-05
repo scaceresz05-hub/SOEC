@@ -8,14 +8,14 @@ import type { ClaseErrorAdaptador } from './errores-normalizados';
 import type { EstadoRegistroAdaptador, SaludRegistro } from './registro-adaptador';
 import type { EstadoBreaker } from './operativo-tipos';
 
-export const EVIDENCIA_OPERATIVA_VERSION = 3;
+export const EVIDENCIA_OPERATIVA_VERSION = 4;
 export const EVIDENCIA_INTENTO_VERSION = 1;
 
 export type NaturalezaDuracion = 'REAL' | 'ESTIMADA' | 'SIMULADA';
 export type ModoIntencion = 'SIMULADO' | 'REAL';
 
 /** Gate que produjo un rechazo (temprano o reevaluado). `null` si la ejecución llegó al sandbox con éxito de gates. */
-export type GateRechazo = 'CICLO_VIDA' | 'MODO_REAL' | 'INTEGRIDAD' | 'COMPATIBILIDAD' | 'SALUD' | 'BREAKER' | 'SEMIABIERTO' | 'CONCURRENCIA' | 'CANCELACION' | null;
+export type GateRechazo = 'CICLO_VIDA' | 'MODO_REAL' | 'ACTIVACION' | 'INTEGRIDAD' | 'COMPATIBILIDAD' | 'SALUD' | 'BREAKER' | 'SEMIABIERTO' | 'CONCURRENCIA' | 'PRESUPUESTO' | 'CANCELACION' | null;
 
 export interface EvidenciaOperativa {
   readonly evidenciaVersion: number;
@@ -28,6 +28,7 @@ export interface EvidenciaOperativa {
   readonly descriptorVersion: number | null;
   readonly descriptorHuella: string | null;
   readonly estado: EstadoRegistroAdaptador;
+  readonly nivelActivacion: string;
   readonly salud: SaludRegistro;
   readonly modoSolicitado: ModoIntencion;
   readonly modoAutorizado: ModoIntencion;

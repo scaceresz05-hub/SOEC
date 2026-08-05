@@ -33,7 +33,7 @@ const politicaRetry = { habilitado: true, maxIntentos: 4, erroresReintentables: 
 const reg = (over: Partial<RegistroAdaptador> = {}): RegistroAdaptador => ({
   organizationId: 'org-a', adaptadorId: 'gen-1', capacidadId: 'gen', contratoId: 'gen', contratoVersion: '1.0.0', implementacionVersion: '1.0.0',
   estado: 'AUTORIZADO', modo: 'SIMULADO', secretRef: 'env:GEN', salud: 'SALUDABLE', compatibilidad: null, limites: null, circuitBreaker: CIRCUIT_BREAKER_CERRADO,
-  expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, descriptor: null, creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4, ...over,
+  expiraEn: null, revocadoMotivo: null, reemplazadoPor: null, descriptor: null, nivelActivacion: 'SIMULADO', creadoPor: 'ana', actualizadoPor: 'ana-h', existe: true, terminada: false, version: 4, ...over,
 });
 // Adaptador que siempre falla con error reintentable → fuerza el bucle de retry.
 const fallaReintentable = (): AdaptadorExterno => ({

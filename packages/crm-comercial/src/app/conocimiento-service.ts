@@ -32,6 +32,10 @@ const MAPA_TIPO: Record<TipoPerfil, TipoEntidad> = {
   CLIENTE_IDEAL: 'PUBLICO',
   COMPETIDOR: 'COMPETIDOR',
   MERCADO: 'MERCADO',
+  // M5 (aditivos): la existencia canónica sigue en @soec/negocio (SSOT), por el MISMO id.
+  BUYER_PERSONA: 'BUYER_PERSONA',
+  PROPUESTA_VALOR: 'PROPUESTA_VALOR',
+  KPI: 'INDICADOR',
 };
 
 export class ConocimientoComercialService {

@@ -10,7 +10,17 @@
 import type { RecordedEvent } from '@soec/contracts';
 import { type Confianza, type TipoEvidencia, confianzaPorDefecto } from '@soec/negocio';
 
-export type TipoPerfil = 'EMPRESA' | 'PRODUCTO' | 'SERVICIO' | 'CLIENTE_IDEAL' | 'COMPETIDOR' | 'MERCADO';
+export type TipoPerfil =
+  | 'EMPRESA'
+  | 'PRODUCTO'
+  | 'SERVICIO'
+  | 'CLIENTE_IDEAL'
+  | 'COMPETIDOR'
+  | 'MERCADO'
+  // M5 (ampliaciones aditivas del dominio comercial; SSOT en @soec/negocio por MAPA_TIPO):
+  | 'BUYER_PERSONA'
+  | 'PROPUESTA_VALOR'
+  | 'KPI';
 
 /** Un dato comercial con su procedencia: nunca un valor "pelado" sin saber de dónde viene. */
 export interface Campo {
@@ -30,8 +40,16 @@ export const ESQUEMAS: Record<TipoPerfil, readonly string[]> = {
   PRODUCTO: ['problemaQueResuelve', 'paraQuien', 'objeciones', 'beneficios', 'diferenciadores', 'competidores', 'margen', 'prioridad', 'cicloVenta', 'material', 'estado'],
   SERVICIO: ['problemaQueResuelve', 'paraQuien', 'objeciones', 'beneficios', 'diferenciadores', 'competidores', 'margen', 'prioridad', 'cicloVenta', 'material', 'estado'],
   CLIENTE_IDEAL: ['problemas', 'dolores', 'objetivos', 'miedos', 'motivaciones', 'objeciones', 'preguntasFrecuentes', 'capacidadEconomica', 'comportamientoDigital', 'redes', 'horarios', 'estacionalidad'],
-  COMPETIDOR: ['fortalezas', 'debilidades', 'precios', 'contenido', 'seo', 'sem', 'redes', 'propuestaComercial', 'tipoCampanas', 'frecuencia', 'landingPages', 'embudos'],
-  MERCADO: ['tendencias', 'estacionalidad', 'demanda', 'oportunidades', 'amenazas', 'palabrasClave', 'busquedas', 'eventos', 'cambiosRegulatorios'],
+  COMPETIDOR: ['fortalezas', 'debilidades', 'precios', 'contenido', 'seo', 'sem', 'redes', 'propuestaComercial', 'tipoCampanas', 'frecuencia', 'landingPages', 'embudos', 'diferenciadores', 'riesgos'],
+  MERCADO: ['tendencias', 'estacionalidad', 'demanda', 'oportunidades', 'amenazas', 'palabrasClave', 'busquedas', 'eventos', 'cambiosRegulatorios', 'segmentos', 'tamano', 'barreras'],
+  // M5 · Buyer Persona: entidad descriptiva independiente del ICP (la relación "pertenece a un ICP,
+  // varias por ICP" vive en el grafo evaluable de @soec/motor-estrategico, enlace PERTENECE_A).
+  BUYER_PERSONA: ['rol', 'responsabilidades', 'objetivos', 'dolores', 'motivaciones', 'objeciones', 'criteriosDecision', 'canalesInformacion', 'nivelDecision', 'influencia'],
+  // M5 · Propuesta de Valor tipada (antes solo ítem plano en @soec/negocio / campo de EMPRESA).
+  PROPUESTA_VALOR: ['beneficios', 'problemasResueltos', 'diferenciadores', 'prueba'],
+  // M5 · KPI con META/UMBRAL/RESPONSABLE (definición del objetivo del indicador; el CÁLCULO del valor
+  // sigue siendo SSOT de @soec/medicion). No duplica: aquí va la meta, allá el valor observado.
+  KPI: ['meta', 'umbral', 'responsable', 'unidad', 'frecuencia'],
 } as const;
 
 export function claveValida(tipo: TipoPerfil, clave: string): boolean {
@@ -144,4 +162,17 @@ export function coberturaDe(ent: EntidadComercial): Cobertura {
   const presentes = esperados.filter((k) => k in ent.campos);
   const faltantes = esperados.filter((k) => !(k in ent.campos));
   return { tipo: ent.tipo, esperados, presentes, faltantes, completitud: esperados.length === 0 ? 1 : presentes.length / esperados.length };
+}
+
+/**
+ * RAÍZ del conocimiento comercial. Decisión de arquitectura (Arquitecto, 2026-08-03, ADR-0028): la
+ * Empresa es el **agregado raíz** del dominio y se representa como la `EntidadComercial` SINGLETON
+ * tipada (`ID_EMPRESA`), no como un modelo nominal aparte — así se evita una segunda sede de datos de
+ * empresa (SSOT). Su capa EVALUABLE es la afirmación de clase `EMPRESA` en `@soec/motor-estrategico`, y
+ * la composición del dominio (productos, ICP, mercado, competidores…) la provee el GRAFO de enlaces, no
+ * una propiedad de este agregado. Esta función nombra explícitamente esa raíz (retorna `null` si aún no
+ * se registró la empresa: ausencia declarada, no conclusión).
+ */
+export function raizEmpresa(state: ConocimientoComercialState): EntidadComercial | null {
+  return state.empresa;
 }

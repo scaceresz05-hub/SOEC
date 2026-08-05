@@ -44,6 +44,9 @@ importers:
       '@soec/capacidades':
         specifier: workspace:*
         version: link:../../packages/capacidades
+      '@soec/cia':
+        specifier: workspace:*
+        version: link:../../packages/cia
       '@soec/contenido':
         specifier: workspace:*
         version: link:../../packages/contenido
@@ -129,6 +132,33 @@ importers:
 
   apps/web:
     dependencies:
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../../packages/contenido
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@soec/estrategia-creativa':
+        specifier: workspace:*
+        version: link:../../packages/estrategia-creativa
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../../packages/event-store
+      '@soec/motor-creativo':
+        specifier: workspace:*
+        version: link:../../packages/motor-creativo
+      '@soec/motor-estrategico':
+        specifier: workspace:*
+        version: link:../../packages/motor-estrategico
+      '@soec/motor-medicion':
+        specifier: workspace:*
+        version: link:../../packages/motor-medicion
+      '@soec/motor-operacion':
+        specifier: workspace:*
+        version: link:../../packages/motor-operacion
+      '@soec/motor-optimizacion':
+        specifier: workspace:*
+        version: link:../../packages/motor-optimizacion
       next:
         specifier: 15.1.6
         version: 15.1.6(@babel/core@7.29.7)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
@@ -326,6 +356,22 @@ importers:
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
+
+  packages/cia:
+    dependencies:
+      '@soec/adaptadores':
+        specifier: workspace:*
+        version: link:../adaptadores
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/plataforma-capacidades':
+        specifier: workspace:*
+        version: link:../plataforma-capacidades
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
 
   packages/contenido:
     dependencies:
@@ -738,6 +784,149 @@ importers:
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
+
+  packages/motor-creativo:
+    dependencies:
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../contenido
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/estrategia-creativa':
+        specifier: workspace:*
+        version: link:../estrategia-creativa
+      '@soec/motor-estrategico':
+        specifier: workspace:*
+        version: link:../motor-estrategico
+      '@soec/negocio':
+        specifier: workspace:*
+        version: link:../negocio
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
+  packages/motor-estrategico:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/negocio':
+        specifier: workspace:*
+        version: link:../negocio
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
+  packages/motor-medicion:
+    dependencies:
+      '@soec/aprendizaje':
+        specifier: workspace:*
+        version: link:../aprendizaje
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/medicion':
+        specifier: workspace:*
+        version: link:../medicion
+      '@soec/motor-estrategico':
+        specifier: workspace:*
+        version: link:../motor-estrategico
+      '@soec/motor-operacion':
+        specifier: workspace:*
+        version: link:../motor-operacion
+    devDependencies:
+      '@soec/adaptadores':
+        specifier: workspace:*
+        version: link:../adaptadores
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../contenido
+      '@soec/control':
+        specifier: workspace:*
+        version: link:../control
+      '@soec/estrategia-creativa':
+        specifier: workspace:*
+        version: link:../estrategia-creativa
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      '@soec/motor-creativo':
+        specifier: workspace:*
+        version: link:../motor-creativo
+
+  packages/motor-operacion:
+    dependencies:
+      '@soec/adaptadores':
+        specifier: workspace:*
+        version: link:../adaptadores
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/control':
+        specifier: workspace:*
+        version: link:../control
+      '@soec/motor-creativo':
+        specifier: workspace:*
+        version: link:../motor-creativo
+      '@soec/plataforma-capacidades':
+        specifier: workspace:*
+        version: link:../plataforma-capacidades
+    devDependencies:
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../contenido
+      '@soec/estrategia-creativa':
+        specifier: workspace:*
+        version: link:../estrategia-creativa
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      '@soec/motor-estrategico':
+        specifier: workspace:*
+        version: link:../motor-estrategico
+
+  packages/motor-optimizacion:
+    dependencies:
+      '@soec/adaptadores':
+        specifier: workspace:*
+        version: link:../adaptadores
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@soec/estrategia-creativa':
+        specifier: workspace:*
+        version: link:../estrategia-creativa
+      '@soec/motor-creativo':
+        specifier: workspace:*
+        version: link:../motor-creativo
+      '@soec/motor-estrategico':
+        specifier: workspace:*
+        version: link:../motor-estrategico
+      '@soec/motor-medicion':
+        specifier: workspace:*
+        version: link:../motor-medicion
+      '@soec/motor-operacion':
+        specifier: workspace:*
+        version: link:../motor-operacion
+    devDependencies:
+      '@soec/aprendizaje':
+        specifier: workspace:*
+        version: link:../aprendizaje
+      '@soec/contenido':
+        specifier: workspace:*
+        version: link:../contenido
+      '@soec/control':
+        specifier: workspace:*
+        version: link:../control
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+      '@soec/medicion':
+        specifier: workspace:*
+        version: link:../medicion
 
   packages/negocio:
     dependencies:

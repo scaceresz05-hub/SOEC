@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@soec/contracts": "workspace:*",
+    "@soec/cia": "workspace:*",
     "@soec/event-store": "workspace:*",
     "@soec/intelligence": "workspace:*",
     "@soec/rubros": "workspace:*",

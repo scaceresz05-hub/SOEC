@@ -38,6 +38,25 @@ export interface ContenidoBrief {
   readonly requisitosLegales: readonly string[];
   readonly fuentesDisponibles: readonly string[];
   readonly fechaObjetivo: string;
+  // ── M6 · gobernanza M5 (ampliación ADITIVA; opcional para no romper briefs previos) ──
+  /** Contexto creativo (M6) del que deriva el brief. */
+  readonly contextoCreativoId?: string;
+  /** Razones para creer la promesa (respaldo argumental). */
+  readonly razonesParaCreer?: readonly string[];
+  /** Objeciones anticipadas de la audiencia. */
+  readonly objeciones?: readonly string[];
+  /** Referencias VERSIONADAS a afirmaciones de M5 usadas (no copias): base de obsolescencia. */
+  readonly referenciasM5?: readonly { readonly afirmacionId: string; readonly version: number }[];
+  /** Información faltante declarada (nunca se completa inventando). */
+  readonly informacionFaltante?: readonly string[];
+  /** Estado epistémico del brief (valor de EstadoEvaluabilidad de M5; tipado por el productor M6). */
+  readonly estadoEpistemico?: string;
+  /** Explicación de por qué el brief es (o no es) evaluable. */
+  readonly explicacion?: string;
+  /** Huella de las versiones de conocimiento M5 usadas (suma), para detectar obsolescencia. */
+  readonly versionConocimiento?: number;
+  /** Vigencia del brief respecto de M5. */
+  readonly vigencia?: 'VIGENTE' | 'OBSOLETO' | 'REQUIERE_REVISION';
 }
 
 export const EVENTOS_BRIEF = {

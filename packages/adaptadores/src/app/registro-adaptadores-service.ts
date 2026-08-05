@@ -14,6 +14,7 @@ import {
 } from '../domain/errores-normalizados';
 import type { CompatibilidadAdaptador, EstadoCircuitBreaker, LimiteConcurrencia } from '../domain/operativo-tipos';
 import { type ContenidoDescriptor, crearDescriptor, huellaDescriptor } from '../domain/descriptor';
+import { type NivelActivacion, transicionActivacionValida } from '../m4d/activacion';
 import {
   EVENTOS_ADAPTADOR,
   type EstadoRegistroAdaptador,
@@ -190,6 +191,22 @@ export class RegistroAdaptadoresService {
     const descriptorVersion = (reg.descriptor?.descriptorVersion ?? 0) + 1;
     const descriptor = crearDescriptor(contenido, descriptorVersion);
     await this.emitir(ctx, adaptadorId, primero ? EVENTOS_ADAPTADOR.descriptorRegistrado : EVENTOS_ADAPTADOR.descriptorActualizado, { descriptor, actor: actorHumano, en: o }, a, o);
+    return this.cargar(ctx, adaptadorId);
+  }
+
+  /**
+   * Cambia el NIVEL DE ACTIVACIÓN (M4-D, Eje 7). Acto humano; sólo transiciones válidas (un paso adelante o
+   * retroceso a SIMULADO = kill-switch). Convierte la activación progresiva en un evento gobernado, no código.
+   */
+  async cambiarNivel(ctx: RequestContext, adaptadorId: string, nivel: NivelActivacion, actorHumano: string, a: Attribution, o: string): Promise<RegistroAdaptador> {
+    if (!actorHumano?.trim()) throw new AdaptadorInvalidoError('cambiar el nivel de activación exige un actor humano');
+    const reg = await this.cargar(ctx, adaptadorId);
+    if (!reg.existe) throw new RegistroAdaptadorNoEncontradoError(`adaptador ${adaptadorId} no encontrado`);
+    if (nivel === reg.nivelActivacion) return reg; // idempotente
+    if (!transicionActivacionValida(reg.nivelActivacion, nivel)) {
+      throw new TransicionAdaptadorInvalidaError(`transición de nivel ${reg.nivelActivacion} → ${nivel} no permitida`);
+    }
+    await this.emitir(ctx, adaptadorId, EVENTOS_ADAPTADOR.nivelCambiado, { nivel, actor: actorHumano, en: o }, a, o);
     return this.cargar(ctx, adaptadorId);
   }
 

@@ -106,4 +106,29 @@ export class InMemoryEventStore implements EventStore {
       (r) => new Date(r.recordedAt).getTime() <= cutoff,
     );
   }
+
+  /**
+   * Exporta el LOG completo (todas las streams, ya recordadas) como estructura serializable. Permite
+   * demostrar replay FRÍO: serializar el log y reconstruirlo en una instancia NUEVA (ver `desdeInstantanea`),
+   * sin reutilizar mapas ni referencias de objeto del proceso anterior.
+   */
+  exportar(): Record<string, readonly RecordedEvent[]> {
+    const out: Record<string, readonly RecordedEvent[]> = {};
+    for (const [k, v] of this.streams) out[k] = v;
+    return out;
+  }
+
+  /**
+   * Construye una instancia NUEVA a partir de un log exportado (idealmente tras un round-trip JSON, de modo
+   * que no comparta referencias con el store original). Los eventos ya están recordados: se ingieren tal
+   * cual, sin re-generar ids/tiempos. Sirve para replay frío en tests.
+   */
+  static desdeInstantanea(
+    instantanea: Readonly<Record<string, readonly RecordedEvent[]>>,
+    clock: Clock = systemClock,
+  ): InMemoryEventStore {
+    const s = new InMemoryEventStore(clock);
+    for (const [k, evs] of Object.entries(instantanea)) s.streams.set(k, [...evs]);
+    return s;
+  }
 }
