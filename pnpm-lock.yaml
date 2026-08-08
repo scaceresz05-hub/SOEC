@@ -35,6 +35,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@soec/adaptadores':
+        specifier: workspace:*
+        version: link:../../packages/adaptadores
       '@soec/autonomia':
         specifier: workspace:*
         version: link:../../packages/autonomia
@@ -98,6 +101,9 @@ importers:
       '@soec/models':
         specifier: workspace:*
         version: link:../../packages/models
+      '@soec/motor-medicion':
+        specifier: workspace:*
+        version: link:../../packages/motor-medicion
       '@soec/negocio':
         specifier: workspace:*
         version: link:../../packages/negocio
@@ -119,6 +125,9 @@ importers:
       '@soec/rubros':
         specifier: workspace:*
         version: link:../../packages/rubros
+      '@soec/secretos':
+        specifier: workspace:*
+        version: link:../../packages/secretos
       fastify:
         specifier: ^5.2.0
         version: 5.10.0

@@ -11,8 +11,8 @@
 import { ConcurrencyError, type Attribution, type EventInput, type EventStore, type RequestContext } from '@soec/contracts';
 import { type LecturaOperativa, clasificarM8 } from '@soec/motor-operacion';
 import {
-  EVENTOS_OBSERVACION, type DatosObservacion, type NaturalezaDato, type ObservacionState, type UnidadObservacion,
-  observacionStreamId, reconstruirObservacion, transicionObservacionValida,
+  EVENTOS_OBSERVACION, type DatosObservacion, type NaturalezaSimulable, type ProvenanciaReal, type ObservacionState,
+  type UnidadObservacion, observacionStreamId, reconstruirObservacion, transicionObservacionValida,
 } from '../dominio/observacion';
 import { ComandoMedicionInvalidoError, ObservacionNoEncontradaError } from '../dominio/errors';
 import type { NivelCalidad } from '@soec/medicion';
@@ -30,9 +30,36 @@ export interface EntradaObservacion {
   readonly metrica: string;
   readonly valor: number | null;
   readonly unidad: UnidadObservacion;
-  readonly naturaleza: NaturalezaDato; // debe ser SIMULADA/ESTIMADA; REAL se rechaza
+  readonly naturaleza: NaturalezaSimulable; // SÓLO SIMULADA/ESTIMADA por tipo; REAL va por registrarReal()
   readonly calidad: NivelCalidad;
   readonly cobertura: number;
+  readonly limitaciones?: readonly string[];
+}
+
+/**
+ * Entrada de la PUERTA REAL gobernada (Opción C). Exige PROCEDENCIA EXTERNA: sin `provider`+`externalEventId`
+ * +`eventName`+`occurredAt` no hay observación REAL. El caller no puede omitir silenciosamente la procedencia.
+ * No transporta PII: sólo identificadores de evento/atribución de medición.
+ */
+export interface EntradaObservacionReal {
+  readonly provider: string;          // p. ej. 'smileflow-growth'
+  readonly externalEventId: string;   // clave natural de idempotencia (con provider)
+  readonly eventName: string;         // p. ej. 'demo_requested'
+  readonly occurredAt: string;        // cuándo ocurrió en el proveedor (ISO)
+  readonly kpiId: string;
+  readonly metrica: string;
+  readonly valor: number | null;
+  readonly unidad: UnidadObservacion;
+  readonly calidad: NivelCalidad;
+  readonly cobertura: number;
+  readonly source?: string | null;
+  readonly utmSource?: string | null;
+  readonly utmMedium?: string | null;
+  readonly utmCampaign?: string | null;
+  readonly utmContent?: string | null;
+  readonly leadRef?: string | null;
+  readonly hipotesisId?: string | null;
+  readonly diagnostico?: boolean;     // true si el evento es reconocible como TEST/DIAG (se excluye del aprendizaje)
   readonly limitaciones?: readonly string[];
 }
 
@@ -69,6 +96,46 @@ export class ObservacionService {
       naturaleza: e.naturaleza, calidad: e.calidad, cobertura: e.cobertura, limitaciones: e.limitaciones ?? [], evidenciaOperacionalRef: null,
     };
     await this.appendObs(ctx, observacionId, st.version, EVENTOS_OBSERVACION.registrada, datos, a, o);
+    await this.asegurarEnIndice(ctx, observacionId, a, o);
+    return this.cargar(ctx, observacionId);
+  }
+
+  /**
+   * PUERTA REAL GOBERNADA (Opción C). Registra un HECHO REAL con procedencia externa obligatoria. A diferencia
+   * de `registrar`+`validar` (que se validan contra M7 simulado), un hecho REAL nace VALIDADA porque su autoridad
+   * es la PROCEDENCIA (provider+externalEventId+eventName+occurredAt). Idempotente y replay-safe por `observacionId`
+   * (que el llamador deriva de provider+externalEventId). NUNCA degrada a simulada ni acepta procedencia vacía.
+   * `o` es el instante de ingesta (inyectado; determinista).
+   */
+  async registrarReal(ctx: RequestContext, observacionId: string, e: EntradaObservacionReal, a: Attribution, o: string): Promise<ObservacionState> {
+    if (!observacionId?.trim()) throw new ComandoMedicionInvalidoError('observacionId es obligatorio');
+    if (!e.provider?.trim()) throw new ComandoMedicionInvalidoError('registrarReal exige provider (procedencia obligatoria)');
+    if (!e.externalEventId?.trim()) throw new ComandoMedicionInvalidoError('registrarReal exige externalEventId (procedencia obligatoria)');
+    if (!e.eventName?.trim()) throw new ComandoMedicionInvalidoError('registrarReal exige eventName (evidencia externa)');
+    if (!e.occurredAt?.trim()) throw new ComandoMedicionInvalidoError('registrarReal exige occurredAt (evidencia externa)');
+    if (!e.kpiId?.trim() || !e.metrica?.trim()) throw new ComandoMedicionInvalidoError('registrarReal exige kpiId y metrica');
+    if (e.cobertura < 0 || e.cobertura > 1) throw new ComandoMedicionInvalidoError('cobertura fuera de rango [0,1]');
+    const st = await this.cargar(ctx, observacionId);
+    if (st.existe) { await this.asegurarEnIndice(ctx, observacionId, a, o); return st; } // idempotente / replay-safe
+    const provenanciaReal: ProvenanciaReal = {
+      provider: e.provider, externalEventId: e.externalEventId, eventName: e.eventName, occurredAt: e.occurredAt,
+      ingestedAt: o, source: e.source ?? null, utmSource: e.utmSource ?? null, utmMedium: e.utmMedium ?? null,
+      utmCampaign: e.utmCampaign ?? null, utmContent: e.utmContent ?? null, leadRef: e.leadRef ?? null,
+      diagnostico: e.diagnostico ?? false,
+    };
+    const datos: DatosObservacion = {
+      ordenId: `${e.provider}:${e.externalEventId}`, executionId: `${e.provider}:${e.externalEventId}`,
+      pieza: { id: '', version: 0 }, variante: null, hipotesisId: e.hipotesisId ?? null, kpiId: e.kpiId,
+      instante: e.occurredAt, fuente: e.provider, metrica: e.metrica, valor: e.valor, unidad: e.unidad,
+      naturaleza: 'REAL', calidad: e.calidad, cobertura: e.cobertura, limitaciones: e.limitaciones ?? [],
+      evidenciaOperacionalRef: null, provenanciaReal,
+    };
+    try {
+      await this.appendObs(ctx, observacionId, st.version, EVENTOS_OBSERVACION.registradaReal, datos, a, o);
+    } catch (err) {
+      if (err instanceof ConcurrencyError) { await this.asegurarEnIndice(ctx, observacionId, a, o); return this.cargar(ctx, observacionId); } // carrera ⇒ idempotente
+      throw err;
+    }
     await this.asegurarEnIndice(ctx, observacionId, a, o);
     return this.cargar(ctx, observacionId);
   }

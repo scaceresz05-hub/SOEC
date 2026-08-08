@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { inicio } from '../lib/soec/consultas';
+import ObservacionesReales from './ObservacionesReales';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +26,8 @@ export default async function Home() {
         <span className="dotb" aria-hidden="true" />
         <span><span className="t">{salud.titulo}</span> — <span className="s">{salud.detalle}</span></span>
       </div>
+
+      <ObservacionesReales />
 
       <h2 className="block">Lo que hice por ti</h2>
       <div className="card" style={{ padding: '6px 16px' }}>
