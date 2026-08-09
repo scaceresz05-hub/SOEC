@@ -7,7 +7,11 @@ interface ObsReal {
   externalEventId: string; eventName: string; naturaleza: string; occurredAt: string; provider: string;
   diagnostico: boolean; elegibleParaAprendizaje: boolean; utmSource: string | null; utmCampaign: string | null; estado: string;
 }
-interface RealesResp { total: number; comerciales: number; diagnosticos: number; conclusion: string; observaciones: ObsReal[] }
+interface Sync { provider: string; ok: boolean | null; at: string | null }
+interface RealesResp {
+  total: number; comerciales: number; diagnosticos: number; conclusion: string;
+  porProveedor?: Record<string, number>; sincronizaciones?: Sync[]; observaciones: ObsReal[];
+}
 
 export default function ObservacionesReales(): React.ReactElement | null {
   const [d, setD] = useState<RealesResp | null>(null);
@@ -22,12 +26,26 @@ export default function ObservacionesReales(): React.ReactElement | null {
   if (!d || d.total === 0) return null;
   return (
     <>
-      <h2 className="block">Datos reales de SmileFlow <span className="pill ok">REAL</span></h2>
+      <h2 className="block">Datos reales (SmileFlow Growth + Google Ads) <span className="pill ok">REAL</span></h2>
       <div className="card" style={{ padding: '6px 16px' }}>
         <p className="s" style={{ margin: '8px 0' }}>
-          {d.total} observación(es) <b>REAL</b> de <b>smileflow-growth</b> · {d.comerciales} comercial(es) · {d.diagnosticos} diagnóstico(s).{' '}
+          {d.total} observación(es) <b>REAL</b>
+          {d.porProveedor && Object.entries(d.porProveedor).map(([prov, n]) => (
+            <span key={prov} className="pill mut" style={{ fontSize: '10px', marginLeft: 4 }}>{prov}: {n}</span>
+          ))}
+          {' · '}{d.comerciales} comercial(es) · {d.diagnosticos} diagnóstico(s).{' '}
           Conclusión estadística: <b>{d.conclusion}</b> (muestra insuficiente: SOEC afirma el hecho real, no recomienda).
         </p>
+        {d.sincronizaciones && d.sincronizaciones.length > 0 && (
+          <p className="s" style={{ margin: '4px 0' }}>
+            Última sincronización autónoma:{' '}
+            {d.sincronizaciones.map((s) => (
+              <span key={s.provider} className={`pill ${s.ok ? 'ok' : s.ok === false ? 'warn' : 'mut'}`} style={{ fontSize: '10px', marginRight: 4 }}>
+                {s.provider} {s.ok ? '✓' : s.ok === false ? '✗' : '—'} {s.at ? new Date(s.at).toLocaleString() : 'sin datos'}
+              </span>
+            ))}
+          </p>
+        )}
         {d.observaciones.slice(0, 8).map((o) => (
           <div className="did" key={o.externalEventId}>
             <span className="tick medi" aria-hidden="true">◆</span>

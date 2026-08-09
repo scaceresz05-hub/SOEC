@@ -36,13 +36,29 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
         elegibleParaAprendizaje: !p.diagnostico, utmSource: p.utmSource, utmCampaign: p.utmCampaign,
       });
     }
-    observaciones.sort((a, b) => Number(b.externalEventId) - Number(a.externalEventId));
+    // Orden por instante de ocurrencia (desc); externalEventId es string (multi-proveedor).
+    observaciones.sort((a, b) => String(b.occurredAt).localeCompare(String(a.occurredAt)));
     const comerciales = observaciones.filter((o) => o.elegibleParaAprendizaje).length;
+
+    // Estado de última sincronización por fuente (ingesta autónoma).
+    const PROVIDERS = ['smileflow-growth', 'google-ads'] as const;
+    const sincronizaciones: Array<Record<string, unknown>> = [];
+    for (const provider of PROVIDERS) {
+      const eventos = await store.readStream(c, `ingesta-estado:${provider}:${ORG_INGESTA_REAL}`);
+      let ultimo: { ok?: boolean; at?: string; error?: string } | null = null;
+      for (const e of eventos) if (e.type === 'sync.registrada') ultimo = e.payload as typeof ultimo;
+      sincronizaciones.push({ provider, ok: ultimo?.ok ?? null, at: ultimo?.at ?? null });
+    }
+    const porProveedor: Record<string, number> = {};
+    for (const o of observaciones) porProveedor[String(o.provider)] = (porProveedor[String(o.provider)] ?? 0) + 1;
+
     return reply.send({
       ok: true,
       total: observaciones.length,
       comerciales,
       diagnosticos: observaciones.length - comerciales,
+      porProveedor,
+      sincronizaciones,
       // Muestra insuficiente: NUNCA se calcula una métrica comercial ni se recomienda; se afirma el hecho.
       conclusion: 'NO_EVALUABLE_CON_DATOS_REALES',
       observaciones,
