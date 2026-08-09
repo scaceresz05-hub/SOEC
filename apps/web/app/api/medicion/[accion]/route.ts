@@ -1,6 +1,6 @@
 import { API_BASE } from '../../../../lib/config';
 
-const GET_ACCIONES = new Set(['estado', 'reales']);
+const GET_ACCIONES = new Set(['estado', 'reales', 'panel']);
 const POST_ACCIONES = new Set(['preparar', 'sincronizar', 'optimizar']);
 
 async function proxiar(path: string, method: 'GET' | 'POST', body?: unknown): Promise<Response> {

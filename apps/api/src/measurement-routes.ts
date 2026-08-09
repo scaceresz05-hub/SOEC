@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { ActorId, OrganizationId, type EventStore, type RequestContext } from '@soec/contracts';
 import { ObservacionService } from '@soec/motor-medicion';
 import { MeasurementExperience } from './measurement-experience';
+import { construirPanel, type ObsPanel, type Sync } from './ingesta/panel-resultados';
 
 // Organización donde la ingesta real (one-shot smileflow-growth) deposita las observaciones REAL.
 const ORG_INGESTA_REAL = 'org-smileflow';
@@ -46,7 +47,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     for (const provider of PROVIDERS) {
       const eventos = await store.readStream(c, `ingesta-estado:${provider}:${ORG_INGESTA_REAL}`);
       let ultimo: { ok?: boolean; at?: string; error?: string } | null = null;
-      for (const e of eventos) if (e.type === 'sync.registrada') ultimo = e.payload as typeof ultimo;
+      for (const e of eventos) if (e.type === 'sync.registrada') ultimo = e.payload as { ok?: boolean; at?: string; error?: string };
       sincronizaciones.push({ provider, ok: ultimo?.ok ?? null, at: ultimo?.at ?? null });
     }
     const porProveedor: Record<string, number> = {};
@@ -63,6 +64,35 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       conclusion: 'NO_EVALUABLE_CON_DATOS_REALES',
       observaciones,
     });
+  });
+
+  // PANEL DE RESULTADOS: presentación pura de datos REALES ya persistidos (no ingesta, no cálculo de atribución).
+  app.get('/medicion/panel', async (_req, reply) => {
+    const obs = new ObservacionService(store, {} as never);
+    const c = ctxReal();
+    const ids = await obs.listarIds(c);
+    const observaciones: ObsPanel[] = [];
+    for (const id of ids) {
+      const st = await obs.cargar(c, id);
+      const d = st.datos;
+      if (!d || d.naturaleza !== 'REAL' || !d.provenanciaReal) continue;
+      const p = d.provenanciaReal;
+      observaciones.push({
+        provider: p.provider, eventName: p.eventName, metrica: d.metrica ?? null, valor: d.valor ?? null,
+        occurredAt: p.occurredAt, diagnostico: p.diagnostico, utmCampaign: p.utmCampaign ?? null,
+        utmContent: p.utmContent ?? null, limitaciones: d.limitaciones ?? [], externalEventId: p.externalEventId,
+      });
+    }
+    // Estado de última sincronización por fuente (mismo patrón que /medicion/reales).
+    const PROVIDERS = ['smileflow-growth', 'google-ads'] as const;
+    const sincronizaciones: Sync[] = [];
+    for (const provider of PROVIDERS) {
+      const eventos = await store.readStream(c, `ingesta-estado:${provider}:${ORG_INGESTA_REAL}`);
+      let ultimo: { ok?: boolean; at?: string } | null = null;
+      for (const e of eventos) if (e.type === 'sync.registrada') ultimo = e.payload as { ok?: boolean; at?: string };
+      sincronizaciones.push({ provider, ok: ultimo?.ok ?? null, at: ultimo?.at ?? null });
+    }
+    return reply.send(construirPanel(observaciones, sincronizaciones));
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {

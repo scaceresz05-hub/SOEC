@@ -22,6 +22,12 @@ export default async function Home() {
           : 'Mientras no estabas avancé en tus objetivos. No necesito nada de ti ahora mismo.'}
       </p>
 
+      <p style={{ margin: '0 0 22px' }}>
+        <Link href="/resultados" className="pill ok" style={{ fontSize: 13, textDecoration: 'none' }}>
+          Resultados reales →
+        </Link>
+      </p>
+
       <div className={`salud ${salud.estado}`}>
         <span className="dotb" aria-hidden="true" />
         <span><span className="t">{salud.titulo}</span> — <span className="s">{salud.detalle}</span></span>
