@@ -122,6 +122,9 @@ async function main(): Promise<void> {
 
     const resultado = await scheduler.correrTodo(ctx(ORG), { ahora: new Date().toISOString() });
     console.log(JSON.stringify(resultado, null, 2)); // sin secretos
+    // Código de salida = observabilidad del scheduler (el launcher lo propaga a Task Scheduler):
+    //   GLOBAL_OK ⇒ 0 · PARTIAL_FAILURE ⇒ 3 (una fuente/consulta falló, el resto SÍ persistió) · TOTAL_FAILURE ⇒ 2
+    process.exitCode = resultado.estado === 'GLOBAL_OK' ? 0 : resultado.estado === 'PARTIAL_FAILURE' ? 3 : 2;
   } finally {
     await pool.end();
   }
@@ -129,5 +132,5 @@ async function main(): Promise<void> {
 
 main().catch((e) => {
   console.error(e);
-  process.exit(1);
+  process.exit(1); // fallo infra (DB/env): distinto de los estados de negocio (0/2/3)
 });

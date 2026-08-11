@@ -18,8 +18,12 @@ import { AdaptadorRealBase, type DependenciasAdaptadorReal, type SalidaAdaptador
 /** Allowlist cerrada de hosts autorizados (default-deny). Nunca comodines. */
 const HOSTS_AUTORIZADOS = new Set<string>(['googleads.googleapis.com', 'oauth2.googleapis.com']);
 
-/** Versión de la API de Google Ads verificada para este conector. */
-const API_VERSION = 'v21';
+/**
+ * Versión de la API de Google Ads verificada para este conector (READ ONLY).
+ * v21 quedó deprecada (sunset ago-2026) y devolvía HTTP 400 UNSUPPORTED_VERSION de forma intermitente.
+ * v25 (jul-2026, soporte hasta ago-2027) validada 200/200 para snapshot, métricas diarias y search_term_view.
+ */
+const API_VERSION = 'v25';
 
 /** Referencias OPACAS (nunca el valor) de los secretos de Google Ads. */
 export interface RefsSecretosGoogleAds {

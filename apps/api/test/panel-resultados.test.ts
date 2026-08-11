@@ -1,19 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { construirPanel, type ObsPanel, type Sync } from '../src/ingesta/panel-resultados';
+import type { SnapshotAdsActual } from '../src/ingesta/mapa-google-ads';
 
-// Fixture REAL: snapshot de campaña con 0 impresiones/clics/coste + embudo Growth (1 diagnóstico, varios comerciales).
-const snap = (metrica: string): ObsPanel => ({
-  provider: 'google-ads',
-  eventName: `ads_campaign_snapshot:${metrica}`,
-  metrica,
-  valor: 0,
-  occurredAt: '2026-08-08T00:00:00Z',
-  diagnostico: false,
-  utmCampaign: 'SmileFlow Search Chile',
-  utmContent: null,
-  limitaciones: ['campaign_status=ENABLED'],
-  externalEventId: `google-ads:campaign:24120966895:snapshot:2026-08-08:${metrica}`,
-});
+// Snapshot acumulado vigente (stream dedicado): campaña ENABLED que aún no sirve → 0 impresiones/clics/coste.
+const SNAP_CERO: SnapshotAdsActual = {
+  campaignId: '24120966895', campaignName: 'SmileFlow Search Chile', status: 'ENABLED',
+  impressions: 0, clicks: 0, cost: 0, at: '2026-08-08T09:05:00Z',
+};
 
 const growth = (eventName: string, diagnostico: boolean, i: number): ObsPanel => ({
   provider: 'smileflow-growth',
@@ -29,7 +22,6 @@ const growth = (eventName: string, diagnostico: boolean, i: number): ObsPanel =>
 });
 
 const OBS: ObsPanel[] = [
-  snap('impressions'), snap('clicks'), snap('cost'),
   growth('demo_cta_clicked', false, 1),
   growth('demo_cta_clicked', false, 2),
   growth('demo_form_started', false, 3),
@@ -39,14 +31,14 @@ const OBS: ObsPanel[] = [
 ];
 
 const SYNCS: Sync[] = [
-  { provider: 'smileflow-growth', ok: true, at: '2026-08-08T09:00:00Z' },
-  { provider: 'google-ads', ok: true, at: '2026-08-08T09:05:00Z' },
+  { provider: 'smileflow-growth', ok: true, at: '2026-08-08T09:00:00Z', estado: 'OK' },
+  { provider: 'google-ads', ok: true, at: '2026-08-08T09:05:00Z', estado: 'OK' },
 ];
 
 describe('construirPanel', () => {
-  const panel = construirPanel(OBS, SYNCS);
+  const panel = construirPanel(OBS, SYNCS, SNAP_CERO);
 
-  it('extrae nombre, estado e id de campaña del snapshot más reciente', () => {
+  it('extrae nombre, estado e id de campaña del snapshot acumulado vigente', () => {
     expect(panel.campaign.name).toBe('SmileFlow Search Chile');
     expect(panel.campaign.status).toBe('ENABLED');
     expect(panel.campaign.id).toBe('24120966895');
@@ -59,6 +51,15 @@ describe('construirPanel', () => {
     expect(panel.ads.ctr).toBeNull();
     expect(panel.ads.cpc).toBeNull();
     expect(panel.ads.sinDatos).toBe(true);
+  });
+
+  it('sin snapshot ⇒ cabecera y cifras Ads en null (nunca 0 fabricado)', () => {
+    const vacio = construirPanel(OBS, SYNCS, null);
+    expect(vacio.campaign).toEqual({ name: null, status: null, id: null });
+    expect(vacio.ads.impressions).toBeNull();
+    expect(vacio.ads.ctr).toBeNull();
+    expect(vacio.ads.cpc).toBeNull();
+    expect(vacio.ads.sinDatos).toBe(true);
   });
 
   it('el embudo comercial cuenta bien y EXCLUYE el diagnóstico', () => {
@@ -87,21 +88,29 @@ describe('construirPanel', () => {
     expect(panel.modo).toBe('OBSERVE_ONLY');
   });
 
-  it('ctr/cpc reales cuando hay denominador; agrega términos de búsqueda por utmContent', () => {
+  it('refleja el acumulado vigente (incluye hoy) y agrega términos de búsqueda por utmContent', () => {
+    const snapHoy: SnapshotAdsActual = { campaignId: '24120966895', campaignName: 'SmileFlow Search Chile', status: 'ENABLED', impressions: 200, clicks: 10, cost: 5000, at: '2026-08-10T22:00:00Z' };
     const conDatos = construirPanel(
       [
-        { ...snap('impressions'), valor: 200, occurredAt: '2026-08-09T00:00:00Z', externalEventId: 'google-ads:campaign:24120966895:snapshot:2026-08-09:impressions' },
-        { ...snap('clicks'), valor: 10, occurredAt: '2026-08-09T00:00:00Z', externalEventId: 'google-ads:campaign:24120966895:snapshot:2026-08-09:clicks' },
-        { ...snap('cost'), valor: 5000, occurredAt: '2026-08-09T00:00:00Z', externalEventId: 'google-ads:campaign:24120966895:snapshot:2026-08-09:cost' },
-        { provider: 'google-ads', eventName: 'ads_search_term', metrica: 'search_term_impressions', valor: 30, occurredAt: '2026-08-09T00:00:00Z', diagnostico: false, utmCampaign: null, utmContent: 'dentista santiago', limitaciones: [], externalEventId: 'google-ads:searchterm:x:1:2026-08-09:search_term_impressions' },
-        { provider: 'google-ads', eventName: 'ads_search_term', metrica: 'search_term_clicks', valor: 3, occurredAt: '2026-08-09T00:00:00Z', diagnostico: false, utmCampaign: null, utmContent: 'dentista santiago', limitaciones: [], externalEventId: 'google-ads:searchterm:x:1:2026-08-09:search_term_clicks' },
+        { provider: 'google-ads', eventName: 'ads_search_term', metrica: 'search_term_impressions', valor: 30, occurredAt: '2026-08-10T00:00:00Z', diagnostico: false, utmCampaign: null, utmContent: 'dentista santiago', limitaciones: [], externalEventId: 'google-ads:searchterm:x:1:2026-08-10:search_term_impressions' },
+        { provider: 'google-ads', eventName: 'ads_search_term', metrica: 'search_term_clicks', valor: 3, occurredAt: '2026-08-10T00:00:00Z', diagnostico: false, utmCampaign: null, utmContent: 'dentista santiago', limitaciones: [], externalEventId: 'google-ads:searchterm:x:1:2026-08-10:search_term_clicks' },
       ],
       SYNCS,
+      snapHoy,
     );
+    expect(conDatos.ads.impressions).toBe(200);
     expect(conDatos.ads.ctr).toBeCloseTo(10 / 200, 6);
     expect(conDatos.ads.cpc).toBeCloseTo(5000 / 10, 6);
     expect(conDatos.ads.sinDatos).toBe(false);
     expect(conDatos.searchTerms).toEqual([{ termino: 'dentista santiago', impresiones: 30, clics: 3 }]);
     expect(conDatos.lecturaSoec).not.toContain('Todavía no hay suficientes datos');
+  });
+
+  it('con 1 impresión usa singular ("impresión")', () => {
+    const snap1: SnapshotAdsActual = { campaignId: '1', campaignName: 'c', status: 'ENABLED', impressions: 1, clicks: 0, cost: 0, at: '2026-08-10T22:00:00Z' };
+    const p = construirPanel([], SYNCS, snap1);
+    expect(p.lecturaSoec).toContain('1 impresión ');
+    expect(p.ads.ctr).toBe(0); // 0 clics / 1 impresión = 0 (impresiones > 0 ⇒ calculable)
+    expect(p.ads.cpc).toBeNull(); // 0 clics ⇒ NO_CALCULABLE
   });
 });

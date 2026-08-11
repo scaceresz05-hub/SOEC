@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
-  clasificarTermino, fechaMaxima, mapearCampania, mapearCampaniaSnapshot, mapearTerminos, parsearSearchStream, sha1corto,
+  clasificarTermino, extraerSnapshotActual, fechaLocal, fechaMaxima, gaqlCampanias, gaqlTerminos, mapearCampania,
+  mapearTerminos, parsearSearchStream, sha1corto, ventanaIngesta,
 } from '../src/ingesta/mapa-google-ads';
 
 // Snapshot acumulado (sin segments.date): campaña ENABLED que aún no sirve → métricas 0 reales.
 const BODY_SNAPSHOT = JSON.stringify([
   { results: [{ campaign: { id: '24120966895', name: 'SmileFlow Search Chile', status: 'ENABLED' }, metrics: { impressions: '0', clicks: '0', costMicros: '0' } }] },
+]);
+const BODY_SNAPSHOT_SIRVIENDO = JSON.stringify([
+  { results: [{ campaign: { id: '24120966895', name: 'SmileFlow Search Chile', status: 'ENABLED' }, metrics: { impressions: '51', clicks: '0', costMicros: '0' } }] },
 ]);
 
 const BODY_CAMPANIA = JSON.stringify([
@@ -99,22 +103,42 @@ describe('mapa-google-ads', () => {
     expect(fechaMaxima([])).toBeNull();
   });
 
-  it('mapearCampaniaSnapshot registra el estado real (0 impresiones), fechado por fechaSync e idempotente por día', () => {
-    const obs = mapearCampaniaSnapshot(parsearSearchStream(BODY_SNAPSHOT), '2026-08-08');
-    const byMetric = Object.fromEntries(obs.map((o) => [o.metrica, o]));
-    // 0 es un valor real (no ausencia): se registra impressions/clicks/cost=0
-    expect(byMetric.impressions!.valor).toBe(0);
-    expect(byMetric.clicks!.valor).toBe(0);
-    expect(byMetric.cost!.valor).toBe(0);
-    for (const o of obs) {
-      expect(o.provider).toBe('google-ads');
-      expect(o.occurredAt).toBe('2026-08-08T00:00:00Z');
-      expect(o.eventName.startsWith('ads_campaign_snapshot:')).toBe(true);
-      expect(o.limitaciones).toContain('campaign_status=ENABLED');
-    }
-    expect(byMetric.impressions!.externalEventId).toBe('google-ads:campaign:24120966895:snapshot:2026-08-08:impressions');
-    // idempotente por (campaña, fechaSync, métrica)
-    const b = mapearCampaniaSnapshot(parsearSearchStream(BODY_SNAPSHOT), '2026-08-08');
-    expect(obs.map((o) => o.externalEventId).sort()).toEqual(b.map((o) => o.externalEventId).sort());
+  it('extraerSnapshotActual toma el acumulado vigente (0 real cuando no sirve; acumulado cuando sirve)', () => {
+    const cero = extraerSnapshotActual(parsearSearchStream(BODY_SNAPSHOT), '2026-08-08T12:00:00Z');
+    expect(cero).not.toBeNull();
+    expect(cero!.campaignId).toBe('24120966895');
+    expect(cero!.campaignName).toBe('SmileFlow Search Chile');
+    expect(cero!.status).toBe('ENABLED');
+    expect(cero!.impressions).toBe(0); // 0 real, no ausencia
+    expect(cero!.clicks).toBe(0);
+    expect(cero!.cost).toBe(0);
+    expect(cero!.at).toBe('2026-08-08T12:00:00Z');
+
+    const sirviendo = extraerSnapshotActual(parsearSearchStream(BODY_SNAPSHOT_SIRVIENDO), '2026-08-10T22:00:00Z');
+    expect(sirviendo!.impressions).toBe(51);
+    expect(extraerSnapshotActual([], 'x')).toBeNull(); // sin filas ⇒ null (no fabrica)
+  });
+
+  it('fechaLocal calcula el día en la zona de la cuenta (América/Santiago, GMT-04/-03)', () => {
+    // 2026-08-10T02:00:00Z = 2026-08-09 ~22:00 en Santiago ⇒ el día local es el 09, no el 10 (UTC).
+    expect(fechaLocal('2026-08-10T02:00:00Z', 'America/Santiago')).toBe('2026-08-09');
+    // 2026-08-10T12:00:00Z = 2026-08-10 ~08:00 en Santiago.
+    expect(fechaLocal('2026-08-10T12:00:00Z', 'America/Santiago')).toBe('2026-08-10');
+  });
+
+  it('ventanaIngesta INCLUYE hoy (hasta = hoy local) y abarca `dias` días', () => {
+    const v = ventanaIngesta('2026-08-10T12:00:00Z', 7, 'America/Santiago');
+    expect(v.hasta).toBe('2026-08-10'); // hoy incluido (a diferencia de LAST_7_DAYS)
+    expect(v.desde).toBe('2026-08-04'); // 7 días: 04,05,06,07,08,09,10
+  });
+
+  it('las GAQL usan BETWEEN [desde, hasta] (no el preset LAST_7_DAYS que excluye hoy)', () => {
+    const c = gaqlCampanias('2026-08-04', '2026-08-10');
+    expect(c).toContain("segments.date BETWEEN '2026-08-04' AND '2026-08-10'");
+    expect(c).not.toContain('LAST_7_DAYS');
+    const t = gaqlTerminos('2026-08-04', '2026-08-10');
+    expect(t).toContain('FROM search_term_view');
+    expect(t).toContain("BETWEEN '2026-08-04' AND '2026-08-10'");
+    expect(t).not.toContain('LAST_7_DAYS');
   });
 });

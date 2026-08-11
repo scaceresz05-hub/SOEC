@@ -8,6 +8,7 @@ import { ActorId, OrganizationId, type EventStore, type RequestContext } from '@
 import { ObservacionService } from '@soec/motor-medicion';
 import { MeasurementExperience } from './measurement-experience';
 import { construirPanel, type ObsPanel, type Sync } from './ingesta/panel-resultados';
+import { adsSnapshotStreamId, ultimoSnapshotAds } from './ingesta/ingesta-google-ads-service';
 
 // Organización donde la ingesta real (one-shot smileflow-growth) deposita las observaciones REAL.
 const ORG_INGESTA_REAL = 'org-smileflow';
@@ -83,16 +84,21 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
         utmContent: p.utmContent ?? null, limitaciones: d.limitaciones ?? [], externalEventId: p.externalEventId,
       });
     }
-    // Estado de última sincronización por fuente (mismo patrón que /medicion/reales).
+    // Estado de última sincronización por fuente (mismo patrón que /medicion/reales), con estado fino.
     const PROVIDERS = ['smileflow-growth', 'google-ads'] as const;
     const sincronizaciones: Sync[] = [];
     for (const provider of PROVIDERS) {
       const eventos = await store.readStream(c, `ingesta-estado:${provider}:${ORG_INGESTA_REAL}`);
-      let ultimo: { ok?: boolean; at?: string } | null = null;
-      for (const e of eventos) if (e.type === 'sync.registrada') ultimo = e.payload as { ok?: boolean; at?: string };
-      sincronizaciones.push({ provider, ok: ultimo?.ok ?? null, at: ultimo?.at ?? null });
+      type UltimoSync = { ok?: boolean; at?: string; estado?: 'OK' | 'PARCIAL' | 'FALLO' };
+      let ultimo: UltimoSync | null = null;
+      for (const e of eventos) if (e.type === 'sync.registrada') ultimo = e.payload as UltimoSync;
+      sincronizaciones.push({ provider, ok: ultimo?.ok ?? null, at: ultimo?.at ?? null, estado: ultimo?.estado ?? null });
     }
-    return reply.send(construirPanel(observaciones, sincronizaciones));
+
+    // Snapshot acumulado vigente (stream dedicado last-wins): cabecera + cifras Ads frescas de cada sync.
+    const snapshotActual = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(ORG_INGESTA_REAL)));
+
+    return reply.send(construirPanel(observaciones, sincronizaciones, snapshotActual));
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {

@@ -20,18 +20,55 @@ const CALIDAD_INGESTA: NivelCalidad = 'alta';
 const PROVIDER = 'google-ads';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Consultas GAQL (sólo lectura)
+// Ventana temporal de ingesta (DEBE incluir HOY)
 // ─────────────────────────────────────────────────────────────────────────────
-export const GAQL_CAMPANIAS =
-  'SELECT campaign.id, campaign.name, campaign.status, segments.date, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.average_cpc, metrics.ctr FROM campaign WHERE segments.date DURING LAST_7_DAYS';
+/**
+ * Zona horaria de la CUENTA de Google Ads (cliente en Chile). `segments.date` en GAQL se evalúa en la zona de
+ * la cuenta; por eso "hoy" se calcula en esta zona y no en UTC. Los presets `LAST_7_DAYS`/`YESTERDAY` EXCLUYEN
+ * el día en curso, por lo que NO se usan: SOEC sincroniza cada 15 min y debe reflejar la actividad de hoy.
+ */
+export const TZ_CUENTA_ADS = 'America/Santiago';
 
-export const GAQL_TERMINOS =
-  'SELECT search_term_view.search_term, campaign.id, segments.date, metrics.impressions, metrics.clicks, metrics.cost_micros FROM search_term_view WHERE segments.date DURING LAST_7_DAYS';
+/** Fecha (YYYY-MM-DD) del instante ISO `ahora` en la zona `timeZone`. Determinista (Intl, sin locale ambiguo). */
+export function fechaLocal(ahoraISO: string, timeZone: string = TZ_CUENTA_ADS): string {
+  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+  return fmt.format(new Date(ahoraISO)); // en-CA ⇒ 'YYYY-MM-DD'
+}
+
+/** Resta `dias` a una fecha 'YYYY-MM-DD' de forma determinista (aritmética en UTC puro sobre la fecha civil). */
+function restarDias(fecha: string, dias: number): string {
+  const [y, m, d] = fecha.split('-').map(Number) as [number, number, number];
+  const ms = Date.UTC(y, m - 1, d) - dias * 86_400_000;
+  const dt = new Date(ms);
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${dt.getUTCFullYear()}-${mm}-${dd}`;
+}
 
 /**
- * Snapshot ACUMULADO de campaña (sin filtro de fecha): devuelve la campaña y sus métricas totales aunque no
- * haya actividad diaria. Permite observar el hecho real "la campaña existe, está ENABLED y aún no sirve
- * (0 impresiones)" cuando la consulta diaria no devuelve filas. NO fabrica actividad: si el valor es 0, es 0.
+ * Ventana [desde, hasta] de `dias` días que INCLUYE hoy (hasta = hoy en la zona de la cuenta). Reemplaza al
+ * preset `LAST_7_DAYS` (que excluye hoy). Determinista a partir del instante de sync inyectado.
+ */
+export function ventanaIngesta(ahoraISO: string, dias = 7, timeZone: string = TZ_CUENTA_ADS): { desde: string; hasta: string } {
+  const hasta = fechaLocal(ahoraISO, timeZone);
+  return { desde: restarDias(hasta, dias - 1), hasta };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Consultas GAQL (sólo lectura). Ventana explícita [desde, hasta] que incluye hoy.
+// ─────────────────────────────────────────────────────────────────────────────
+export function gaqlCampanias(desde: string, hasta: string): string {
+  return `SELECT campaign.id, campaign.name, campaign.status, segments.date, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.average_cpc, metrics.ctr FROM campaign WHERE segments.date BETWEEN '${desde}' AND '${hasta}'`;
+}
+
+export function gaqlTerminos(desde: string, hasta: string): string {
+  return `SELECT search_term_view.search_term, campaign.id, segments.date, metrics.impressions, metrics.clicks, metrics.cost_micros FROM search_term_view WHERE segments.date BETWEEN '${desde}' AND '${hasta}'`;
+}
+
+/**
+ * Snapshot ACUMULADO de campaña (sin filtro de fecha): devuelve la campaña y sus métricas totales (all-time)
+ * aunque no haya actividad diaria. Permite observar el hecho real "la campaña existe, está ENABLED y aún no
+ * sirve (0 impresiones)" y, ya sirviendo, el acumulado vigente. NO fabrica actividad: si el valor es 0, es 0.
  */
 export const GAQL_CAMPANIA_SNAPSHOT =
   'SELECT campaign.id, campaign.name, campaign.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.average_cpc, metrics.ctr FROM campaign';
@@ -126,41 +163,39 @@ export function mapearCampania(rows: readonly FilaGoogleAds[]): EntradaObservaci
 }
 
 /**
- * Mapea el snapshot ACUMULADO de campaña a observaciones REAL, una por métrica, fechadas con `fechaSync`
- * (YYYY-MM-DD del momento de ingesta). externalEventId = `google-ads:campaign:<id>:snapshot:<fechaSync>:<metric>`
- * ⇒ idempotente por día (un snapshot por día). Registra el estado real aunque sea 0 (no inventa actividad).
+ * Snapshot ACUMULADO ACTUAL de la campaña (all-time), extraído de la fila del snapshot. A diferencia de las
+ * observaciones (first-wins, inmutables), el snapshot vigente se persiste en un stream dedicado LAST-WINS para
+ * que el panel refleje el acumulado más reciente en cada sync (cada 15 min), sin congelar el valor del día.
+ * `ctr`/`cpc` NO se transportan: se derivan aguas abajo respetando la semántica NO_CALCULABLE (denominador 0).
  */
-export function mapearCampaniaSnapshot(rows: readonly FilaGoogleAds[], fechaSync: string): EntradaObservacionReal[] {
-  const salida: EntradaObservacionReal[] = [];
-  for (const row of rows) {
-    const campaign = obj(row.campaign);
-    const metrics = obj(row.metrics);
-    const campaignId = str(campaign.id);
-    if (!campaignId) continue;
-    const campaignName = str(campaign.name);
-    const status = str(campaign.status);
-    for (const spec of METRICAS_CAMPANIA) {
-      const valor = spec.valor(metrics);
-      if (valor === null) continue; // métrica ausente en la fila ⇒ no se genera (no se inventa)
-      salida.push({
-        provider: PROVIDER,
-        externalEventId: `${PROVIDER}:campaign:${campaignId}:snapshot:${fechaSync}:${spec.metric}`,
-        eventName: `ads_campaign_snapshot:${spec.metric}`,
-        occurredAt: `${fechaSync}T00:00:00Z`,
-        kpiId: spec.metric,
-        metrica: spec.metric,
-        valor,
-        unidad: spec.unidad,
-        calidad: CALIDAD_INGESTA,
-        cobertura: 1,
-        source: PROVIDER,
-        utmCampaign: campaignName,
-        diagnostico: false,
-        limitaciones: status ? [`campaign_status=${status}`] : [],
-      });
-    }
-  }
-  return salida;
+export interface SnapshotAdsActual {
+  readonly campaignId: string;
+  readonly campaignName: string | null;
+  readonly status: string | null;
+  readonly impressions: number | null;
+  readonly clicks: number | null;
+  readonly cost: number | null;
+  readonly at: string; // instante de sync (ISO) — orden last-wins
+}
+
+/** Extrae el snapshot acumulado de la 1ª fila (la consulta snapshot devuelve la campaña). null si no hay id. */
+export function extraerSnapshotActual(rows: readonly FilaGoogleAds[], at: string): SnapshotAdsActual | null {
+  const row = rows[0];
+  if (!row) return null;
+  const campaign = obj(row.campaign);
+  const metrics = obj(row.metrics);
+  const campaignId = str(campaign.id);
+  if (!campaignId) return null;
+  const costMicros = num(metrics.costMicros);
+  return {
+    campaignId,
+    campaignName: str(campaign.name),
+    status: str(campaign.status),
+    impressions: num(metrics.impressions),
+    clicks: num(metrics.clicks),
+    cost: costMicros === null ? null : costMicros / 1e6,
+    at,
+  };
 }
 
 /** sha1 corto (12 hex) de un texto — determinista, sin PII (un término de búsqueda no es dato personal). */

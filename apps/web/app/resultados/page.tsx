@@ -14,7 +14,7 @@ interface FunnelCounts { demo_cta_clicked: number; demo_form_started: number; de
 interface GrowthFunnel { comercial: FunnelCounts; diagnostico: FunnelCounts }
 interface SearchTerm { termino: string; impresiones: number; clics: number }
 interface Atribucion { demosAtribuiblesAds: null; costePorDemo: null; estado: string }
-interface Sync { provider: string; ok: boolean | null; at: string | null }
+interface Sync { provider: string; ok: boolean | null; at: string | null; estado?: 'OK' | 'PARCIAL' | 'FALLO' | null }
 interface Panel {
   campaign: Campaign; ads: Ads; growthFunnel: GrowthFunnel; searchTerms: SearchTerm[];
   atribucion: Atribucion; sincronizaciones: Sync[]; lecturaSoec: string; modo: string;
@@ -122,7 +122,11 @@ export default function Resultados(): React.ReactElement {
       {/* Términos de búsqueda reales */}
       <h2 className="block">Términos de búsqueda reales</h2>
       {sinTerminos ? (
-        <p className="note">Todavía no hay términos de búsqueda porque la campaña no registra impresiones.</p>
+        <p className="note">
+          {(d.ads.impressions ?? 0) > 0
+            ? 'Sin términos de búsqueda disponibles todavía para la ventana consultada.'
+            : 'Todavía no hay términos de búsqueda: la campaña aún no registra impresiones.'}
+        </p>
       ) : (
         <div className="card" style={{ padding: '6px 16px' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
@@ -149,11 +153,16 @@ export default function Resultados(): React.ReactElement {
       {/* Última sincronización */}
       <h2 className="block">Última sincronización</h2>
       <div className="card" style={{ padding: '12px 16px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        {d.sincronizaciones.map((s) => (
-          <span key={s.provider} className={`pill ${s.ok ? 'ok' : s.ok === false ? 'warn' : 'mut'}`} style={{ fontSize: 11 }}>
-            {s.provider} {s.ok ? '✓' : s.ok === false ? '✗' : '—'} {s.at ? new Date(s.at).toLocaleString('es-CL') : 'sin datos'}
-          </span>
-        ))}
+        {d.sincronizaciones.map((s) => {
+          const parcial = s.estado === 'PARCIAL';
+          const cls = parcial ? 'warn' : s.ok ? 'ok' : s.ok === false ? 'warn' : 'mut';
+          const icono = parcial ? '◐' : s.ok ? '✓' : s.ok === false ? '✗' : '—';
+          return (
+            <span key={s.provider} className={`pill ${cls}`} style={{ fontSize: 11 }}>
+              {s.provider} {icono}{parcial ? ' parcial' : ''} {s.at ? new Date(s.at).toLocaleString('es-CL') : 'sin datos'}
+            </span>
+          );
+        })}
         <span className="pill ok" style={{ fontSize: 10.5, marginLeft: 'auto' }}>Datos reales</span>
       </div>
 

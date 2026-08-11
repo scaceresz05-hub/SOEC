@@ -26,18 +26,38 @@ export interface DependenciasScheduler {
   readonly org: string;
 }
 
+/** Estado de una fuente en una corrida. PARCIAL = ingirió parte (alguna consulta falló) sin perder el resto. */
+export type EstadoFuente = 'OK' | 'PARCIAL' | 'FALLO';
+/** Estado global de la corrida multi-fuente (observabilidad del scheduler / código de salida del launcher). */
+export type EstadoCorrida = 'GLOBAL_OK' | 'PARTIAL_FAILURE' | 'TOTAL_FAILURE';
+
 export interface ResultadoFuente {
   readonly provider: string;
-  readonly ok: boolean;
+  readonly ok: boolean; // false SÓLO en FALLO total de la fuente; PARCIAL mantiene ok=true (no se pierde lo demás)
+  readonly estado: EstadoFuente;
   readonly resumen?: unknown;
   readonly error?: string;
 }
 
 export interface EstadoSync {
   readonly ok: boolean;
+  readonly estado: EstadoFuente;
   readonly at: string;
   readonly resumen?: unknown;
   readonly error?: string;
+}
+
+/** Deriva el estado de la fuente desde su resumen: usa `resumen.estado` si lo expone (Google Ads); si no, OK. */
+function estadoDeResumen(resumen: unknown): EstadoFuente {
+  const e = (resumen as { estado?: unknown } | null)?.estado;
+  return e === 'OK' || e === 'PARCIAL' || e === 'FALLO' ? e : 'OK';
+}
+
+/** Estado global: OK si todas OK; TOTAL si todas FALLO; PARCIAL en cualquier mezcla (o alguna PARCIAL). */
+function estadoGlobal(estados: readonly EstadoFuente[]): EstadoCorrida {
+  if (estados.length > 0 && estados.every((e) => e === 'OK')) return 'GLOBAL_OK';
+  if (estados.length > 0 && estados.every((e) => e === 'FALLO')) return 'TOTAL_FAILURE';
+  return 'PARTIAL_FAILURE';
 }
 
 const ATRIB: Attribution = {
@@ -58,24 +78,25 @@ export class SchedulerIngesta {
     return `ingesta-estado:${provider}:${this.deps.org}`;
   }
 
-  async correrTodo(ctx: RequestContext, opts: { ahora: string }): Promise<{ fuentes: ResultadoFuente[] }> {
+  async correrTodo(ctx: RequestContext, opts: { ahora: string }): Promise<{ fuentes: ResultadoFuente[]; estado: EstadoCorrida }> {
     const resultados: ResultadoFuente[] = [];
     for (const fuente of this.deps.fuentes) {
       let estado: EstadoSync;
       let resultado: ResultadoFuente;
       try {
         const resumen = await fuente.ingesta.correrUnaVez(ctx, { ahora: opts.ahora });
-        estado = { ok: true, at: opts.ahora, resumen };
-        resultado = { provider: fuente.provider, ok: true, resumen };
+        const est = estadoDeResumen(resumen); // PARCIAL no pierde lo demás: ok se mantiene true salvo FALLO total
+        estado = { ok: est !== 'FALLO', estado: est, at: opts.ahora, resumen };
+        resultado = { provider: fuente.provider, ok: est !== 'FALLO', estado: est, resumen };
       } catch (e) {
         const error = e instanceof Error ? e.message : String(e);
-        estado = { ok: false, at: opts.ahora, error };
-        resultado = { provider: fuente.provider, ok: false, error };
+        estado = { ok: false, estado: 'FALLO', at: opts.ahora, error };
+        resultado = { provider: fuente.provider, ok: false, estado: 'FALLO', error };
       }
       await this.registrarEstado(ctx, fuente.provider, estado);
       resultados.push(resultado);
     }
-    return { fuentes: resultados };
+    return { fuentes: resultados, estado: estadoGlobal(resultados.map((r) => r.estado)) };
   }
 
   private async registrarEstado(ctx: RequestContext, provider: string, estado: EstadoSync): Promise<void> {

@@ -53,12 +53,14 @@ describe('GoogleAdsAdapter', () => {
     let devTokenRecibido: string | null = null;
     let authRecibido: string | null = null;
     let loginRecibido: string | null = null;
+    let urlSearchStream: string | null = null;
     const fetchFn = (async (input: string | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('oauth2.googleapis.com')) {
         return new Response(JSON.stringify({ access_token: ACCESS_TOKEN }), { status: 200 });
       }
       if (url.includes('googleads.googleapis.com')) {
+        urlSearchStream = url;
         const h = init?.headers as Record<string, string>;
         devTokenRecibido = h['developer-token'] ?? null;
         authRecibido = h['Authorization'] ?? null;
@@ -73,6 +75,9 @@ describe('GoogleAdsAdapter', () => {
 
     expect(res.estado).toBe('OK');
     expect(res.salida?.body).toContain('24120966895');
+    // usa la versión soportada v25 (v21 quedó deprecada / bloqueada con HTTP 400 UNSUPPORTED_VERSION)
+    expect(urlSearchStream).toContain('/v25/customers/8605539300/googleAds:searchStream');
+    expect(urlSearchStream).not.toContain('/v21/');
     // los tokens viajaron en headers pero NO aparecen en la salida
     expect(devTokenRecibido).toBe(DEV_TOKEN);
     expect(authRecibido).toBe(`Bearer ${ACCESS_TOKEN}`);
