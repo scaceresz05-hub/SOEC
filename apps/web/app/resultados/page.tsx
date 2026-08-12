@@ -19,6 +19,13 @@ interface Panel {
   campaign: Campaign; ads: Ads; growthFunnel: GrowthFunnel; searchTerms: SearchTerm[];
   atribucion: Atribucion; sincronizaciones: Sync[]; lecturaSoec: string; modo: string;
 }
+interface LecturaDirector {
+  veredicto: 'NO_EVALUABLE' | 'OBSERVAR' | 'RECOMENDAR';
+  naturaleza?: 'REAL'; motivo?: string;
+  hechos?: { impresiones: number; clics: number; gasto: number; ctr: number | null; cpc: number | null; conversionesAtribuiblesAds: number };
+  interpretacion?: { clasificacionDesempeno: string; roi: { clasificacion: string; motivo: string }; calidad: string; evidenciaSuficiente: boolean; explicacion: string; limitaciones: string[]; faltantes: string[]; estadoGobernanza: string };
+  recomendacion?: { tipo: string; motivo: string; evidencia: string; confianza: string; estado: string } | null;
+}
 
 const num = (n: number | null): string => (n === null ? '—' : n.toLocaleString('es-CL'));
 const pct = (n: number | null): string => (n === null ? '—' : `${(n * 100).toFixed(2)} %`);
@@ -41,8 +48,15 @@ function Tarjeta({ titulo, valor, nota }: { titulo: string; valor: string; nota?
   );
 }
 
+const VEREDICTO_META: Record<string, { label: string; cls: string }> = {
+  NO_EVALUABLE: { label: 'No evaluable', cls: 'mut' },
+  OBSERVAR: { label: 'Observar', cls: 'warn' },
+  RECOMENDAR: { label: 'Recomendar', cls: 'ok' },
+};
+
 export default function Resultados(): React.ReactElement {
   const [d, setD] = useState<Panel | null>(null);
+  const [ld, setLd] = useState<LecturaDirector | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     (async () => {
@@ -51,6 +65,12 @@ export default function Resultados(): React.ReactElement {
         if (!r.ok) { setError('No se pudo cargar el panel de resultados.'); return; }
         setD((await r.json()) as Panel);
       } catch { setError('No se pudo contactar el servicio.'); }
+    })();
+    (async () => {
+      try {
+        const r = await fetch('/api/medicion/lectura-director', { cache: 'no-store' });
+        if (r.ok) setLd((await r.json()) as LecturaDirector);
+      } catch { /* la lectura del Director es opcional; el panel funciona sin ella */ }
     })();
   }, []);
 
@@ -76,6 +96,57 @@ export default function Resultados(): React.ReactElement {
         <span className="pill ok" style={{ fontSize: 10.5 }}>Datos reales</span>
         {d.campaign.id ? <span className="s" style={{ fontSize: 12, color: 'var(--ink-faint)' }}>ID de campaña: {d.campaign.id}</span> : null}
       </p>
+
+      {/* Lectura del Director SOEC (sobre evidencia REAL) */}
+      {ld ? (
+        <>
+          <h2 className="block">Lectura del Director SOEC</h2>
+          <div className="card" style={{ padding: '14px 16px' }}>
+            <p style={{ margin: 0, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span className="s" style={{ fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--ink-faint)' }}>Veredicto</span>
+              <span className={`pill ${VEREDICTO_META[ld.veredicto]?.cls ?? 'mut'}`} style={{ fontSize: 12, fontWeight: 600 }}>{VEREDICTO_META[ld.veredicto]?.label ?? ld.veredicto}</span>
+              <span className="pill ok" style={{ fontSize: 10.5 }}>Evidencia {ld.naturaleza ?? 'REAL'}</span>
+            </p>
+
+            {ld.motivo && !ld.hechos ? <p className="note" style={{ marginTop: 10 }}>{ld.motivo}</p> : null}
+
+            {ld.hechos ? (
+              <p className="s" style={{ margin: '12px 0 4px', fontWeight: 600, color: 'var(--ink-soft)' }}>1 · Hechos reales</p>
+            ) : null}
+            {ld.hechos ? (
+              <p className="s" style={{ margin: 0 }}>
+                {num(ld.hechos.impresiones)} impresiones · {num(ld.hechos.clics)} clics · {clp(ld.hechos.gasto)} · CTR {pct(ld.hechos.ctr)} · CPC {clp(ld.hechos.cpc)} · {ld.hechos.conversionesAtribuiblesAds} conversiones atribuibles a Ads
+              </p>
+            ) : null}
+
+            {ld.interpretacion ? (
+              <>
+                <p className="s" style={{ margin: '12px 0 4px', fontWeight: 600, color: 'var(--ink-soft)' }}>2 · Interpretación de SOEC</p>
+                <p className="s" style={{ margin: 0 }}>{ld.interpretacion.explicacion}</p>
+                <p className="s" style={{ margin: '4px 0 0', color: 'var(--ink-faint)' }}>
+                  Desempeño: <b>{ld.interpretacion.clasificacionDesempeno}</b> · ROI: <b>{ld.interpretacion.roi.clasificacion}</b> ({ld.interpretacion.roi.motivo}) · Calidad: <b>{ld.interpretacion.calidad}</b> · Evidencia suficiente: <b>{ld.interpretacion.evidenciaSuficiente ? 'sí' : 'no'}</b>
+                </p>
+                {ld.interpretacion.limitaciones.length > 0 ? (
+                  <p className="s" style={{ margin: '4px 0 0', color: 'var(--ink-faint)' }}>Limitaciones: {ld.interpretacion.limitaciones.join(' · ')}</p>
+                ) : null}
+                {ld.interpretacion.faltantes.length > 0 ? (
+                  <p className="s" style={{ margin: '4px 0 0', color: 'var(--ink-faint)' }}>Faltan: {ld.interpretacion.faltantes.join(' · ')}</p>
+                ) : null}
+              </>
+            ) : null}
+
+            <p className="s" style={{ margin: '12px 0 4px', fontWeight: 600, color: 'var(--ink-soft)' }}>3 · Recomendación</p>
+            {ld.recomendacion ? (
+              <p className="s" style={{ margin: 0 }}>
+                <b>{ld.recomendacion.tipo}</b> — {ld.recomendacion.motivo}{' '}
+                <span className="pill warn" style={{ fontSize: 10.5 }}>{ld.recomendacion.estado}</span>
+              </p>
+            ) : (
+              <p className="s" style={{ margin: 0, color: 'var(--ink-faint)' }}>Ninguna. La evidencia real todavía no justifica modificar la campaña; SOEC observa. No se ejecuta ninguna acción sobre Google Ads.</p>
+            )}
+          </div>
+        </>
+      ) : null}
 
       {/* Tarjetas Google Ads */}
       <h2 className="block">Google Ads</h2>

@@ -9,6 +9,7 @@ import { ObservacionService } from '@soec/motor-medicion';
 import { MeasurementExperience } from './measurement-experience';
 import { construirPanel, type ObsPanel, type Sync } from './ingesta/panel-resultados';
 import { adsSnapshotStreamId, ultimoSnapshotAds } from './ingesta/ingesta-google-ads-service';
+import { LecturaDirectorRealService, ORG_REAL } from './real-director/lectura-director-real';
 
 // Organización donde la ingesta real (one-shot smileflow-growth) deposita las observaciones REAL.
 const ORG_INGESTA_REAL = 'org-smileflow';
@@ -99,6 +100,18 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const snapshotActual = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(ORG_INGESTA_REAL)));
 
     return reply.send(construirPanel(observaciones, sincronizaciones, snapshotActual));
+  });
+
+  // LECTURA DEL DIRECTOR sobre datos REALES (org-smileflow). GET = lectura pura (sin efectos);
+  // POST recalcular = recorre M8 → MeasurementService → M9 → ResultadoCampania y persiste el resultado.
+  const lecturaDirector = new LecturaDirectorRealService(store);
+  app.get('/medicion/lectura-director', async (_req, reply) => {
+    const lectura = await lecturaDirector.leerUltima(ORG_REAL);
+    if (!lectura) return reply.send({ veredicto: 'NO_EVALUABLE', naturaleza: 'REAL', motivo: 'aún no se ha calculado la lectura sobre datos reales' });
+    return reply.send(lectura);
+  });
+  app.post('/medicion/lectura-director/recalcular', async (_req, reply) => {
+    return reply.code(201).send(await lecturaDirector.recalcular(ORG_REAL, new Date().toISOString()));
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {

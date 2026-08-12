@@ -19,6 +19,7 @@ import { IngestaGoogleAds } from '../src/ingesta/ingesta-google-ads-service';
 import { SmileFlowGrowthAdapter } from '../src/ingesta/smileflow-growth-adapter';
 import { IngestaSmileFlowGrowth } from '../src/ingesta/ingesta-smileflow-service';
 import { SchedulerIngesta } from '../src/ingesta/scheduler';
+import { LecturaDirectorRealService } from '../src/real-director/lectura-director-real';
 
 const ORG = 'org-smileflow';
 const ARCHIVO_ENV = 'C:/proyectos/SOEC/.env.google-ads';
@@ -122,6 +123,15 @@ async function main(): Promise<void> {
 
     const resultado = await scheduler.correrTodo(ctx(ORG), { ahora: new Date().toISOString() });
     console.log(JSON.stringify(resultado, null, 2)); // sin secretos
+
+    // Tras ingerir, recalcular la LECTURA DEL DIRECTOR sobre datos REALES (M8→MeasurementService→M9→ResultadoCampania).
+    // No debe romper el tick de ingesta: si falla, se registra pero no cambia el código de salida.
+    try {
+      const lectura = await new LecturaDirectorRealService(store).recalcular(ORG, new Date().toISOString());
+      console.log(JSON.stringify({ lecturaDirector: { veredicto: lectura.veredicto, naturaleza: lectura.naturaleza } }, null, 2));
+    } catch (e) {
+      console.error('lectura-director recalcular falló (no afecta la ingesta):', e instanceof Error ? e.message : String(e));
+    }
     // Código de salida = observabilidad del scheduler (el launcher lo propaga a Task Scheduler):
     //   GLOBAL_OK ⇒ 0 · PARTIAL_FAILURE ⇒ 3 (una fuente/consulta falló, el resto SÍ persistió) · TOTAL_FAILURE ⇒ 2
     process.exitCode = resultado.estado === 'GLOBAL_OK' ? 0 : resultado.estado === 'PARTIAL_FAILURE' ? 3 : 2;
