@@ -26,6 +26,20 @@ interface LecturaDirector {
   interpretacion?: { clasificacionDesempeno: string; roi: { clasificacion: string; motivo: string }; calidad: string; evidenciaSuficiente: boolean; explicacion: string; limitaciones: string[]; faltantes: string[]; estadoGobernanza: string };
   recomendacion?: { tipo: string; motivo: string; evidencia: string; confianza: string; estado: string } | null;
 }
+interface PlanItem {
+  intencion: {
+    palanca: string; entidadRef: string; riesgo: string; confianza: string;
+    problema: string; recomendacion: string; impactoEsperado: string; riesgoExplicacion: string; rollbackPrevisto: string;
+    valorAntes: string; valorDespues: string; evidencia: { resumen: string; suficiente: boolean };
+    limitesAplicados: string[]; detalleTecnico: { operacion: string; descripcionMutate: string };
+  };
+  gates: { bloqueos: string[]; puedeEjecutarReal: boolean; modo: string };
+  aprobacion: { requerida: boolean; simulada: boolean; actor: string | null; nota: string };
+  simulacion: { ejecutado: boolean; mutateSimulado: string; antes: string; despues: string; rollback: { descripcion: string } };
+}
+interface PlanAccion {
+  modo: string; autonomousReal: boolean; perfil?: string; totalPropuestas: number; resumenSimple: string; items: PlanItem[];
+}
 
 const num = (n: number | null): string => (n === null ? '—' : n.toLocaleString('es-CL'));
 const pct = (n: number | null): string => (n === null ? '—' : `${(n * 100).toFixed(2)} %`);
@@ -57,6 +71,7 @@ const VEREDICTO_META: Record<string, { label: string; cls: string }> = {
 export default function Resultados(): React.ReactElement {
   const [d, setD] = useState<Panel | null>(null);
   const [ld, setLd] = useState<LecturaDirector | null>(null);
+  const [plan, setPlan] = useState<PlanAccion | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     (async () => {
@@ -71,6 +86,12 @@ export default function Resultados(): React.ReactElement {
         const r = await fetch('/api/medicion/lectura-director', { cache: 'no-store' });
         if (r.ok) setLd((await r.json()) as LecturaDirector);
       } catch { /* la lectura del Director es opcional; el panel funciona sin ella */ }
+    })();
+    (async () => {
+      try {
+        const r = await fetch('/api/medicion/plan-accion', { cache: 'no-store' });
+        if (r.ok) setPlan((await r.json()) as PlanAccion);
+      } catch { /* el plan de acción es opcional */ }
     })();
   }, []);
 
@@ -144,6 +165,53 @@ export default function Resultados(): React.ReactElement {
             ) : (
               <p className="s" style={{ margin: 0, color: 'var(--ink-faint)' }}>Ninguna. La evidencia real todavía no justifica modificar la campaña; SOEC observa. No se ejecuta ninguna acción sobre Google Ads.</p>
             )}
+          </div>
+        </>
+      ) : null}
+
+      {/* Plan de acción (G1 · SIMULACIÓN, sin efecto real) */}
+      {plan ? (
+        <>
+          <h2 className="block">Plan de acción <span className="pill mut" style={{ fontSize: 10.5 }}>SIMULACIÓN · no se ejecuta nada</span></h2>
+          <div className="card" style={{ padding: '14px 16px' }}>
+            <p className="s" style={{ margin: 0 }}>{plan.resumenSimple}</p>
+            {plan.items.length === 0 ? null : (
+              <div className="stack" style={{ marginTop: 12 }}>
+                {plan.items.map((it, i) => {
+                  const rk = it.intencion.riesgo;
+                  const rkCls = rk === 'bajo' ? 'ok' : rk === 'alto' ? 'warn' : 'mut';
+                  return (
+                    <div key={i} className="card" style={{ padding: '12px 14px', borderLeft: '3px solid var(--line)' }}>
+                      <p className="s" style={{ margin: 0, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span className={`pill ${rkCls}`} style={{ fontSize: 10.5 }}>Riesgo {rk}</span>
+                        <span className="pill mut" style={{ fontSize: 10.5 }}>Confianza {it.intencion.confianza}</span>
+                        {it.aprobacion.requerida ? <span className="pill warn" style={{ fontSize: 10.5 }}>Requiere tu aprobación</span> : null}
+                        <span className="pill mut" style={{ fontSize: 10.5 }}>DRY-RUN · no ejecutado</span>
+                      </p>
+                      <p className="s" style={{ margin: '8px 0 0' }}><b>Problema:</b> {it.intencion.problema}</p>
+                      <p className="s" style={{ margin: '4px 0 0' }}><b>Recomendación:</b> {it.intencion.recomendacion}</p>
+                      <p className="s" style={{ margin: '4px 0 0' }}><b>Qué se espera:</b> {it.intencion.impactoEsperado}</p>
+                      <p className="s" style={{ margin: '4px 0 0', color: 'var(--ink-faint)' }}><b>Riesgo:</b> {it.intencion.riesgoExplicacion}</p>
+                      <p className="s" style={{ margin: '4px 0 0', color: 'var(--ink-faint)' }}><b>Si sale mal:</b> {it.intencion.rollbackPrevisto}</p>
+                      <details style={{ marginTop: 6 }}>
+                        <summary className="s" style={{ cursor: 'pointer', color: 'var(--ink-faint)' }}>Detalle técnico</summary>
+                        <p className="s" style={{ margin: '4px 0 0', color: 'var(--ink-faint)' }}>
+                          Antes: {it.simulacion.antes} → Después: {it.simulacion.despues}<br />
+                          Evidencia: {it.intencion.evidencia.resumen}<br />
+                          Operación (simulada, NO enviada): <code>{it.simulacion.mutateSimulado}</code><br />
+                          Rollback previsto: {it.simulacion.rollback.descripcion}<br />
+                          Límites aplicados: {it.intencion.limitesAplicados.join(' · ')}<br />
+                          Aprobación simulada por: {it.aprobacion.actor ?? '—'} · Gates que bloquearían el efecto real: {it.gates.bloqueos.join(', ') || 'ninguno'}
+                        </p>
+                      </details>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <p className="s" style={{ margin: '10px 0 0', color: 'var(--ink-faint)' }}>
+              Etapa G1 (asistido, simulación): la escritura real en Google Ads está <b>desactivada</b>. SOEC nunca ejecuta nada sin tu aprobación.
+            </p>
           </div>
         </>
       ) : null}

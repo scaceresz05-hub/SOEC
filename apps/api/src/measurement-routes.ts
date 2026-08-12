@@ -10,6 +10,7 @@ import { MeasurementExperience } from './measurement-experience';
 import { construirPanel, type ObsPanel, type Sync } from './ingesta/panel-resultados';
 import { adsSnapshotStreamId, ultimoSnapshotAds } from './ingesta/ingesta-google-ads-service';
 import { LecturaDirectorRealService, ORG_REAL } from './real-director/lectura-director-real';
+import { PlanAccionDryRunService, type PerfilUsuario } from './autonomia-ads/plan-accion-service';
 
 // Organización donde la ingesta real (one-shot smileflow-growth) deposita las observaciones REAL.
 const ORG_INGESTA_REAL = 'org-smileflow';
@@ -112,6 +113,19 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
   });
   app.post('/medicion/lectura-director/recalcular', async (_req, reply) => {
     return reply.code(201).send(await lecturaDirector.recalcular(ORG_REAL, new Date().toISOString()));
+  });
+
+  // PLAN DE ACCIÓN (G1 · ASISTIDO DRY-RUN). GET = plan pura (sin efectos); POST genera y persiste.
+  // NADA se ejecuta: AUTONOMOUS_REAL apagado, el Executor sólo simula.
+  const planAccion = new PlanAccionDryRunService(store);
+  app.get('/medicion/plan-accion', async (_req, reply) => {
+    const plan = await planAccion.leerUltimo(ORG_REAL);
+    if (!plan) return reply.send({ modo: 'DRY_RUN', autonomousReal: false, totalPropuestas: 0, resumenSimple: 'Aún no se ha generado el plan de acción.', items: [] });
+    return reply.send(plan);
+  });
+  app.post('/medicion/plan-accion/generar', async (req, reply) => {
+    const { perfil } = (req.body ?? {}) as { perfil?: PerfilUsuario };
+    return reply.code(201).send(await planAccion.generar(ORG_REAL, new Date().toISOString(), perfil ? { perfil } : {}));
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {
