@@ -40,6 +40,11 @@ interface PlanItem {
 interface PlanAccion {
   modo: string; autonomousReal: boolean; perfil?: string; totalPropuestas: number; resumenSimple: string; items: PlanItem[];
 }
+interface AprobacionItem {
+  intencionId: string; estadoIntencion: string; estadoAprobacion: string;
+  queDetecte: string; porQueImporta: string; queHare: string; riesgo: string; impactoEsperado: string;
+  detalleTecnico: { keyword: string; match: string; campaign: string; diff: string };
+}
 
 const num = (n: number | null): string => (n === null ? '—' : n.toLocaleString('es-CL'));
 const pct = (n: number | null): string => (n === null ? '—' : `${(n * 100).toFixed(2)} %`);
@@ -72,6 +77,7 @@ export default function Resultados(): React.ReactElement {
   const [d, setD] = useState<Panel | null>(null);
   const [ld, setLd] = useState<LecturaDirector | null>(null);
   const [plan, setPlan] = useState<PlanAccion | null>(null);
+  const [bandeja, setBandeja] = useState<AprobacionItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     (async () => {
@@ -93,7 +99,23 @@ export default function Resultados(): React.ReactElement {
         if (r.ok) setPlan((await r.json()) as PlanAccion);
       } catch { /* el plan de acción es opcional */ }
     })();
+    (async () => {
+      try {
+        const r = await fetch('/api/medicion/g2a-bandeja', { cache: 'no-store' });
+        if (r.ok) { const j = await r.json(); setBandeja((j.bandeja ?? []) as AprobacionItem[]); }
+      } catch { /* la bandeja es opcional */ }
+    })();
   }, []);
+
+  const accionG2A = async (accion: 'g2a-aprobar' | 'g2a-rechazar', intencionId: string): Promise<void> => {
+    // En G2-A esto es DRY-RUN gobernado (AUTONOMOUS_REAL=false): no toca Google Ads. El actor humano vendría
+    // del usuario autenticado en producción; aquí se envía una etiqueta de demo.
+    try {
+      await fetch(`/api/medicion/${accion}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ intencionId, actorHumano: 'director-humano', motivo: 'revisión' }) });
+      const r = await fetch('/api/medicion/g2a-bandeja', { cache: 'no-store' });
+      if (r.ok) { const j = await r.json(); setBandeja((j.bandeja ?? []) as AprobacionItem[]); }
+    } catch { /* opcional */ }
+  };
 
   if (error) return <div className="wrap panel"><p className="lede">{error}</p><p><Link href="/">← Volver al inicio</Link></p></div>;
   if (!d) return <div className="wrap panel"><p className="lede">Cargando resultados reales…</p></div>;
@@ -211,6 +233,48 @@ export default function Resultados(): React.ReactElement {
             )}
             <p className="s" style={{ margin: '10px 0 0', color: 'var(--ink-faint)' }}>
               Etapa G1 (asistido, simulación): la escritura real en Google Ads está <b>desactivada</b>. SOEC nunca ejecuta nada sin tu aprobación.
+            </p>
+          </div>
+        </>
+      ) : null}
+
+      {/* Bandeja de aprobaciones (G2-A · dry-run gobernado, sin efecto real) */}
+      {bandeja ? (
+        <>
+          <h2 className="block">Aprobaciones pendientes <span className="pill mut" style={{ fontSize: 10.5 }}>G2-A · escritura desactivada</span></h2>
+          <div className="card" style={{ padding: '14px 16px' }}>
+            {bandeja.length === 0 ? (
+              <p className="s" style={{ margin: 0, color: 'var(--ink-faint)' }}>No hay acciones pendientes de tu aprobación. SOEC observa; cuando la evidencia lo justifique, aquí verás recomendaciones para autorizar o rechazar (nunca se ejecuta nada sin tu aprobación).</p>
+            ) : (
+              <div className="stack">
+                {bandeja.map((it) => (
+                  <div key={it.intencionId} className="card" style={{ padding: '12px 14px', borderLeft: '3px solid var(--line)' }}>
+                    <p className="s" style={{ margin: 0, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <span className="pill warn" style={{ fontSize: 10.5 }}>{it.estadoAprobacion}</span>
+                      <span className="pill mut" style={{ fontSize: 10.5 }}>{it.estadoIntencion}</span>
+                    </p>
+                    <p className="s" style={{ margin: '8px 0 0' }}><b>Qué detecté:</b> {it.queDetecte}</p>
+                    <p className="s" style={{ margin: '4px 0 0' }}><b>Por qué importa:</b> {it.porQueImporta}</p>
+                    <p className="s" style={{ margin: '4px 0 0' }}><b>Qué haré:</b> {it.queHare}</p>
+                    <p className="s" style={{ margin: '4px 0 0', color: 'var(--ink-faint)' }}><b>Riesgo:</b> {it.riesgo} · <b>Impacto:</b> {it.impactoEsperado}</p>
+                    <details style={{ marginTop: 6 }}>
+                      <summary className="s" style={{ cursor: 'pointer', color: 'var(--ink-faint)' }}>Ver detalles técnicos</summary>
+                      <p className="s" style={{ margin: '4px 0 0', color: 'var(--ink-faint)' }}>
+                        keyword: <code>{it.detalleTecnico.keyword}</code> · match: {it.detalleTecnico.match}<br />
+                        campaña: {it.detalleTecnico.campaign}<br />
+                        cambio: {it.detalleTecnico.diff}
+                      </p>
+                    </details>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                      <button className="pill ok" style={{ fontSize: 12, cursor: 'pointer', border: 'none' }} onClick={() => accionG2A('g2a-aprobar', it.intencionId)}>Autorizar</button>
+                      <button className="pill warn" style={{ fontSize: 12, cursor: 'pointer', border: 'none' }} onClick={() => accionG2A('g2a-rechazar', it.intencionId)}>Rechazar</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="s" style={{ margin: '10px 0 0', color: 'var(--ink-faint)' }}>
+              Etapa G2-A: la escritura real en Google Ads está <b>desactivada</b>. Autorizar aquí ejecuta una <b>simulación gobernada</b> (dry-run), nunca un cambio real.
             </p>
           </div>
         </>

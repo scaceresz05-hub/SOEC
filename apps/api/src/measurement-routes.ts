@@ -11,6 +11,7 @@ import { construirPanel, type ObsPanel, type Sync } from './ingesta/panel-result
 import { adsSnapshotStreamId, ultimoSnapshotAds } from './ingesta/ingesta-google-ads-service';
 import { LecturaDirectorRealService, ORG_REAL } from './real-director/lectura-director-real';
 import { PlanAccionDryRunService, type PerfilUsuario } from './autonomia-ads/plan-accion-service';
+import { G2AService, ORG_REAL as ORG_G2A } from './autonomia-ads/g2a-service';
 
 // Organización donde la ingesta real (one-shot smileflow-growth) deposita las observaciones REAL.
 const ORG_INGESTA_REAL = 'org-smileflow';
@@ -126,6 +127,26 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
   app.post('/medicion/plan-accion/generar', async (req, reply) => {
     const { perfil } = (req.body ?? {}) as { perfil?: PerfilUsuario };
     return reply.code(201).send(await planAccion.generar(ORG_REAL, new Date().toISOString(), perfil ? { perfil } : {}));
+  });
+
+  // G2-A · bandeja de aprobaciones (lenguaje simple) + aprobar/rechazar. AUTONOMOUS_REAL=false ⇒ dry-run, 0 mutate.
+  const g2a = new G2AService(store);
+  app.get('/medicion/g2a-bandeja', async (_req, reply) => reply.send({ ok: true, bandeja: await g2a.bandeja(ORG_G2A, new Date().toISOString()) }));
+  app.post('/medicion/g2a-aprobar', async (req, reply) => {
+    const { intencionId, actorHumano } = (req.body ?? {}) as { intencionId?: string; actorHumano?: string };
+    if (!intencionId || !actorHumano) return reply.code(400).send({ ok: false, error: 'faltan intencionId/actorHumano' });
+    try {
+      const r = await g2a.aprobarYEjecutar(ORG_G2A, intencionId, actorHumano, new Date().toISOString());
+      return reply.code(201).send({ ok: true, ...r });
+    } catch (e) {
+      return reply.code(400).send({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+  app.post('/medicion/g2a-rechazar', async (req, reply) => {
+    const { intencionId, actorHumano, motivo } = (req.body ?? {}) as { intencionId?: string; actorHumano?: string; motivo?: string };
+    if (!intencionId || !actorHumano) return reply.code(400).send({ ok: false, error: 'faltan intencionId/actorHumano' });
+    await g2a.rechazar(ORG_G2A, intencionId, actorHumano, motivo ?? 'rechazada', new Date().toISOString());
+    return reply.code(201).send({ ok: true });
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {
