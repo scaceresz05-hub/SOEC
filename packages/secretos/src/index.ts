@@ -9,4 +9,5 @@ export * from './domain/registro';
 export * from './domain/errors';
 export * from './port/secret-store';
 export * from './adapters/secret-store-en-memoria';
+export * from './adapters/secret-store-env';
 export * from './app/registro-secretos-service';

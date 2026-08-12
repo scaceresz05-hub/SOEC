@@ -1,7 +1,7 @@
 import { API_BASE } from '../../../../lib/config';
 
-const GET_ACCIONES = new Set(['estado']);
-const POST_ACCIONES = new Set(['preparar', 'sincronizar', 'optimizar']);
+const GET_ACCIONES = new Set(['estado', 'reales', 'panel', 'lectura-director', 'plan-accion', 'g2a-bandeja']);
+const POST_ACCIONES = new Set(['preparar', 'sincronizar', 'optimizar', 'g2a-aprobar', 'g2a-rechazar']);
 
 async function proxiar(path: string, method: 'GET' | 'POST', body?: unknown): Promise<Response> {
   try {

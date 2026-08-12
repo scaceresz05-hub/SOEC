@@ -32,7 +32,8 @@ export interface LoteMetricas {
 
 export interface MetricsSource {
   readonly nombre: string;
-  readonly modo: 'simulado' | 'sandbox';
+  /** `real` = evidencia OBSERVADA de un proveedor real (READ ONLY); `simulado`/`sandbox` = sintético/emulado. */
+  readonly modo: 'simulado' | 'sandbox' | 'real';
   obtener(token: string, cuenta: string, cursor?: string): Promise<LoteMetricas>;
   obtenerDe(token: string, cuenta: string, externalRef: string): Promise<readonly FilaProveedor[]>;
 }

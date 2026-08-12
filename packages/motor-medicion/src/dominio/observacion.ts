@@ -11,9 +11,33 @@
 import type { RecordedEvent } from '@soec/contracts';
 import type { NivelCalidad } from '@soec/medicion';
 
-export type NaturalezaDato = 'SIMULADA' | 'ESTIMADA';
+// El DOMINIO reconoce tres naturalezas, pero las RUTAS DE ENTRADA están separadas por tipo (Opción C):
+//   - `registrar(...)`   sólo admite `NaturalezaSimulable` (SIMULADA | ESTIMADA) — invariante M8 intacto.
+//   - `registrarReal(...)` es la ÚNICA puerta que produce REAL, con procedencia/evidencia externa obligatoria.
+// REAL no es «otro valor del enum»: es un régimen epistemológico distinto (procedencia, idempotencia, traza).
+export type NaturalezaSimulable = 'SIMULADA' | 'ESTIMADA';
+export type NaturalezaDato = NaturalezaSimulable | 'REAL';
 export type EstadoObservacion = 'REGISTRADA' | 'VALIDADA' | 'INVALIDA' | 'DESCARTADA' | 'SUPERADA';
 export type UnidadObservacion = 'conteo' | 'monetario' | 'segundos' | 'porcentaje' | 'ratio';
+
+/**
+ * Procedencia OBLIGATORIA de una observación REAL. Sin esto, un hecho no puede reclamar ser REAL.
+ * No contiene PII: identifica el evento externo y su atribución de medición, nunca a la persona.
+ */
+export interface ProvenanciaReal {
+  readonly provider: string;           // p. ej. 'smileflow-growth'
+  readonly externalEventId: string;    // id estable del evento en el proveedor (clave natural de idempotencia)
+  readonly eventName: string;          // p. ej. 'demo_requested'
+  readonly occurredAt: string;         // cuándo ocurrió en el proveedor (ISO)
+  readonly ingestedAt: string;         // cuándo lo ingirió SOEC (ISO, inyectado)
+  readonly source: string | null;
+  readonly utmSource: string | null;
+  readonly utmMedium: string | null;
+  readonly utmCampaign: string | null;
+  readonly utmContent: string | null;
+  readonly leadRef: string | null;     // correlación pseudónima (nunca PII)
+  readonly diagnostico: boolean;       // true si el evento es reconocible como TEST/DIAG (excluir del aprendizaje)
+}
 
 /** Referencia versionada a un artefacto de M6 (no se copia; se referencia por id+versión). */
 export interface RefVersion {
@@ -38,6 +62,7 @@ export interface DatosObservacion {
   readonly cobertura: number; // [0,1]
   readonly limitaciones: readonly string[];
   readonly evidenciaOperacionalRef: string | null; // referencia a la evidencia de M7 (no su contenido)
+  readonly provenanciaReal?: ProvenanciaReal | null; // presente SÓLO en observaciones REAL (naturaleza='REAL')
 }
 
 export interface ObservacionState {
@@ -53,6 +78,7 @@ export interface ObservacionState {
 
 export const EVENTOS_OBSERVACION = {
   registrada: 'observacion.registrada',
+  registradaReal: 'observacion.registrada-real', // puerta REAL gobernada (Opción C): nace VALIDADA por procedencia externa
   validada: 'observacion.validada',
   invalidada: 'observacion.invalidada',
   descartada: 'observacion.descartada',
@@ -85,6 +111,12 @@ export function aplicarObservacion(state: ObservacionState, event: RecordedEvent
     case EVENTOS_OBSERVACION.registrada: {
       if (state.existe) return next; // idempotente por id determinista
       return { ...next, existe: true, estado: 'REGISTRADA', datos: event.payload as DatosObservacion };
+    }
+    case EVENTOS_OBSERVACION.registradaReal: {
+      // Puerta REAL gobernada: una observación REAL nace ya VALIDADA porque su autoridad es la PROCEDENCIA
+      // externa obligatoria (no la confrontación contra M7). Idempotente por id determinista (provider+extId).
+      if (state.existe) return next;
+      return { ...next, existe: true, estado: 'VALIDADA', datos: event.payload as DatosObservacion };
     }
     case EVENTOS_OBSERVACION.validada: {
       if (!transicionObservacionValida(state.estado, 'VALIDADA')) return next;
