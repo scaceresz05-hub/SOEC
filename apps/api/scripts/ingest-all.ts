@@ -126,6 +126,17 @@ async function main(): Promise<void> {
     const resultado = await scheduler.correrTodo(ctx(ORG), { ahora: new Date().toISOString() });
     console.log(JSON.stringify(resultado, null, 2)); // sin secretos
 
+    // Reconciliación CONVERGENTE de naturaleza TEST/REAL (ventana acotada). Cubre reclasificaciones en la
+    // fuente (is_test false→true) POSTERIORES a la ingesta, que `registrarReal` (first-wins) no releía.
+    // Idempotente y fail-closed; envuelto para NO afectar el tick de ingesta si falla.
+    try {
+      const desde = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(); // ventana de 30 días
+      const rec = await ingestaGrowth.reconciliarDiagnostico(ctx(ORG), { ahora: new Date().toISOString(), since: desde });
+      if (rec.reconciliados > 0) console.log(JSON.stringify({ reconcileGrowth: rec }, null, 2));
+    } catch (e) {
+      console.error('reconcile-growth falló (no afecta la ingesta):', e instanceof Error ? e.message : String(e));
+    }
+
     // Tras ingerir, recalcular la LECTURA DEL DIRECTOR sobre datos REALES (M8→MeasurementService→M9→ResultadoCampania).
     // No debe romper el tick de ingesta: si falla, se registra pero no cambia el código de salida.
     try {

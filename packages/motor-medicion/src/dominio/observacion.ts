@@ -83,6 +83,7 @@ export const EVENTOS_OBSERVACION = {
   invalidada: 'observacion.invalidada',
   descartada: 'observacion.descartada',
   superada: 'observacion.superada',
+  diagnosticoReconciliado: 'observacion.diagnostico-reconciliado', // reconciliación convergente de is_test desde la fuente estructural
 } as const;
 
 export function observacionStreamId(organizacionId: string, observacionId: string): string {
@@ -134,6 +135,15 @@ export function aplicarObservacion(state: ObservacionState, event: RecordedEvent
     case EVENTOS_OBSERVACION.superada:
       if (!transicionObservacionValida(state.estado, 'SUPERADA')) return next;
       return { ...next, estado: 'SUPERADA', supersedidaPor: (event.payload as { por?: string }).por ?? null };
+    case EVENTOS_OBSERVACION.diagnosticoReconciliado: {
+      // Reconciliación CONVERGENTE: actualiza SÓLO `provenanciaReal.diagnostico` desde la fuente estructural
+      // (is_test del proveedor). NO cambia estado, naturaleza, valor ni ningún otro contenido. No-op si la
+      // observación no es REAL o no tiene procedencia (fail-closed). Preserva la historia (append-only).
+      if (!state.existe || !state.datos || !state.datos.provenanciaReal) return next;
+      const nd = (event.payload as { diagnostico?: boolean }).diagnostico;
+      if (typeof nd !== 'boolean') return next;
+      return { ...next, datos: { ...state.datos, provenanciaReal: { ...state.datos.provenanciaReal, diagnostico: nd } } };
+    }
     default:
       return next;
   }
