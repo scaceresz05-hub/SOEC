@@ -141,6 +141,25 @@ export class ObservacionService {
   }
 
   /**
+   * RECONCILIACIÓN CONVERGENTE (M8). Actualiza SÓLO `provenanciaReal.diagnostico` de una observación REAL
+   * existente cuando la FUENTE ESTRUCTURAL (is_test del proveedor) cambió DESPUÉS de la ingesta — cubriendo
+   * el hueco de `registrarReal` (first-wins por observacionId, que nunca releía la naturaleza). Reglas duras:
+   *  - Idempotente: NO emite evento si el valor ya coincide (convergencia sin ruido, replay-safe).
+   *  - Fail-closed: no crea observaciones (no-op si no existe), no toca simuladas ni observaciones sin
+   *    procedencia, y no cambia estado/valor/contenido — sólo el flag diagnóstico/comercial.
+   *  - Tenant-safe: todo pasa por `ctx` (org). Determinista (`o` inyectado). Historia append-only.
+   * Devuelve `{ estado, cambiado }` (cambiado=true sólo si se emitió el evento de reconciliación).
+   */
+  async reconciliarDiagnostico(ctx: RequestContext, observacionId: string, diagnostico: boolean, a: Attribution, o: string): Promise<{ estado: ObservacionState; cambiado: boolean }> {
+    if (!observacionId?.trim()) throw new ComandoMedicionInvalidoError('observacionId es obligatorio');
+    const st = await this.cargar(ctx, observacionId);
+    if (!st.existe || !st.datos || (st.datos.naturaleza as string) !== 'REAL' || !st.datos.provenanciaReal) return { estado: st, cambiado: false };
+    if (st.datos.provenanciaReal.diagnostico === diagnostico) return { estado: st, cambiado: false }; // ya convergente
+    await this.appendObs(ctx, observacionId, st.version, EVENTOS_OBSERVACION.diagnosticoReconciliado, { diagnostico }, a, o);
+    return { estado: await this.cargar(ctx, observacionId), cambiado: true };
+  }
+
+  /**
    * VALIDA autoritativamente contra M7: la orden existe, su ejecución es COMPLETA y medible, tiene evidencia
    * de naturaleza SIMULADA, y la observación no pretende ser REAL. Materializa pieza/variante/executionId
    * DESDE M7 (no desde el llamador). VALIDADA si todo cuadra; INVALIDA con motivo si no.

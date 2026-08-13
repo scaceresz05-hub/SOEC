@@ -106,4 +106,41 @@ export class IngestaSmileFlowGrowth {
 
     return { leidos: eventos.length, ingeridos: eventos.length, nuevos, cursorAntes, cursorDespues, diagnosticos };
   }
+
+  /**
+   * RECONCILIACIÓN CONVERGENTE de la naturaleza diagnóstico/comercial. Re-lee una ventana de eventos del
+   * puente (por `since` o desde el inicio) y, para cada observación YA persistida, actualiza su flag
+   * `diagnostico` a la fuente estructural (`is_test` → `esDiagnostico`). NO crea eventos nuevos, NO mueve el
+   * cursor de ingesta, NO borra ni recrea observaciones: sólo converge la naturaleza. Idempotente
+   * (no emite evento si ya coincide) y fail-closed (no toca eventos reales ni observaciones inexistentes).
+   *
+   * Resuelve el hueco de `registrarReal` (first-wins): cuando la fuente reclasifica un evento is_test=false→true
+   * tras la ingesta, esta reconciliación hace que SOEC termine reflejando is_test=true sin re-ingerir.
+   */
+  async reconciliarDiagnostico(ctx: RequestContext, opts: { ahora: string; since?: string; limit?: number }): Promise<{ leidos: number; reconciliados: number }> {
+    const limit = opts.limit ?? 500;
+    let cursor = 0;
+    let leidos = 0;
+    let reconciliados = 0;
+    for (let guard = 0; guard < 200; guard += 1) {
+      const salida = await this.deps.adaptador.ejecutar(ctx, {
+        solicitudId: `reconcile-growth:${this.deps.org}:${cursor}`,
+        capacidadId: 'ingesta-growth',
+        peticion: { operacion: 'growth-events', parametros: { cursor: String(cursor), limit: String(limit), ...(opts.since ? { since: opts.since } : {}) } },
+      });
+      if (salida.estado === 'ERROR' || salida.salida === null) {
+        throw new Error(`reconcile smileflow-growth falló: ${salida.error?.clase ?? 'SIN_SALIDA'} — ${salida.error?.mensaje ?? 'sin cuerpo'}`);
+      }
+      const parsed = JSON.parse(salida.salida.body ?? '') as RespuestaGrowth;
+      const eventos = parsed.datos ?? [];
+      for (const ev of eventos) {
+        leidos += 1;
+        const r = await this.deps.observaciones.reconciliarDiagnostico(ctx, observacionIdDe(ev), esDiagnostico(ev), ATRIB, opts.ahora);
+        if (r.cambiado) reconciliados += 1;
+      }
+      if (parsed.next_cursor == null || eventos.length === 0) break;
+      cursor = parsed.next_cursor;
+    }
+    return { leidos, reconciliados };
+  }
 }
