@@ -20,13 +20,23 @@ export interface EventoGrowth {
   readonly utm_campaign: string | null;
   readonly value: number | null;
   readonly lead_id: number | null;
+  /** Naturaleza estructural del origen: true ⇒ lead/evento de PRUEBA (SmileFlow lo marcó en la fuente). */
+  readonly is_test?: boolean | null;
 }
 
 /** Calidad de la evidencia de ingesta real (valor válido de NivelCalidad). */
 const CALIDAD_INGESTA: NivelCalidad = 'alta';
 
-/** True si el evento es un marcador de prueba/diagnóstico interno (anon_id 'diag…' o utm_source 'diag'). */
+/**
+ * True si el evento NO debe contar como evidencia comercial real (se excluye de aprendizaje/M9/Director).
+ *
+ * FUENTE DE VERDAD: el flag estructural `is_test` que SmileFlow persiste en el lead/evento y expone el
+ * puente M2M. Un visitante público no puede fabricarlo (la captura pública siempre nace REAL; sólo el
+ * token interno de testing marca TEST). Se mantienen `anon_id 'diag…'`/`utm_source 'diag'` como
+ * compatibilidad auxiliar hacia atrás (marcadores heredados), nunca como única señal.
+ */
 export function esDiagnostico(ev: EventoGrowth): boolean {
+  if (ev.is_test === true) return true;
   const anon = (ev.anon_id ?? '').toLowerCase();
   return anon.startsWith('diag') || ev.utm_source === 'diag';
 }
