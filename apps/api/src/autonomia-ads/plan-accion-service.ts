@@ -12,11 +12,16 @@
  * Con la evidencia real actual ⇒ CERO propuestas (prevalece OBSERVAR). El recorrido se prueba E2E igualmente.
  * NADA se ejecuta: `AUTONOMOUS_REAL` está apagado y el Executor sólo simula.
  */
-import { ActorId, OrganizationId, type Attribution, type EventStore, type RequestContext } from '@soec/contracts';
+import {
+  ActorId,
+  OrganizationId,
+  type Attribution,
+  type EventStore,
+  type RequestContext,
+} from '@soec/contracts';
 import { ObservacionService } from '@soec/motor-medicion';
-import { CAMPANIA_SMILEFLOW } from '../real-director/criterio-smileflow';
 import { LecturaDirectorRealService } from '../real-director/lectura-director-real';
-import { LIMITES_SMILEFLOW } from './limites-smileflow';
+import { getProfile, getRecursoGoogleAds } from '../plataforma';
 import { evaluarOportunidadesTacticas, planificarCambios, type IntencionDeCambio, type InsumosPlan } from './intencion';
 import type { EvaluacionTermino } from './evaluacion-termino';
 import { evaluarGates, type ContextoGates, type NivelAutonomia, type ResultadoGates } from './gates';
@@ -87,11 +92,18 @@ export class PlanAccionDryRunService {
 
   private ctx(org: string): RequestContext {
     const o = OrganizationId(org);
-    return { organizationId: o, actor: ActorId('plan-accion'), scope: { organizationId: o, permissions: ['events:append', 'events:read'] }, correlationId: `plan-accion-${org}` };
+    return {
+      organizationId: o,
+      actor: ActorId('plan-accion'),
+      scope: { organizationId: o, permissions: ['events:append', 'events:read'] },
+      correlationId: `plan-accion-${org}`,
+    };
   }
 
   /** Términos de búsqueda REALES agregados por término (excluye diagnóstico). */
-  private async leerTerminos(ctx: RequestContext): Promise<{ termino: string; impresiones: number; clics: number }[]> {
+  private async leerTerminos(
+    ctx: RequestContext,
+  ): Promise<{ termino: string; impresiones: number; clics: number }[]> {
     const ids = await this.observaciones.listarIds(ctx);
     const map = new Map<string, { impresiones: number; clics: number }>();
     for (const id of ids) {
@@ -99,7 +111,8 @@ export class PlanAccionDryRunService {
       const d = st.datos;
       if (!d || d.naturaleza !== 'REAL' || !d.provenanciaReal) continue;
       const p = d.provenanciaReal;
-      if (p.provider !== 'google-ads' || p.diagnostico || p.eventName !== 'ads_search_term') continue;
+      if (p.provider !== 'google-ads' || p.diagnostico || p.eventName !== 'ads_search_term')
+        continue;
       const termino = p.utmContent;
       if (!termino) continue;
       const acc = map.get(termino) ?? { impresiones: 0, clics: 0 };
@@ -110,22 +123,29 @@ export class PlanAccionDryRunService {
     return [...map.entries()].map(([termino, v]) => ({ termino, ...v }));
   }
 
-  async generar(org: string, ahora: string, opts?: { perfil?: PerfilUsuario }): Promise<PlanAccionDryRun> {
+  async generar(
+    org: string,
+    ahora: string,
+    opts?: { perfil?: PerfilUsuario },
+  ): Promise<PlanAccionDryRun> {
     const ctx = this.ctx(org);
     const perfil = opts?.perfil ?? 'ASISTIDO';
+    // Configuración registrada de ESTA organización (objetivo, límites, cuenta externa). Lanza si falta.
+    const perfilNegocio = getProfile(org);
+    const ads = getRecursoGoogleAds(org);
     const lect = await this.lecturaSvc.leerUltima(org);
     const terminos = await this.leerTerminos(ctx);
 
     const insumos: InsumosPlan = {
       org,
-      customerId: CAMPANIA_SMILEFLOW.campaignId,
-      campaniaRef: CAMPANIA_SMILEFLOW.campaniaRef,
+      customerId: ads.customerId,
+      campaniaRef: ads.campaniaRef,
       evidenciaSuficiente: lect?.interpretacion.evidenciaSuficiente ?? false,
       clasificacionDesempeno: lect?.interpretacion.clasificacionDesempeno ?? 'sin_datos',
       roiClasificacion: lect?.interpretacion.roi.clasificacion ?? 'NO_EVALUABLE',
       decisionTipo: null,
       terminos,
-      limites: LIMITES_SMILEFLOW,
+      limites: perfilNegocio.limitesAutonomia,
     };
 
     const intenciones = planificarCambios(insumos);
@@ -141,17 +161,19 @@ export class PlanAccionDryRunService {
       aprobacionHumana: true, // APROBACIÓN SIMULADA (no hay humano real en G1)
       cambiosHoy: 0,
       cooldownVigente: false,
-      customerIdAutorizado: CAMPANIA_SMILEFLOW.campaignId,
+      customerIdAutorizado: ads.customerId,
     };
 
     const items: PlanItem[] = intenciones.map((intencion) => {
-      const gates = evaluarGates(intencion, ctxGates, LIMITES_SMILEFLOW);
+      const gates = evaluarGates(intencion, ctxGates, perfilNegocio.limitesAutonomia);
       const requerida = intencion.autorizacionRequerida === 'HUMANA_POR_CAMBIO';
       const aprobacion: AprobacionSimulada = {
         requerida,
         simulada: requerida,
         actor: requerida ? 'DRY-RUN (humano simulado)' : null,
-        nota: requerida ? 'En producción, esto requiere que una persona apruebe cada cambio antes de ejecutar.' : 'Acción de bajo riesgo (en etapa futura podría no requerir aprobación por cambio).',
+        nota: requerida
+          ? 'En producción, esto requiere que una persona apruebe cada cambio antes de ejecutar.'
+          : 'Acción de bajo riesgo (en etapa futura podría no requerir aprobación por cambio).',
       };
       const simulacion = simularEjecucion(intencion, gates);
       return { intencion, gates, aprobacion, simulacion };
@@ -183,7 +205,9 @@ export class PlanAccionDryRunService {
     const streamId = planAccionStreamId(String(ctx.organizationId));
     const eventos = await this.store.readStream(ctx, streamId);
     try {
-      await this.store.append(ctx, streamId, eventos.length, [{ type: EVENTO_PLAN, payload: plan, attribution: ATRIB, occurredAt: plan.at }]);
+      await this.store.append(ctx, streamId, eventos.length, [
+        { type: EVENTO_PLAN, payload: plan, attribution: ATRIB, occurredAt: plan.at },
+      ]);
     } catch {
       // carrera ⇒ tolerada (last-wins)
     }

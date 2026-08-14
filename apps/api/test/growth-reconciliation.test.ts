@@ -11,7 +11,7 @@ import { ActorId, OrganizationId, type RequestContext } from '@soec/contracts';
 import type { AdaptadorExterno, SalidaAdaptador } from '@soec/adaptadores';
 import { ObservacionService } from '@soec/motor-medicion';
 import { IngestaSmileFlowGrowth } from '../src/ingesta/ingesta-smileflow-service';
-import { esDiagnostico, observacionIdDe, type EventoGrowth } from '../src/ingesta/mapa-growth';
+import { observacionIdDe, type EventoGrowth } from '../src/ingesta/mapa-growth';
 import { construirPanel, type ObsPanel, type Sync } from '../src/ingesta/panel-resultados';
 
 const AHORA = '2026-08-13T12:00:00.000Z';

@@ -10,7 +10,15 @@
  * ningún mutate. El único camino disponible es `describirMutate` (puro, para dry-run/auditoría).
  */
 import { AUTONOMOUS_REAL, assertSimulado } from '@soec/cia';
-import { CONFINAMIENTO, WRITE_CREDENTIAL_REF, construirMutateNegativa, construirRollbackNegativa, esCapacidadHabilitada, type ActionTypeAds, type OperacionMutate } from './capacidad-negativa';
+import {
+  CONFINAMIENTO,
+  WRITE_CREDENTIAL_REF,
+  construirMutateNegativa,
+  construirRollbackNegativa,
+  esCapacidadHabilitada,
+  type ActionTypeAds,
+  type OperacionMutate,
+} from './capacidad-negativa';
 
 const HOSTS_AUTORIZADOS = new Set<string>(['googleads.googleapis.com', 'oauth2.googleapis.com']);
 
@@ -31,13 +39,31 @@ export class GoogleAdsWriteAdapter {
   readonly credentialRef = WRITE_CREDENTIAL_REF;
   /** Host de escritura (sujeto a allowlist). */
   private readonly host = 'googleads.googleapis.com';
+  /**
+   * Cuenta externa AUTORIZADA para esta instancia. La inyecta la composición desde la configuración
+   * registrada de la organización: un adaptador construido para una organización no puede describir
+   * operaciones sobre la cuenta de otra. El default es la cuenta de `org-smileflow`.
+   */
+  private readonly customerIdAutorizado: string;
+
+  constructor(customerIdAutorizado: string = CONFINAMIENTO.customerId) {
+    if (!customerIdAutorizado?.trim()) {
+      throw new OperacionNoHabilitadaError(
+        'el adaptador de escritura exige una cuenta externa autorizada',
+      );
+    }
+    this.customerIdAutorizado = customerIdAutorizado;
+  }
 
   /** Valida capacidad + confinamiento y DESCRIBE el mutate (puro, no se envía). Lanza si algo no cuadra. */
   describirMutate(s: SolicitudWrite): OperacionMutate {
-    if (!esCapacidadHabilitada(s.actionType)) throw new OperacionNoHabilitadaError(`operación no habilitada en G2-A: ${s.actionType}`);
-    if (s.customerId !== CONFINAMIENTO.customerId) throw new OperacionNoHabilitadaError('customerId fuera del confinamiento de tenant');
+    if (!esCapacidadHabilitada(s.actionType))
+      throw new OperacionNoHabilitadaError(`operación no habilitada en G2-A: ${s.actionType}`);
+    if (s.customerId !== this.customerIdAutorizado)
+      throw new OperacionNoHabilitadaError('customerId fuera del confinamiento de tenant');
     const op = construirMutateNegativa(s.customerId, s.campaignId, s.entityRef);
-    if (!HOSTS_AUTORIZADOS.has(this.host)) throw new OperacionNoHabilitadaError('host no autorizado (egress default-deny)');
+    if (!HOSTS_AUTORIZADOS.has(this.host))
+      throw new OperacionNoHabilitadaError('host no autorizado (egress default-deny)');
     return op;
   }
 

@@ -143,6 +143,7 @@ import { registerAuthRoutes, type AuthRateLimitConfig } from './auth-routes';
 import { RateLimiter } from './rate-limit';
 import { registerOrganizationsRoutes } from './organizations-routes';
 import { registrarVerticalesAutenticadas } from './vertical-gateway';
+import { PlataformaError } from './plataforma';
 import { registrarProteccionCsrf } from './csrf';
 
 export interface AppDeps {
@@ -211,7 +212,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('X-Frame-Options', 'DENY');
     reply.header('Referrer-Policy', 'no-referrer');
-    reply.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+    reply.header(
+      'Content-Security-Policy',
+      "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+    );
     if (secure) reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     return payload;
   });
@@ -222,6 +226,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.setErrorHandler((err, _req, reply) => {
     // Errores de identidad: llevan su propio código HTTP (401/403/404/409/400).
     if (err instanceof IdentityError) {
+      return reply.code(err.httpStatus).send({ error: err.code, message: err.message });
+    }
+    // Plataforma multiempresa: organización/perfil/fuente no configurados y binding denegado.
+    // FAIL-CLOSED explícito — nunca se degrada a la configuración de otra organización.
+    if (err instanceof PlataformaError) {
       return reply.code(err.httpStatus).send({ error: err.code, message: err.message });
     }
     if (err instanceof ScopeRequiredError || err instanceof ScopeMismatchError) {
@@ -280,7 +289,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     ) {
       return reply.code(403).send({ error: err.name, message: err.message });
     }
-    if (err instanceof NegocioInvalidoError || err instanceof ProgramaInvalidoError || err instanceof ProgramaNoEjecutableError) {
+    if (
+      err instanceof NegocioInvalidoError ||
+      err instanceof ProgramaInvalidoError ||
+      err instanceof ProgramaNoEjecutableError
+    ) {
       return reply.code(422).send({ error: err.name, message: err.message });
     }
     if (err instanceof EstrategiaCreativaInvalidaError) {
@@ -425,7 +438,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // ── Plano PRODUCTIVO: autenticación y organizaciones (siempre; exige sesión) ──────────────────
   if (deps.pool) {
     const identity = new IdentityService(deps.pool);
-    registerAuthRoutes(app, identity, secure, { exposeResetToken: !secure, ...(deps.rateLimit ? { rateLimit: deps.rateLimit } : {}) });
+    registerAuthRoutes(app, identity, secure, {
+      exposeResetToken: !secure,
+      ...(deps.rateLimit ? { rateLimit: deps.rateLimit } : {}),
+    });
     registerOrganizationsRoutes(app, identity, !secure); // devToken de invitación solo fuera de prod
 
     // CUTOVER (Macrobloque 1, incremento final): en condiciones normales (sin demo legacy), la
