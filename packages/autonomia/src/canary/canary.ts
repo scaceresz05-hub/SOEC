@@ -105,6 +105,16 @@ export interface CanaryCandidate {
   readonly mandateVersion: number;
   /** Instante de la evidencia usada; base para detectar obsolescencia (staleness). */
   readonly freshnessAt: string;
+  /** El candidato EXPIRA: una oportunidad vieja no se mantiene indefinidamente. */
+  readonly expiresAt: string;
+}
+
+/** Vida útil de un candidato canary antes de exigir recálculo de evidencia. */
+export const TTL_CANARY_HORAS = 24;
+
+/** ¿Sigue vigente el candidato en `ahora`? Fuera de su ventana ⇒ expirado (no ejecutable). */
+export function candidatoVigente(candidato: CanaryCandidate, ahora: string): boolean {
+  return ahora <= candidato.expiresAt;
 }
 
 export type ResultadoCandidato =
@@ -154,6 +164,7 @@ export function evaluarCandidatoCanary(
       },
       mandateVersion: accion.mandateVersionVista,
       freshnessAt: ctx.ahora,
+      expiresAt: new Date(new Date(ctx.ahora).getTime() + TTL_CANARY_HORAS * 3_600_000).toISOString(),
     },
   };
 }
@@ -241,4 +252,44 @@ export function preMutateCheck(e: EntradaPreMutate): ResultadoPreMutate {
 
 function no(razon: string, writeEstado: EstadoCapacidadWrite, frescura: Frescura, traza: readonly string[]): ResultadoPreMutate {
   return { puedeMutar: false, razon, writeEstado, frescura, traza };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8 · NOTIFICACIÓN (manage-by-exception): el usuario no revisa SOEC a diario
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type CategoriaNotificacion =
+  | 'INFO'
+  | 'ACTION_EXECUTED'
+  | 'ACTION_ROLLED_BACK'
+  | 'APPROVAL_REQUIRED'
+  | 'CANARY_CANDIDATE_READY'
+  | 'RISK_LIMIT_REACHED'
+  | 'DATA_SOURCE_FAILURE'
+  | 'AUTONOMY_PAUSED'
+  | 'CRITICAL';
+
+export type SeveridadNotificacion = 'INFO' | 'IMPORTANT' | 'CRITICAL';
+
+/** Severidad de cada categoría. Sólo lo IMPORTANT/CRITICAL debería interrumpir al usuario. */
+export function severidadNotificacion(cat: CategoriaNotificacion): SeveridadNotificacion {
+  switch (cat) {
+    case 'CRITICAL':
+    case 'AUTONOMY_PAUSED':
+    case 'ACTION_ROLLED_BACK':
+    case 'RISK_LIMIT_REACHED':
+    case 'DATA_SOURCE_FAILURE':
+      return 'CRITICAL';
+    case 'APPROVAL_REQUIRED':
+    case 'CANARY_CANDIDATE_READY':
+    case 'ACTION_EXECUTED':
+      return 'IMPORTANT';
+    case 'INFO':
+      return 'INFO';
+  }
+}
+
+/** Un candidato canary listo se notifica como IMPORTANTE / requiere aprobación, no como ruido. */
+export function notificacionDeCandidatoCanary(): { categoria: CategoriaNotificacion; severidad: SeveridadNotificacion } {
+  return { categoria: 'CANARY_CANDIDATE_READY', severidad: severidadNotificacion('CANARY_CANDIDATE_READY') };
 }

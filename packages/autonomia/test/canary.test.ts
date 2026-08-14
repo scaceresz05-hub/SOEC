@@ -7,12 +7,15 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  candidatoVigente,
   esCapacidadCanaryPermitida,
   estadoCapacidadWrite,
   evaluarCandidatoCanary,
   evaluarFrescura,
   LIMITES_CANARY,
+  notificacionDeCandidatoCanary,
   preMutateCheck,
+  severidadNotificacion,
   verificarReadBack,
   type AccionPropuesta,
   type ContextoEjecucion,
@@ -148,5 +151,21 @@ describe('Canary · read-back requerido', () => {
     expect(verificarReadBack('excluded', 'excluded').verificado).toBe(true);
     expect(verificarReadBack('excluded', 'otro').verificado).toBe(false);
     expect(verificarReadBack('excluded', null).verificado).toBe(false); // sin lectura ⇒ no verificado
+  });
+});
+
+describe('Canary · expiración y notificación', () => {
+  it('un candidato expira: fuera de su ventana ya no es ejecutable', () => {
+    const r = evaluarCandidatoCanary(accion(), ctx(), 'cmp-1');
+    if (r.estado !== 'CANDIDATE') throw new Error('esperado candidato');
+    expect(candidatoVigente(r.candidato, AHORA)).toBe(true);
+    expect(candidatoVigente(r.candidato, '2027-01-01T00:00:00.000Z')).toBe(false); // vencido
+  });
+  it('un candidato listo se notifica como IMPORTANTE (manage-by-exception), no como ruido', () => {
+    const n = notificacionDeCandidatoCanary();
+    expect(n.categoria).toBe('CANARY_CANDIDATE_READY');
+    expect(n.severidad).toBe('IMPORTANT');
+    expect(severidadNotificacion('CRITICAL')).toBe('CRITICAL');
+    expect(severidadNotificacion('INFO')).toBe('INFO');
   });
 });
