@@ -17,7 +17,8 @@ import { ObservacionService } from '@soec/motor-medicion';
 import { CAMPANIA_SMILEFLOW } from '../real-director/criterio-smileflow';
 import { LecturaDirectorRealService } from '../real-director/lectura-director-real';
 import { LIMITES_SMILEFLOW } from './limites-smileflow';
-import { planificarCambios, type IntencionDeCambio, type InsumosPlan } from './intencion';
+import { evaluarOportunidadesTacticas, planificarCambios, type IntencionDeCambio, type InsumosPlan } from './intencion';
+import type { EvaluacionTermino } from './evaluacion-termino';
 import { evaluarGates, type ContextoGates, type NivelAutonomia, type ResultadoGates } from './gates';
 import { simularEjecucion, type SimulacionEjecucion } from './executor-dryrun';
 
@@ -58,6 +59,11 @@ export interface PlanAccionDryRun {
   readonly totalPropuestas: number;
   readonly resumenSimple: string;
   readonly items: readonly PlanItem[];
+  /**
+   * OPORTUNIDADES TÁCTICAS (informativas, NO ejecutables): búsquedas de bajo rendimiento (0 clics) que SOEC
+   * NO propone excluir — sugiere revisar el mensaje. Distinto de una recomendación estratégica del Director.
+   */
+  readonly oportunidadesTacticas: readonly EvaluacionTermino[];
   readonly at: string;
 }
 
@@ -123,6 +129,7 @@ export class PlanAccionDryRunService {
     };
 
     const intenciones = planificarCambios(insumos);
+    const oportunidadesTacticas = evaluarOportunidadesTacticas(insumos);
     const nivel = nivelDePerfil(perfil);
     const ctxGates: ContextoGates = {
       autonomousReal: AUTONOMOUS_REAL_G1, // false ⇒ dry-run
@@ -150,9 +157,11 @@ export class PlanAccionDryRunService {
       return { intencion, gates, aprobacion, simulacion };
     });
 
-    const resumenSimple = items.length === 0
-      ? 'Ahora mismo no hay nada que cambiar en tu campaña: la evidencia todavía es poca, así que SOEC solo observa. Cuando haya datos suficientes, aquí verás recomendaciones claras para aprobar o rechazar.'
-      : `SOEC preparó ${items.length} recomendación${items.length > 1 ? 'es' : ''} para tu revisión. Es una SIMULACIÓN: no se ejecutó nada y no se tocó tu campaña. Vos decidís si aprobar.`;
+    const resumenSimple = items.length > 0
+      ? `SOEC preparó ${items.length} recomendación${items.length > 1 ? 'es' : ''} para tu revisión. Es una SIMULACIÓN: no se ejecutó nada y no se tocó tu campaña. Vos decidís si aprobar.`
+      : oportunidadesTacticas.length > 0
+        ? `Ningún cambio para aprobar. SOEC observa ${oportunidadesTacticas.length} búsqueda${oportunidadesTacticas.length > 1 ? 's' : ''} con impresiones pero 0 clics: NO propone excluirlas (bajo rendimiento no es lo mismo que irrelevancia) — sugiere revisar el anuncio/mensaje. La evidencia todavía no justifica excluir tráfico.`
+        : 'Ahora mismo no hay nada que cambiar en tu campaña: la evidencia todavía es poca, así que SOEC solo observa. Cuando haya datos suficientes, aquí verás recomendaciones claras para aprobar o rechazar.';
 
     const plan: PlanAccionDryRun = {
       modo: 'DRY_RUN',
@@ -162,6 +171,7 @@ export class PlanAccionDryRunService {
       totalPropuestas: items.length,
       resumenSimple,
       items,
+      oportunidadesTacticas,
       at: ahora,
     };
 

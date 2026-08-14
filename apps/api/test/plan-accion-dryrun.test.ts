@@ -9,6 +9,10 @@ import { ObservacionService, type EntradaObservacionReal } from '@soec/motor-med
 import { adsSnapshotStreamId, EVENTO_ADS_SNAPSHOT } from '../src/ingesta/ingesta-google-ads-service';
 import { LecturaDirectorRealService, ORG_REAL } from '../src/real-director/lectura-director-real';
 import { PlanAccionDryRunService } from '../src/autonomia-ads/plan-accion-service';
+import { planificarCambios, type InsumosPlan } from '../src/autonomia-ads/intencion';
+import { evaluarGates, type ContextoGates } from '../src/autonomia-ads/gates';
+import { simularEjecucion } from '../src/autonomia-ads/executor-dryrun';
+import { LIMITES_SMILEFLOW, type LimitesAutonomia } from '../src/autonomia-ads/limites-smileflow';
 
 const AHORA = '2026-08-11T12:00:00.000Z';
 const ATR: Attribution = { source: 't', purpose: 't', assumptions: [], claimType: 'observational', regime: 'empirical', uncertainty: 'baja' };
@@ -49,43 +53,49 @@ describe('PlanAccionDryRunService.generar (E2E G1)', () => {
     expect(plan.items).toEqual([]);
   });
 
-  it('un término con muestra suficiente ⇒ recorrido COMPLETO en dry-run, sin efecto externo', async () => {
+  it('términos reales con muestra + 0 clics SIN política ⇒ 0 propuestas, pero SÍ oportunidades tácticas (fix)', async () => {
+    // Comportamiento CORREGIDO: 0 clics ≠ irrelevancia. Sin política del negocio, SOEC NO excluye
+    // "reparacion de autos" ni "dentalink agenda": los observa como oportunidad táctica (revisar mensaje).
     const store = new InMemoryEventStore();
     await seedSnapshot(store, { impressions: 292, clicks: 7, cost: 6028 });
     await new LecturaDirectorRealService(store).recalcular(ORG_REAL, AHORA);
-    await seedTerminos(store, [{ t: 'reparacion de autos', impr: 40, clics: 0 }, { t: 'dentalink agenda', impr: 6, clics: 0 }]);
+    await seedTerminos(store, [{ t: 'reparacion de autos', impr: 40, clics: 0 }, { t: 'dentalink agenda', impr: 40, clics: 0 }]);
 
-    const svc = new PlanAccionDryRunService(store);
-    const plan = await svc.generar(ORG_REAL, AHORA, { perfil: 'ASISTIDO' });
-
-    expect(plan.totalPropuestas).toBe(1); // solo el término con muestra suficiente
-    const it = plan.items[0]!;
-    // Decision → intención tipada en lenguaje simple
-    expect(it.intencion.palanca).toBe('agregar_negativa');
-    expect(it.intencion.entidadRef).toBe('reparacion de autos');
-    // gates: en G1 NUNCA se puede ejecutar de verdad
-    expect(it.gates.modo).toBe('DRY_RUN');
-    expect(it.gates.puedeEjecutarReal).toBe(false);
-    expect(it.gates.bloqueos).toContain('INTERRUPTOR_MAESTRO_REAL');
-    // aprobación simulada (ASISTIDO)
-    expect(it.aprobacion.requerida).toBe(true);
-    expect(it.aprobacion.simulada).toBe(true);
-    // Executor DRY-RUN: NUNCA ejecutado; describe mutate + rollback
-    expect(it.simulacion.ejecutado).toBe(false);
-    expect(it.simulacion.mutateSimulado.length).toBeGreaterThan(0);
-    expect(it.simulacion.rollback.descripcion.length).toBeGreaterThan(0);
-
-    // auditoría persistida
-    const leido = await svc.leerUltimo(ORG_REAL);
-    expect(leido?.totalPropuestas).toBe(1);
+    const plan = await new PlanAccionDryRunService(store).generar(ORG_REAL, AHORA, { perfil: 'ASISTIDO' });
+    expect(plan.totalPropuestas).toBe(0);          // estratégico: NADA que ejecutar (no false-negative)
+    expect(plan.items).toEqual([]);
+    expect(plan.veredicto).toBe('OBSERVAR');
+    expect(plan.oportunidadesTacticas.length).toBeGreaterThan(0); // táctico: revisar mensaje
+    expect(plan.oportunidadesTacticas.every((o) => o.accion === 'OPTIMIZAR_MENSAJE')).toBe(true);
   });
 
-  it('perfil CONSERVADOR ⇒ el nivel no autoriza ejecutar (queda como recomendación)', async () => {
-    const store = new InMemoryEventStore();
-    await seedSnapshot(store, { impressions: 292, clicks: 7, cost: 6028 });
-    await new LecturaDirectorRealService(store).recalcular(ORG_REAL, AHORA);
-    await seedTerminos(store, [{ t: 'reparacion de autos', impr: 40, clics: 0 }]);
-    const plan = await new PlanAccionDryRunService(store).generar(ORG_REAL, AHORA, { perfil: 'CONSERVADOR' });
-    expect(plan.items[0]!.gates.bloqueos).toContain('NIVEL_AUTONOMIA');
+  it('recorrido COMPLETO dry-run CUANDO hay evidencia de irrelevancia (política) ⇒ gates/executor sin efecto', () => {
+    // Con una política de irrelevancia del negocio, un término 0-clics con muestra SÍ es negativa justificada;
+    // el pipeline (gates + executor DRY-RUN) se ejercita igual, sin efecto externo.
+    const limites: LimitesAutonomia = { ...LIMITES_SMILEFLOW, politicaIrrelevancia: ['empleo'] };
+    const insumos: InsumosPlan = {
+      org: ORG_REAL, customerId: '24120966895', campaniaRef: 'cmp', evidenciaSuficiente: false,
+      clasificacionDesempeno: 'sin_datos', roiClasificacion: 'NO_EVALUABLE', decisionTipo: null,
+      terminos: [{ termino: 'empleo dentista', impresiones: 40, clics: 0 }], limites,
+    };
+    const intenciones = planificarCambios(insumos);
+    expect(intenciones).toHaveLength(1);
+    const intencion = intenciones[0]!;
+    expect(intencion.palanca).toBe('agregar_negativa');
+
+    const ctxGates: ContextoGates = {
+      autonomousReal: false, killSwitchActivo: false, pausado: false, nivelAutonomia: 'EJECUTAR_CON_APROBACION',
+      autorizacionVigente: true, limiteDisponible: true, aprobacionHumana: true, cambiosHoy: 0,
+      cooldownVigente: false, customerIdAutorizado: '24120966895',
+    };
+    const gates = evaluarGates(intencion, ctxGates, limites);
+    expect(gates.modo).toBe('DRY_RUN');
+    expect(gates.puedeEjecutarReal).toBe(false);
+    expect(gates.bloqueos).toContain('INTERRUPTOR_MAESTRO_REAL');
+
+    const sim = simularEjecucion(intencion, gates);
+    expect(sim.ejecutado).toBe(false);
+    expect(sim.mutateSimulado.length).toBeGreaterThan(0);
+    expect(sim.rollback.descripcion.length).toBeGreaterThan(0);
   });
 });
