@@ -8,3 +8,12 @@
 export * from './domain/autonomia';
 export * from './domain/errors';
 export * from './app/autonomia-service';
+
+// ── Mandato de autonomía por organización + Modo Sombra (FASE A0) ──────────────
+export * from './mandato/acciones';
+export * from './mandato/mandato';
+export * from './mandato/gates';
+export * from './mandato/elegibilidad';
+export * from './mandato/sombra';
+export * from './mandato/certificacion';
+export * from './mandato/ledger';
