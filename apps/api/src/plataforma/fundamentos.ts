@@ -33,7 +33,12 @@ export type MotivoFundamentos =
   | 'NATIONWIDE_SHIPPING_NOT_READY'
   | 'ADS_NOT_CONFIGURED'
   | 'CATALOG_NOT_OBSERVED'
-  | 'BUSINESS_PROFILE_NOT_CONFIGURED';
+  | 'BUSINESS_PROFILE_NOT_CONFIGURED'
+  // SaaS / captación de clientes
+  | 'ACQUISITION_NOT_CONNECTED'
+  | 'CONVERSION_SIGNAL_NOT_CONNECTED'
+  // Fail-closed
+  | 'UNKNOWN_BUSINESS_MODEL';
 
 export interface MotivoExplicado {
   readonly codigo: MotivoFundamentos;
@@ -69,6 +74,30 @@ export function evaluarFundamentos(
   /** Línea base de ventas OBSERVADA, si ya existe. Lo medido pesa más que lo declarado. */
   ventas?: LineaBaseDeVentas | null,
 ): EstadoFundamentos {
+  // Los fundamentos REQUERIDOS dependen del MODELO de negocio y sus capacidades, no de la
+  // organización. Un SaaS no necesita catálogo ni ventas WooCommerce; un e-commerce sí.
+  const modelo = negocio.modeloDeNegocio;
+  if (modelo !== 'ECOMMERCE_DISTRIBUCION' && modelo !== 'SAAS_FUNNEL' && modelo !== 'SERVICIOS') {
+    // Modelo desconocido ⇒ fail-closed: SOEC no sabe qué exigir, así que exige todo.
+    return {
+      organizationId: negocio.organizationId,
+      veredicto: 'FOUNDATION_REQUIRED',
+      motivos: [
+        {
+          codigo: 'UNKNOWN_BUSINESS_MODEL',
+          explicacion: 'el modelo de negocio no es reconocido: SOEC no sabe qué fundamentos exigir',
+          resuelveCon: 'declarar un modelo de negocio con su política de fundamentos',
+        },
+      ],
+      cimientosPresentes: [],
+      puedeRecomendarInversionPublicitaria: false,
+    };
+  }
+  if (modelo === 'SAAS_FUNNEL' || modelo === 'SERVICIOS') {
+    return evaluarFundamentosCaptacion(negocio, fuentes, perfilComercial, tienePoliticaDeEvaluacion);
+  }
+
+  // ── ECOMMERCE_DISTRIBUCION (política de e-commerce, sin cambios) ─────────────
   const porTipo = (t: FuenteRegistrada['tipo']): FuenteRegistrada | undefined =>
     fuentes.find((f) => f.tipo === t);
 
@@ -177,6 +206,89 @@ export function evaluarFundamentos(
     'ECONOMICS_UNKNOWN',
     'CATALOG_NOT_OBSERVED',
   ];
+  const veredicto: VeredictoFundamentos = motivos.some((m) => bloqueantes.includes(m.codigo))
+    ? 'FOUNDATION_REQUIRED'
+    : tienePoliticaDeEvaluacion
+      ? 'EVALUABLE'
+      : 'OBSERVABLE_SIN_POLITICA';
+
+  return {
+    organizationId: negocio.organizationId,
+    veredicto,
+    motivos,
+    cimientosPresentes: presentes,
+    puedeRecomendarInversionPublicitaria: false,
+  };
+}
+
+/**
+ * Fundamentos para negocios de CAPTACIÓN (SaaS / servicios). NO exige catálogo ni ventas de tienda:
+ * exige una fuente de ADQUISICIÓN (anuncios o sitio) y una SEÑAL DE CONVERSIÓN (leads/eventos). La
+ * atribución y la economía se informan, pero no bloquean el fundamento —sí gatean la inversión, que
+ * permanece `false` por contrato. PURA y determinista.
+ */
+function evaluarFundamentosCaptacion(
+  negocio: NegocioRegistrado,
+  fuentes: readonly FuenteRegistrada[],
+  perfilComercial: PerfilComercial | null,
+  tienePoliticaDeEvaluacion: boolean,
+): EstadoFundamentos {
+  const porTipo = (t: FuenteRegistrada['tipo']): FuenteRegistrada | undefined => fuentes.find((f) => f.tipo === t);
+  const motivos: MotivoExplicado[] = [];
+  const presentes: string[] = [];
+
+  // Adquisición: anuncios o sitio observable.
+  if (conLectura(porTipo('ADS')) || conLectura(porTipo('WEBSITE'))) {
+    presentes.push('fuente de adquisición conectada (anuncios o sitio)');
+  } else {
+    motivos.push({
+      codigo: 'ACQUISITION_NOT_CONNECTED',
+      explicacion: 'no hay una fuente de adquisición legible: SOEC no ve de dónde llegarían los clientes',
+      resuelveCon: 'conectar Google Ads y/o la analítica del sitio en solo lectura',
+    });
+  }
+
+  // Señal de conversión: eventos de producto (growth) o analítica.
+  if (conLectura(porTipo('GROWTH')) || conLectura(porTipo('ANALYTICS'))) {
+    presentes.push('señal de conversiones/leads conectada');
+  } else {
+    motivos.push({
+      codigo: 'CONVERSION_SIGNAL_NOT_CONNECTED',
+      explicacion: 'no hay señal de conversiones: SOEC no puede saber si el tráfico se convierte en clientes',
+      resuelveCon: 'conectar los eventos del sitio (formularios/leads) o medición de conversiones',
+    });
+  }
+
+  // Atribución (informativa): mejora la confianza, no bloquea el fundamento.
+  if (conLectura(porTipo('ANALYTICS'))) presentes.push('analítica conectada');
+  else
+    motivos.push({
+      codigo: 'ANALYTICS_NOT_CONFIGURED',
+      explicacion: 'sin analítica del sitio la atribución es limitada: mejora la confianza, no impide observar',
+      resuelveCon: 'instalar medición web (GA4) cuando sea posible',
+    });
+
+  // Economía (informativa para el fundamento; gatea la inversión, que sigue en `false`).
+  const margenConocido = perfilComercial?.economia.margenBruto.conocido === true;
+  if (margenConocido) presentes.push('economía del cliente conocida');
+  else
+    motivos.push({
+      codigo: 'ECONOMICS_UNKNOWN',
+      explicacion: 'todavía no se conoce cuánto vale un cliente/lead: se necesita para decidir cuánto invertir',
+      resuelveCon: 'cargar el valor del lead/cliente o el margen desde una fuente autorizada',
+    });
+
+  if (perfilComercial) presentes.push('modelo de negocio y canales identificados');
+  if (!tienePoliticaDeEvaluacion) {
+    motivos.push({
+      codigo: 'BUSINESS_PROFILE_NOT_CONFIGURED',
+      explicacion: 'no hay objetivo ni criterio de evaluación configurado',
+      resuelveCon: 'fijar el objetivo de captación (p. ej. leads calificados) y su criterio',
+    });
+  }
+
+  // Sólo la adquisición y la señal de conversión bloquean el FUNDAMENTO de un negocio de captación.
+  const bloqueantes: readonly MotivoFundamentos[] = ['ACQUISITION_NOT_CONNECTED', 'CONVERSION_SIGNAL_NOT_CONNECTED'];
   const veredicto: VeredictoFundamentos = motivos.some((m) => bloqueantes.includes(m.codigo))
     ? 'FOUNDATION_REQUIRED'
     : tienePoliticaDeEvaluacion

@@ -97,3 +97,29 @@ export function evaluarSombra(
     decisiones,
   };
 }
+
+/**
+ * Resumen HUMANO por EXCEPCIÓN (manage-by-exception). El usuario autónomo no debe recibir un aviso
+ * por cada análisis: sólo lo que requiere su atención. Si es una simulación de certificación, se
+ * marca inequívocamente para no confundirla con una decisión comercial real.
+ */
+export function resumenHumanoSombra(params: {
+  reporte: ReporteSombra;
+  situacionesEvaluadas: number;
+  revisarMensaje: number;
+  esCertificacion?: boolean;
+}): string[] {
+  const { reporte: r, situacionesEvaluadas, revisarMensaje } = params;
+  const lineas: string[] = [];
+  if (params.esCertificacion) lineas.push('SIMULACIÓN DE CERTIFICACIÓN — NO ES UNA DECISIÓN COMERCIAL.');
+  lineas.push(`SOEC analizó ${situacionesEvaluadas} situación${situacionesEvaluadas === 1 ? '' : 'es'}.`);
+  if (r.wouldExecute === 0 && r.wouldRequireApproval === 0) lineas.push('No necesitó hacer cambios.');
+  if (r.wouldExecute > 0) lineas.push(`Habría realizado ${r.wouldExecute} cambio${r.wouldExecute === 1 ? '' : 's'} dentro de tus límites.`);
+  if (revisarMensaje > 0) lineas.push(`Encontró ${revisarMensaje} oportunidad${revisarMensaje === 1 ? '' : 'es'} de mensaje.`);
+  lineas.push(
+    r.wouldRequireApproval > 0
+      ? `Necesita tu decisión en ${r.wouldRequireApproval} caso${r.wouldRequireApproval === 1 ? '' : 's'}.`
+      : 'No necesita una decisión tuya.',
+  );
+  return lineas;
+}

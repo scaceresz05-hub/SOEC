@@ -15,3 +15,5 @@ export * from './mandato/mandato';
 export * from './mandato/gates';
 export * from './mandato/elegibilidad';
 export * from './mandato/sombra';
+export * from './mandato/certificacion';
+export * from './mandato/ledger';
