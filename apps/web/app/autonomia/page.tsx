@@ -1,32 +1,46 @@
 import CapacidadesCIA from './CapacidadesCIA';
+import { Badge, Callout, PageHeader } from '../../components/ui';
 
 export const dynamic = 'force-dynamic';
 
 const NIVELES = [
-  { t: 'Solo observar', s: 'Miro y aprendo. No propongo nada.', tag: 'Mínimo', tagc: 'mut' },
-  { t: 'Recomendar', s: 'Te traigo propuestas; tú decides todo.', tag: 'Prudente', tagc: 'mut' },
-  { t: 'Ejecutar con tu aprobación', s: 'Preparo los cambios y los aplico cuando das el visto bueno.', tag: 'Actual', tagc: 'ok', on: true },
-  { t: 'Ejecutar automáticamente', s: 'Actúo solo dentro de tus políticas; te aviso de excepciones y riesgos.', tag: 'Máximo', tagc: 'warn' },
+  { n: 1, t: 'Solo observar', s: 'SOEC mira tus datos y aprende. No propone cambios.' },
+  { n: 2, t: 'Recomendar', s: 'SOEC te trae propuestas. Vos decidís todo.' },
+  { n: 3, t: 'Ejecutar con mi aprobación', s: 'SOEC prepara los cambios y espera tu confirmación antes de aplicarlos.', actual: true },
+  { n: 4, t: 'Automático', s: 'SOEC puede actuar solo, dentro de los límites que vos definas.' },
 ];
 
 export default function Autonomia() {
   return (
-    <div className="wrap panel">
-      <p className="eyebrow">Cuánto quieres delegarme</p>
-      <h1 className="voice">¿Cuánto me dejas decidir solo?</h1>
-      <p className="lede">Tú fijas el límite. Puedo sólo mirar, recomendarte, actuar con tu visto bueno, o actuar solo dentro de tus políticas. Puedes cambiarlo cuando quieras.</p>
-      <div role="radiogroup" aria-label="Nivel de autonomía">
-        {NIVELES.map((n, i) => (
-          <div className={`lvl ${n.on ? 'on' : ''}`} key={i} role="radio" aria-checked={n.on ? 'true' : 'false'}>
+    <div className="dash panel">
+      <PageHeader eyebrow="Nivel de control" title="¿Cuánto dejás que SOEC decida solo?" />
+      <p className="lede">
+        Vos fijás el límite y podés cambiarlo cuando quieras. SOEC nunca cruza el nivel que elegiste.
+      </p>
+
+      <div role="radiogroup" aria-label="Nivel de control" style={{ maxWidth: 720 }}>
+        {NIVELES.map((n) => (
+          <div className={`lvl ${n.actual ? 'on' : ''}`} key={n.n} role="radio" aria-checked={n.actual ? 'true' : 'false'} tabIndex={0}>
             <span className="radio" aria-hidden="true" />
-            <span><span className="lt">{n.t}</span><span className="ls">{n.s}</span></span>
-            <span className={`pill ${n.tagc}`}>{n.tag}</span>
+            <span>
+              <span className="lt">
+                {n.n}. {n.t}
+              </span>
+              <span className="ls">{n.s}</span>
+            </span>
+            {n.actual && <Badge tono="ok">Nivel actual</Badge>}
           </div>
         ))}
       </div>
-      <div className="note" style={{ marginTop: 18 }}>
-        Sea cual sea el nivel, cualquier acción con efecto real seguirá exigiendo tu ratificación. Hoy todo ocurre en modo simulado; el nivel se gobierna con la misma infraestructura de autonomía de SOEC.
+
+      <div style={{ maxWidth: 720, marginTop: 16 }}>
+        <Callout tono="warn" ico="🔒">
+          <b>Aunque el nivel diga «ejecutar», los cambios reales están desactivados.</b> Hoy SOEC solo
+          simula: prepara cada cambio, te lo muestra y espera tu aprobación. Nada se publica, se gasta
+          ni se modifica de verdad todavía. Cuando eso se habilite, será una decisión explícita tuya.
+        </Callout>
       </div>
+
       <CapacidadesCIA />
     </div>
   );

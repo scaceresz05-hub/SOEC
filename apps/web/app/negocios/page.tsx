@@ -1,719 +1,435 @@
 'use client';
 
 /**
- * MIS NEGOCIOS — selector multiempresa.
+ * PANEL DEL NEGOCIO · dashboard ejecutivo por empresa.
  *
- * Es un SELECTOR, no un portafolio: muestra nombre y estado de incorporación de cada negocio, y
- * ninguna cifra comercial. Al elegir uno, todo el panel queda acotado a ese negocio.
- *
- * Honestidad epistémica: una fuente sin conectar se muestra como «no conectada» con lo que falta,
- * jamás como un cero. `CERO ≠ NO CONECTADO`.
+ * Una persona sin conocimientos debe entender en segundos: qué empresa ve, cómo va, qué recomienda
+ * SOEC y qué necesita de ella. La experiencia se ADAPTA al modelo del negocio:
+ *   · e-commerce (C Y P)  → ventas, productos, catálogo;
+ *   · software / SaaS (SmileFlow) → publicidad, tráfico, embudo de clientes.
+ * El lenguaje es humano; la jerga vive en «Detalles técnicos».
  */
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { cabecerasOrg, ETIQUETA_ESTADO_FUENTE, orgActiva } from '../../lib/org-activa';
 import {
-  ETIQUETA_ESTADO_FUENTE,
-  cabecerasOrg,
-  estadoNoConfigurado,
-  fijarOrgActiva,
-  orgActiva,
-} from '../../lib/org-activa';
+  Badge,
+  Callout,
+  clp,
+  DirectorCard,
+  EmptyState,
+  Funnel,
+  Metric,
+  num,
+  PageHeader,
+  PriorityList,
+  SourceRow,
+  TechDetails,
+  TrendBars,
+  valor,
+  type Desconocible,
+  type Tono,
+} from '../../components/ui';
 
-interface NegocioEnLista {
-  organizationId: string;
-  displayName: string;
-  estado: string;
-  modeloDeNegocio: string;
-  mercado: string;
+/* ── Tipos de vista (subconjunto honesto de las respuestas) ──────────────── */
+interface FuenteVista { sourceId: string; tipo: string; proveedor: string; estado: string; faltantes: string[] }
+interface Negocio {
+  displayName: string; legalName: string; rut: string | null; modeloDeNegocio: string; mercado: string;
+  estado: string; categoriasDeclaradas: string[];
+  fuentes: FuenteVista[]; datosHumanosPendientes: string[];
 }
-
-interface FuenteVista {
-  sourceId: string;
-  tipo: string;
-  proveedor: string;
-  estado: string;
-  faltantes: string[];
+interface Motivo { codigo: string; explicacion: string; resuelveCon: string }
+interface Fundamentos { veredicto: string; motivos: Motivo[]; cimientosPresentes: string[]; puedeRecomendarInversionPublicitaria: boolean }
+interface Agrupado { clave: string; pedidos: number; unidades: number; ingreso: number }
+interface LineaBase {
+  pedidos: number; pedidosConEvidenciaDePago: number; pedidosSinEvidenciaDePago: number;
+  fechaMin: string | null; fechaMax: string | null; moneda: string | null;
+  ingresoObservadoEnLaFuente: Desconocible; ingresoConfirmado: Desconocible; reembolsosConfirmados: Desconocible;
+  ticketPromedio: Desconocible; medianaTicket: Desconocible; unidadesVendidas: number; productosConVentasObservadas: number;
+  concentracionTop5: number | null; porMes: Agrupado[]; porProducto: Agrupado[]; porRegion: Agrupado[];
+  margenBruto: Desconocible; beneficio: Desconocible; cac: Desconocible; roas: Desconocible;
 }
-
-interface DetalleNegocio {
-  organizationId: string;
-  businessKey: string;
-  displayName: string;
-  legalName: string;
-  rut: string | null;
-  modeloDeNegocio: string;
-  mercado: string;
-  estado: string;
-  categoriasDeclaradas: string[];
-  perfilDeEvaluacion: { configurado: boolean; objetivoId?: string; motivo?: string };
-  fuentes: FuenteVista[];
-  resumenFuentes: {
-    conectadas: number;
-    pendientes: number;
-    noConectadas: number;
-    noAplica: number;
-  };
-  experienciasHabilitadas: string[];
-  datosHumanosPendientes: string[];
+interface ProductosCruce { catalogoObservado?: number; conVentasObservadas?: number; sinVentasObservadas?: number; vendidosFueraDelCatalogo?: number }
+interface Ventas { observado: boolean; motivo?: string; lineaBase?: LineaBase; productos?: ProductosCruce }
+interface Catalogo { observado: boolean; resumen?: { productosObservados: number; categoriasObservadas: number; enStock: number; sinStock: number } }
+interface Panel {
+  ads?: { impressions: number; clicks: number; cost: number; ctr: number; cpc: number };
+  growthFunnel?: { comercial?: Record<string, number>; diagnostico?: Record<string, number> };
+  searchTerms?: { termino: string; impresiones: number; clics: number }[];
 }
+interface Director { veredicto?: string; interpretacion?: { calidad?: string } }
+interface Plan { oportunidadesTacticas?: { termino: string; accion: string }[] }
 
-/** Etiqueta humana del estado de incorporación. Nunca dice «operativo» si no lo está. */
-const ESTADO_NEGOCIO: Record<string, { texto: string; cls: string }> = {
-  CREATED: { texto: 'Creado', cls: 'mut' },
-  CONFIGURING: { texto: 'Configurando', cls: 'warn' },
-  SOURCES_PENDING: { texto: 'Configurando · faltan fuentes', cls: 'warn' },
-  OBSERVING: { texto: 'Observando', cls: 'ok' },
-  EVALUABLE: { texto: 'Evaluable', cls: 'ok' },
+const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+function mesCorto(clave: string): string {
+  const m = Number(clave.slice(5, 7));
+  return `${MESES[m - 1] ?? clave} ${clave.slice(2, 4)}`;
+}
+const VEREDICTO_HUMANO: Record<string, { texto: string; tono: Tono }> = {
+  FOUNDATION_REQUIRED: { texto: 'Faltan fundamentos', tono: 'warn' },
+  OBSERVABLE_SIN_POLITICA: { texto: 'Observando', tono: 'info' },
+  EVALUABLE: { texto: 'Evaluable', tono: 'ok' },
+  OBSERVAR: { texto: 'Observando', tono: 'info' },
+  NO_EVALUABLE: { texto: 'Sin datos suficientes', tono: 'warn' },
+  RECOMENDAR: { texto: 'Tengo una recomendación', tono: 'ok' },
+};
+const PRIORIDAD_TITULO: Record<string, string> = {
+  ANALYTICS_NOT_CONFIGURED: 'Instalar medición web para ver de dónde vienen tus clientes',
+  ECONOMICS_UNKNOWN: 'Cargar tus costos para conocer el margen de cada venta',
+  NATIONWIDE_SHIPPING_NOT_READY: 'Configurar el despacho a todo el país en la tienda',
+  ADS_NOT_CONFIGURED: 'Conectar Google Ads (solo lectura) para observar tus campañas',
+  BUSINESS_PROFILE_NOT_CONFIGURED: 'Definir el objetivo del negocio',
+  CATALOG_NOT_OBSERVED: 'Conectar el catálogo de la tienda',
+  SALES_NOT_CONNECTED: 'Conectar las ventas de la tienda',
 };
 
-/** Etiqueta humana del estado de una fuente. «Pendiente» ╪ «cero». */
-const ESTADO_FUENTE = ETIQUETA_ESTADO_FUENTE;
-
-/**
- * Dibuja un valor que puede ser desconocido. NUNCA lo convierte en 0: si no se conoce, lo dice.
- * Es la regla visual que separa «no medido» de «medido y dio cero».
- */
-function formatoValor(v: Desconocible, moneda: string | null): string {
-  if (!v.conocido || v.valor === null) return 'desconocido';
-  return `${v.valor.toLocaleString('es-CL')}${moneda ? ` ${moneda}` : ''}`;
-}
-
-const VEREDICTO_FUNDAMENTOS: Record<string, string> = {
-  FOUNDATION_REQUIRED: 'Faltan cimientos',
-  OBSERVABLE_SIN_POLITICA: 'Observable, sin criterios',
-  EVALUABLE: 'Evaluable',
-};
-
-interface Fundamentos {
-  veredicto: string;
-  motivos: { codigo: string; explicacion: string; resuelveCon: string }[];
-  cimientosPresentes: string[];
-  embudo: { pasos: { paso: string; estado: string }[] };
-}
-
-interface ResumenCatalogoVista {
-  productosObservados: number;
-  categoriasObservadas: number;
-  precioMin: number | null;
-  precioMax: number | null;
-  moneda: string | null;
-  enStock: number;
-  sinStock: number;
-  disponibilidadDesconocida: number;
-}
-
-/** Valor que puede estar legítimamente sin conocer. La UI NUNCA lo dibuja como 0. */
-interface Desconocible {
-  conocido: boolean;
-  motivo?: string;
-  valor: number | null;
-}
-
-interface AgrupadoVista {
-  clave: string;
-  pedidos: number;
-  unidades: number;
-  ingreso: number;
-}
-
-interface LineaBaseVentas {
-  pedidos: number;
-  pedidosConEvidenciaDePago: number;
-  pedidosSinEvidenciaDePago: number;
-  fechaMin: string | null;
-  fechaMax: string | null;
-  moneda: string | null;
-  ingresoObservadoEnLaFuente: Desconocible;
-  ingresoConfirmado: Desconocible;
-  reembolsosConfirmados: Desconocible;
-  ticketPromedio: Desconocible;
-  medianaTicket: Desconocible;
-  articulosPorPedido: Desconocible;
-  unidadesVendidas: number;
-  productosConVentasObservadas: number;
-  clientesUnicosSeudonimos: number;
-  clientesRecurrentes: number;
-  tasaDeRecompra: Desconocible;
-  estados: { clave: string; n: number }[];
-  mediosDePago: { clave: string; n: number }[];
-  metodosDeEnvio: { clave: string; n: number }[];
-  porMes: AgrupadoVista[];
-  porRegion: AgrupadoVista[];
-  porProducto: AgrupadoVista[];
-  concentracionTop5: number | null;
-  margenBruto: Desconocible;
-  beneficio: Desconocible;
-  cac: Desconocible;
-  roas: Desconocible;
-  ingresoAtribuido: Desconocible;
-  ventasFueraDeLaFuente: Desconocible;
-  coberturaDelNegocio: string;
-}
-
-interface ProductosCruce {
-  catalogoObservado?: number;
-  conVentasObservadas?: number;
-  sinVentasObservadas?: number;
-  vendidosFueraDelCatalogo?: number;
-  motivo?: string;
-}
-
-interface VentasVista {
-  observado: boolean;
-  motivo?: string;
-  estadoFuente?: string;
-  lineaBase?: LineaBaseVentas;
-  productos?: ProductosCruce;
-}
-
-interface CatalogoVista {
-  observado: boolean;
-  motivo?: string;
-  source?: string;
-  observedAt?: string;
-  completo?: boolean;
-  resumen?: ResumenCatalogoVista;
-  hallazgos?: {
-    codigo: string;
-    severidad: string;
-    afectados: number;
-    total: number;
-    detalle: string;
-  }[];
-}
-
-const TIPO_FUENTE: Record<string, string> = {
-  WEBSITE: 'Sitio web',
-  ECOMMERCE: 'Tienda / e-commerce',
-  ADS: 'Google Ads',
-  ANALYTICS: 'GA4 / analítica',
-  MERCHANT: 'Merchant Center',
-  SALES: 'Ventas',
-  CATALOG: 'Catálogo',
-  CRM: 'CRM / clientes',
-  PAYMENTS: 'Medios de pago',
-  SHIPPING: 'Despacho',
-  GROWTH: 'Eventos de producto',
-};
-
-export default function Negocios(): React.ReactElement {
-  const [lista, setLista] = useState<NegocioEnLista[] | null>(null);
+export default function Panel(): React.ReactElement {
   const [org, setOrg] = useState<string | null | undefined>(undefined);
-  const [detalle, setDetalle] = useState<DetalleNegocio | null>(null);
+  const [negocio, setNegocio] = useState<Negocio | null>(null);
   const [fundamentos, setFundamentos] = useState<Fundamentos | null>(null);
-  const [catalogo, setCatalogo] = useState<CatalogoVista | null>(null);
-  const [ventas, setVentas] = useState<VentasVista | null>(null);
-  const [aviso, setAviso] = useState<string | null>(null);
+  const [ventas, setVentas] = useState<Ventas | null>(null);
+  const [catalogo, setCatalogo] = useState<Catalogo | null>(null);
+  const [panel, setPanel] = useState<Panel | null>(null);
+  const [director, setDirector] = useState<Director | null>(null);
+  const [plan, setPlan] = useState<Plan | null>(null);
+  const [cargando, setCargando] = useState(false);
 
-  useEffect(() => {
-    setOrg(orgActiva());
+  useEffect(() => { setOrg(orgActiva()); }, []);
+
+  const cargar = useCallback(async (o: string) => {
+    setCargando(true);
+    setNegocio(null); setFundamentos(null); setVentas(null); setCatalogo(null); setPanel(null); setDirector(null); setPlan(null);
+    const h = cabecerasOrg(o);
+    const get = async <T,>(url: string): Promise<T | null> => {
+      try { const r = await fetch(url, { cache: 'no-store', headers: h }); return r.ok ? ((await r.json()) as T) : null; } catch { return null; }
+    };
+    const neg = await get<Negocio>('/api/plataforma/negocio');
+    setNegocio(neg);
+    setFundamentos(await get<Fundamentos>('/api/plataforma/fundamentos'));
+    if (neg?.modeloDeNegocio === 'SAAS_FUNNEL') {
+      setPanel(await get<Panel>('/api/medicion/panel'));
+      setDirector(await get<Director>('/api/medicion/lectura-director'));
+      setPlan(await get<Plan>('/api/medicion/plan-accion'));
+    } else {
+      setVentas(await get<Ventas>('/api/plataforma/ventas'));
+      setCatalogo(await get<Catalogo>('/api/plataforma/catalogo'));
+    }
+    setCargando(false);
   }, []);
 
-  // La lista de negocios necesita algún contexto de organización para la API; se usa el activo, y
-  // si no hay ninguno todavía, no se inventa: se pide elegir.
-  const cargarLista = useCallback(async (desde: string) => {
-    try {
-      const r = await fetch('/api/plataforma/negocios', {
-        cache: 'no-store',
-        headers: cabecerasOrg(desde),
-      });
-      if (r.ok) setLista(((await r.json()) as { negocios: NegocioEnLista[] }).negocios);
-    } catch {
-      /* la vista sigue siendo utilizable con el negocio activo */
-    }
-  }, []);
+  useEffect(() => { if (org) void cargar(org); }, [org, cargar]);
 
-  useEffect(() => {
-    if (org === undefined) return;
-    const referencia = org ?? 'org-smileflow';
-    void cargarLista(referencia);
-  }, [org, cargarLista]);
-
-  useEffect(() => {
-    if (!org) {
-      setDetalle(null);
-      setFundamentos(null);
-      setCatalogo(null);
-      return;
-    }
-    const h = cabecerasOrg(org);
-    (async () => {
-      setAviso(null);
-      try {
-        const r = await fetch('/api/plataforma/negocio', { cache: 'no-store', headers: h });
-        if (!r.ok) {
-          const cuerpo = (await r.json().catch(() => ({}))) as { error?: string };
-          setDetalle(null);
-          setAviso(estadoNoConfigurado(cuerpo.error) ?? 'No se pudo cargar el negocio.');
-          return;
-        }
-        setDetalle((await r.json()) as DetalleNegocio);
-      } catch {
-        setAviso('No se pudo contactar el servicio.');
-      }
-    })();
-    (async () => {
-      try {
-        const r = await fetch('/api/plataforma/fundamentos', { cache: 'no-store', headers: h });
-        setFundamentos(r.ok ? ((await r.json()) as Fundamentos) : null);
-      } catch {
-        setFundamentos(null);
-      }
-    })();
-    (async () => {
-      try {
-        const r = await fetch('/api/plataforma/catalogo', { cache: 'no-store', headers: h });
-        setCatalogo(r.ok ? ((await r.json()) as CatalogoVista) : null);
-      } catch {
-        setCatalogo(null);
-      }
-    })();
-    (async () => {
-      try {
-        const r = await fetch('/api/plataforma/ventas', { cache: 'no-store', headers: h });
-        setVentas(r.ok ? ((await r.json()) as VentasVista) : null);
-      } catch {
-        setVentas(null);
-      }
-    })();
-  }, [org]);
-
-  function elegir(id: string): void {
-    fijarOrgActiva(id);
-    setOrg(id);
-  }
-
-  if (org === undefined)
+  if (org === undefined) return <div className="dash panel"><p className="lede">Cargando…</p></div>;
+  if (org === null)
     return (
-      <div className="wrap panel">
-        <p className="lede">Cargando…</p>
+      <div className="dash panel">
+        <PageHeader eyebrow="Panel" title="Elegí una empresa" />
+        <EmptyState ico="◔" titulo="Todavía no elegiste ninguna empresa" detalle="SOEC nunca elige por vos: los datos de una empresa jamás se muestran en el panel de otra.">
+          <p style={{ marginTop: 14 }}><Link className="btn primary" href="/">Ver mis empresas →</Link></p>
+        </EmptyState>
       </div>
     );
 
-  return (
-    <div className="wrap panel">
-      <h1>Mis negocios</h1>
-      <p className="muted small">
-        SOEC no elige un negocio por vos. Los datos de una empresa nunca se muestran en el panel de
-        otra.
-      </p>
+  const esEcom = negocio?.modeloDeNegocio !== 'SAAS_FUNNEL';
+  // El veredicto relevante depende del modelo: en SaaS manda el Director de campañas (medición);
+  // en e-commerce, el evaluador de fundamentos del negocio.
+  const veredictoCrudo = esEcom ? fundamentos?.veredicto : director?.veredicto ?? fundamentos?.veredicto;
+  const ver = veredictoCrudo
+    ? VEREDICTO_HUMANO[veredictoCrudo] ?? { texto: veredictoCrudo, tono: 'mut' as Tono }
+    : null;
+  const prioridades = esEcom
+    ? (fundamentos?.motivos ?? []).slice(0, 4).map((m) => ({ t: PRIORIDAD_TITULO[m.codigo] ?? m.explicacion, s: m.resuelveCon }))
+    : saasPrioridades(panel, plan);
+  const puedeRecomendar = fundamentos?.puedeRecomendarInversionPublicitaria ?? false;
 
-      <div style={{ display: 'grid', gap: 10, marginBottom: 20 }}>
-        {(lista ?? []).map((n) => {
-          const e = ESTADO_NEGOCIO[n.estado] ?? { texto: n.estado, cls: 'mut' };
-          const activo = n.organizationId === org;
-          return (
-            <div className="card" key={n.organizationId} style={{ padding: '10px 14px' }}>
-              <p style={{ margin: 0 }}>
-                <b>{n.displayName}</b>{' '}
-                <span className={`pill ${e.cls}`} style={{ fontSize: 10 }}>
-                  {e.texto}
-                </span>{' '}
-                {activo && (
-                  <span className="pill ok" style={{ fontSize: 10 }}>
-                    seleccionado
-                  </span>
-                )}
-              </p>
-              <p className="s muted" style={{ margin: '2px 0 8px' }}>
-                {n.modeloDeNegocio === 'ECOMMERCE_DISTRIBUCION'
-                  ? 'E-commerce / distribución'
-                  : n.modeloDeNegocio}
-                {' · '}
-                {n.mercado}
-                {' · '}
-                <code>{n.organizationId}</code>
-              </p>
-              <button className="btn" onClick={() => elegir(n.organizationId)} disabled={activo}>
-                {activo ? 'Negocio actual' : 'Entrar a este negocio'}
-              </button>
-            </div>
-          );
-        })}
-        {lista !== null && lista.length === 0 && (
-          <p className="muted">No hay negocios registrados en esta instalación.</p>
-        )}
+  return (
+    <div className="dash panel">
+      <PageHeader
+        eyebrow={esEcom ? 'Panel · e-commerce' : 'Panel · software (SaaS)'}
+        title={negocio?.displayName ?? 'Panel del negocio'}
+        right={ver ? <Badge tono={ver.tono}>{ver.texto}</Badge> : undefined}
+      />
+      {negocio && (
+        <p className="lede">
+          {esEcom ? 'Tienda WooCommerce' : 'Captación de clientes con Google Ads'} · {negocio.mercado}
+          {negocio.categoriasDeclaradas.length > 0 && <> · {negocio.categoriasDeclaradas.join(' · ')}</>}
+        </p>
+      )}
+
+      {cargando && !negocio && <div className="card"><p className="muted">Cargando el panel de este negocio…</p></div>}
+
+      {/* ── HOY: cifras del día ──────────────────────────────────────────── */}
+      {esEcom && ventas?.observado && ventas.lineaBase && (
+        <>
+          <div className="section">Hoy <span className="hint">lo que SOEC ve en tu tienda</span></div>
+          <div className="grid g-4">
+            <Metric ico="🧾" label="Pedidos confirmados" value={num(ventas.lineaBase.pedidos)} sub={`${ventas.lineaBase.pedidosConEvidenciaDePago} con pago confirmado`} accent />
+            <Metric ico="💰" label="Facturación confirmada" value={valor(ventas.lineaBase.ingresoConfirmado, clp)} sub="pagos confirmados, neto de reembolsos" accent />
+            <Metric ico="🎯" label="Ticket promedio" value={valor(ventas.lineaBase.ticketPromedio, clp)} sub={`mediana ${valor(ventas.lineaBase.medianaTicket, clp)}`} />
+            <Metric ico="📦" label="Productos con ventas" value={num(ventas.lineaBase.productosConVentasObservadas)} sub={catalogo?.resumen ? `de ${num(catalogo.resumen.productosObservados)} en el catálogo` : undefined} />
+          </div>
+        </>
+      )}
+      {!esEcom && panel?.ads && (
+        <>
+          <div className="section">Hoy <span className="hint">lo que SOEC ve en tus campañas</span></div>
+          <div className="grid g-4">
+            <Metric ico="👁" label="Impresiones" value={num(panel.ads.impressions)} sub="veces que se mostró tu anuncio" accent />
+            <Metric ico="🖱" label="Clics" value={num(panel.ads.clicks)} sub={`${(panel.ads.ctr * 100).toFixed(1)}% de quienes lo vieron`} />
+            <Metric ico="💸" label="Inversión" value={clp(panel.ads.cost)} sub={`${clp(panel.ads.cpc)} por clic`} />
+            <Metric ico="🌱" label="Clientes nuevos" value={num(panel.growthFunnel?.comercial?.lead_created ?? 0)} sub="contactos reales desde el sitio" accent />
+          </div>
+        </>
+      )}
+
+      {/* ── SOEC DICE + prioridades ──────────────────────────────────────── */}
+      {ver && (
+        <div className="grid g-main" style={{ marginTop: 22 }}>
+          <DirectorCard
+            estado={<Badge tono={ver.tono}>{ver.texto}</Badge>}
+            dice={frase(esEcom, ventas, panel, puedeRecomendar)}
+            extra={
+              puedeRecomendar ? (
+                <Badge tono="ok">Listo para recomendar inversión</Badge>
+              ) : (
+                <span className="s">
+                  {esEcom
+                    ? 'Todavía no puedo recomendar gastar en publicidad: me faltan datos.'
+                    : 'Sigo en modo seguro: no cambio tu campaña sin tu aprobación.'}
+                </span>
+              )
+            }
+          />
+          <div className="card">
+            <div className="section" style={{ margin: '0 0 12px' }}>Qué conviene hacer</div>
+            {prioridades.length > 0 ? (
+              <PriorityList items={prioridades} />
+            ) : (
+              <p className="s">Sin acciones pendientes por ahora.</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Tu atención ──────────────────────────────────────────────────── */}
+      <div style={{ marginTop: 16 }}>
+        <Callout tono="ok" ico="✓">
+          <b>No necesitás decidir nada ahora.</b> SOEC está en modo seguro: observa y te avisará aquí
+          cuando haya algo real que aprobar. Nada se publica ni se gasta sin tu confirmación.
+        </Callout>
       </div>
 
-      {!org && <p className="lede">Elegí un negocio para ver su estado.</p>}
-      {aviso && <div className="aviso aviso--danger">{aviso}</div>}
-
-      {detalle && (
+      {/* ══════════════ E-COMMERCE (C Y P) ══════════════ */}
+      {esEcom && ventas?.observado && ventas.lineaBase && (
         <>
-          <h2 className="block">{detalle.displayName}</h2>
-          <div className="card" style={{ padding: '8px 16px', marginBottom: 14 }}>
-            <p className="s" style={{ margin: '6px 0' }}>
-              Razón social: <b>{detalle.legalName}</b>
-              {' · '}RUT:{' '}
-              {detalle.rut ?? (
-                <span className="pill warn" style={{ fontSize: 10 }}>
-                  pendiente
+          <div className="section">Ventas <span className="hint">observadas en WooCommerce</span></div>
+          <div className="grid g-main">
+            <div className="card">
+              <div className="spread" style={{ marginBottom: 10 }}>
+                <b>Facturación por mes</b>
+                <span className="small muted">
+                  {ventas.lineaBase.fechaMin?.slice(0, 10)} → {ventas.lineaBase.fechaMax?.slice(0, 10)}
                 </span>
-              )}
-              {' · '}Mercado: {detalle.mercado}
-            </p>
-            {detalle.categoriasDeclaradas.length > 0 && (
-              <p className="s" style={{ margin: '6px 0' }}>
-                Categorías declaradas: {detalle.categoriasDeclaradas.join(' · ')}{' '}
-                <span className="muted">(contexto declarado, no el catálogo real)</span>
-              </p>
-            )}
-            <p className="s" style={{ margin: '6px 0' }}>
-              Objetivos y criterios de evaluación:{' '}
-              {detalle.perfilDeEvaluacion.configurado ? (
-                <span className="pill ok" style={{ fontSize: 10 }}>
-                  configurados
-                </span>
-              ) : (
-                <span className="pill warn" style={{ fontSize: 10 }}>
-                  no configurados
-                </span>
-              )}
-            </p>
+              </div>
+              <TrendBars format={clp} data={[...ventas.lineaBase.porMes].sort((a, b) => a.clave.localeCompare(b.clave)).map((m) => ({ label: mesCorto(m.clave), value: m.ingreso }))} />
+            </div>
+            <div className="card">
+              <div className="section" style={{ margin: '0 0 10px' }}>La verdad de tus ingresos</div>
+              <div className="stack">
+                <div className="spread"><span className="s">Facturación confirmada</span><b>{valor(ventas.lineaBase.ingresoConfirmado, clp)}</b></div>
+                <div className="spread"><span className="s">Reembolsos</span><b>{valor(ventas.lineaBase.reembolsosConfirmados, clp)}</b></div>
+                <div className="spread"><span className="s muted">Valor bruto observado</span><span className="muted">{valor(ventas.lineaBase.ingresoObservadoEnLaFuente, clp)}</span></div>
+                <div className="spread"><span className="s">Unidades vendidas</span><b>{num(ventas.lineaBase.unidadesVendidas)}</b></div>
+              </div>
+              <Callout tono="info" ico="ℹ" >
+                «Confirmada» cuenta solo pedidos pagados. El «valor bruto» es todo lo que pasó por la
+                tienda: no es lo mismo.
+              </Callout>
+            </div>
           </div>
 
-          {fundamentos && (
-            <>
-              <h3 className="block">¿Puede SOEC dirigir este negocio todavía?</h3>
-              <div className="card" style={{ padding: '8px 16px', marginBottom: 14 }}>
-                <p className="s" style={{ margin: '6px 0' }}>
-                  Veredicto:{' '}
-                  <span
-                    className={`pill ${fundamentos.veredicto === 'EVALUABLE' ? 'ok' : 'warn'}`}
-                    style={{ fontSize: 10 }}
-                  >
-                    {VEREDICTO_FUNDAMENTOS[fundamentos.veredicto] ?? fundamentos.veredicto}
-                  </span>
-                </p>
-                {fundamentos.cimientosPresentes.length > 0 && (
-                  <p className="s" style={{ margin: '6px 0' }}>
-                    Ya está: {fundamentos.cimientosPresentes.join(' · ')}
-                  </p>
-                )}
-                {fundamentos.motivos.length > 0 && (
-                  <ul className="s" style={{ margin: '4px 0 10px 18px' }}>
-                    {fundamentos.motivos.map((m) => (
-                      <li key={m.codigo}>
-                        <b>{m.explicacion}</b>
-                        <br />
-                        <span className="muted">Se resuelve con: {m.resuelveCon}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <p className="s muted" style={{ margin: '6px 0' }}>
-                  Medición de embudo: {fundamentos.embudo.pasos.length} pasos sin instrumentar. Cero
-                  eventos observados no es cero eventos ocurridos.
-                </p>
-              </div>
-            </>
-          )}
-
-          {ventas && (
-            <>
-              <h3 className="block">Ventas observadas en WooCommerce</h3>
-              <div className="card" style={{ padding: '8px 16px', marginBottom: 14 }}>
-                {!ventas.observado || !ventas.lineaBase ? (
-                  <p className="s muted" style={{ margin: '6px 0' }}>
-                    {ventas.motivo === 'SALES_PENDING_CREDENTIALS'
-                      ? 'Ventas: requiere credenciales. No es que no haya ventas: es que SOEC todavía no puede leerlas.'
-                      : `Ventas todavía no observadas (${ventas.motivo ?? 'sin observación'}).`}
-                  </p>
-                ) : (
-                  <>
-                    <p className="s muted" style={{ margin: '6px 0' }}>
-                      Esto es lo observado <b>en la tienda WooCommerce</b>, no el total de la
-                      empresa: la cobertura de esta fuente es{' '}
-                      <b>{ventas.lineaBase.coberturaDelNegocio}</b> y las ventas por WhatsApp,
-                      transferencia o mostrador siguen siendo desconocidas.
-                    </p>
-                    <p className="s" style={{ margin: '6px 0' }}>
-                      <b>{ventas.lineaBase.pedidos}</b> pedidos · pago confirmado en{' '}
-                      <b>{ventas.lineaBase.pedidosConEvidenciaDePago}</b> de{' '}
-                      {ventas.lineaBase.pedidos}
-                      {ventas.lineaBase.pedidosSinEvidenciaDePago > 0 && (
-                        <>
-                          {' '}
-                          · <b>{ventas.lineaBase.pedidosSinEvidenciaDePago}</b> sin evidencia de pago
-                        </>
-                      )}
-                    </p>
-                    <p className="s" style={{ margin: '6px 0' }}>
-                      <b>Facturación confirmada:</b>{' '}
-                      <b>{formatoValor(ventas.lineaBase.ingresoConfirmado, ventas.lineaBase.moneda)}</b>{' '}
-                      <span className="muted">
-                        (sólo pedidos con pago confirmado, neto de reembolsos demostrables:{' '}
-                        {formatoValor(ventas.lineaBase.reembolsosConfirmados, ventas.lineaBase.moneda)}
-                        )
-                      </span>
-                    </p>
-                    <p className="s muted" style={{ margin: '6px 0' }}>
-                      Valor bruto de pedidos observados:{' '}
-                      {formatoValor(
-                        ventas.lineaBase.ingresoObservadoEnLaFuente,
-                        ventas.lineaBase.moneda,
-                      )}{' '}
-                      — es «lo que pasó por la tienda», puede incluir pedidos con pago desconocido; no
-                      es lo mismo que la facturación confirmada.
-                    </p>
-                    <p className="s" style={{ margin: '6px 0' }}>
-                      Ticket promedio{' '}
-                      {formatoValor(ventas.lineaBase.ticketPromedio, ventas.lineaBase.moneda)} ·
-                      mediana {formatoValor(ventas.lineaBase.medianaTicket, ventas.lineaBase.moneda)} ·{' '}
-                      {formatoValor(ventas.lineaBase.articulosPorPedido, null)} artículos/pedido
-                    </p>
-                    <p className="s" style={{ margin: '6px 0' }}>
-                      Ventana observada: {ventas.lineaBase.fechaMin?.slice(0, 10) ?? '—'} a{' '}
-                      {ventas.lineaBase.fechaMax?.slice(0, 10) ?? '—'} ·{' '}
-                      <b>{ventas.lineaBase.unidadesVendidas}</b> unidades ·{' '}
-                      <b>{ventas.lineaBase.productosConVentasObservadas}</b> productos con ventas
-                      observadas
-                    </p>
-                    <p className="s" style={{ margin: '6px 0' }}>
-                      Clientes observados (seudónimos):{' '}
-                      <b>{ventas.lineaBase.clientesUnicosSeudonimos}</b> · recurrentes:{' '}
-                      <b>{ventas.lineaBase.clientesRecurrentes}</b>
-                      {ventas.lineaBase.concentracionTop5 !== null && (
-                        <>
-                          {' · '}los 5 productos mayores concentran{' '}
-                          <b>{Math.round(ventas.lineaBase.concentracionTop5 * 100)}%</b> del ingreso
-                        </>
-                      )}
-                    </p>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                      <div>
-                        <p className="s" style={{ margin: '10px 0 4px' }}>
-                          <b>Top productos por ingresos</b>
-                        </p>
-                        <ul className="s" style={{ margin: '0 0 10px 18px' }}>
-                          {ventas.lineaBase.porProducto
-                            .filter((p) => p.clave !== '(desconocido)')
-                            .slice(0, 5)
-                            .map((p) => (
-                              <li key={p.clave}>
-                                producto <code>{p.clave}</code> —{' '}
-                                {p.ingreso.toLocaleString('es-CL')} {ventas.lineaBase!.moneda ?? ''} (
-                                {p.unidades} u.)
-                              </li>
-                            ))}
-                        </ul>
-                      </div>
-                      <div>
-                        <p className="s" style={{ margin: '10px 0 4px' }}>
-                          <b>Top productos por unidades</b>
-                        </p>
-                        <ul className="s" style={{ margin: '0 0 10px 18px' }}>
-                          {[...ventas.lineaBase.porProducto]
-                            .filter((p) => p.clave !== '(desconocido)')
-                            .sort((a, b) => b.unidades - a.unidades)
-                            .slice(0, 5)
-                            .map((p) => (
-                              <li key={p.clave}>
-                                producto <code>{p.clave}</code> — {p.unidades} u. ·{' '}
-                                {p.ingreso.toLocaleString('es-CL')} {ventas.lineaBase!.moneda ?? ''}
-                              </li>
-                            ))}
-                        </ul>
-                      </div>
-                    </div>
-
-                    <p className="s" style={{ margin: '10px 0 4px' }}>
-                      <b>Evolución mensual</b> <span className="muted">(pedidos · facturación observada)</span>
-                    </p>
-                    <ul className="s" style={{ margin: '0 0 10px 18px' }}>
-                      {ventas.lineaBase.porMes.map((m) => (
-                        <li key={m.clave}>
-                          {m.clave} — <b>{m.pedidos}</b> pedidos · {m.ingreso.toLocaleString('es-CL')}{' '}
-                          {ventas.lineaBase!.moneda ?? ''} · {m.unidades} u.
-                        </li>
-                      ))}
-                    </ul>
-
-                    {ventas.productos && 'catalogoObservado' in ventas.productos && (
-                      <p className="s" style={{ margin: '10px 0 4px' }}>
-                        <b>Productos:</b> {ventas.productos.conVentasObservadas} con ventas observadas ·{' '}
-                        {ventas.productos.sinVentasObservadas} del catálogo sin ventas observadas en la
-                        ventana
-                        {(ventas.productos.vendidosFueraDelCatalogo ?? 0) > 0 && (
-                          <>
-                            {' '}
-                            · {ventas.productos.vendidosFueraDelCatalogo} vendidos que ya no están en el
-                            catálogo (referencia histórica, no se elimina)
-                          </>
-                        )}{' '}
-                        <span className="muted">
-                          «sin ventas observadas» no es «sin ventas»: es sin ventas en esta ventana y
-                          fuente.
-                        </span>
-                      </p>
-                    )}
-
-                    <p className="s" style={{ margin: '10px 0 4px' }}>
-                      <b>Por región</b>
-                    </p>
-                    <ul className="s" style={{ margin: '0 0 10px 18px' }}>
-                      {ventas.lineaBase.porRegion.map((r) => (
-                        <li key={r.clave}>
-                          {r.clave} — {r.pedidos} pedidos · {r.ingreso.toLocaleString('es-CL')}{' '}
-                          {ventas.lineaBase!.moneda ?? ''}
-                        </li>
-                      ))}
-                    </ul>
-
-                    <p className="s" style={{ margin: '6px 0' }}>
-                      Medios de pago:{' '}
-                      {ventas.lineaBase.mediosDePago.map((m) => `${m.clave} (${m.n})`).join(' · ')}
-                      {' — '}Envío:{' '}
-                      {ventas.lineaBase.metodosDeEnvio
-                        .map((m) => `${m.clave} (${m.n})`)
-                        .join(' · ')}
-                    </p>
-
-                    <p className="s" style={{ margin: '10px 0 4px' }}>
-                      <b>Lo que estas ventas NO permiten afirmar</b>
-                    </p>
-                    <ul className="s muted" style={{ margin: '0 0 10px 18px' }}>
-                      {(
-                        [
-                          ['Margen', ventas.lineaBase.margenBruto],
-                          ['Beneficio', ventas.lineaBase.beneficio],
-                          ['CAC', ventas.lineaBase.cac],
-                          ['ROAS', ventas.lineaBase.roas],
-                          ['Ingreso atribuido a un canal', ventas.lineaBase.ingresoAtribuido],
-                          ['Ventas fuera de WooCommerce', ventas.lineaBase.ventasFueraDeLaFuente],
-                        ] as const
-                      ).map(([etiqueta, v]) => (
-                        <li key={etiqueta}>
-                          {etiqueta}: <b>desconocido</b>
-                          {v.motivo ? ` (${v.motivo})` : ''} — no es cero
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-              </div>
-            </>
-          )}
-
-          {catalogo && (
-            <>
-              <h3 className="block">Catálogo</h3>
-              <div className="card" style={{ padding: '8px 16px', marginBottom: 14 }}>
-                {!catalogo.observado ? (
-                  <p className="s muted" style={{ margin: '6px 0' }}>
-                    Catálogo todavía no observado ({catalogo.motivo}). No hay cifras que mostrar.
-                  </p>
-                ) : (
-                  <>
-                    <p className="s" style={{ margin: '6px 0' }}>
-                      <b>{catalogo.resumen!.productosObservados}</b> productos ·{' '}
-                      <b>{catalogo.resumen!.categoriasObservadas}</b> categorías · precios{' '}
-                      {catalogo.resumen!.precioMin !== null
-                        ? `${catalogo.resumen!.precioMin!.toLocaleString('es-CL')} – ${catalogo.resumen!.precioMax!.toLocaleString('es-CL')} ${catalogo.resumen!.moneda ?? ''}`
-                        : 'no observados'}
-                    </p>
-                    <p className="s" style={{ margin: '6px 0' }}>
-                      Disponibilidad: {catalogo.resumen!.enStock} en stock ·{' '}
-                      {catalogo.resumen!.sinStock} sin stock
-                      {catalogo.resumen!.disponibilidadDesconocida > 0 &&
-                        ` · ${catalogo.resumen!.disponibilidadDesconocida} desconocida`}
-                    </p>
-                    <p className="s muted" style={{ margin: '6px 0' }}>
-                      Observado el {new Date(catalogo.observedAt!).toLocaleString('es-CL')} desde{' '}
-                      {catalogo.source} (solo lectura)
-                      {catalogo.completo === false && ' · lectura incompleta'}
-                    </p>
-                    {catalogo.hallazgos && catalogo.hallazgos.length > 0 && (
-                      <>
-                        <p className="s" style={{ margin: '10px 0 4px' }}>
-                          <b>Calidad de datos</b>{' '}
-                          <span className="muted">(SOEC observa, no corrige)</span>
-                        </p>
-                        <ul className="s" style={{ margin: '0 0 10px 18px' }}>
-                          {catalogo.hallazgos.map((h) => (
-                            <li key={h.codigo}>
-                              {h.detalle} — <b>{h.afectados}</b> de {h.total}{' '}
-                              <span
-                                className={`pill ${h.severidad === 'IMPIDE_MEDIR' ? 'warn' : 'mut'}`}
-                                style={{ fontSize: 10 }}
-                              >
-                                {h.severidad}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-            </>
-          )}
-
-          <h3 className="block">Fuentes de datos</h3>
-          <div className="card" style={{ padding: '8px 16px', marginBottom: 14 }}>
-            <p className="s muted" style={{ margin: '6px 0' }}>
-              Una fuente no conectada no significa cero resultados: significa que todavía no hay de
-              dónde leer.
-            </p>
-            {detalle.fuentes.map((f) => {
-              const e = ESTADO_FUENTE[f.estado] ?? { texto: f.estado, cls: 'mut' };
-              return (
-                <div className="did" key={f.sourceId}>
-                  <span className="tick medi" aria-hidden="true">
-                    ◆
-                  </span>
-                  <div>
-                    <p className="t" style={{ margin: 0 }}>
-                      {TIPO_FUENTE[f.tipo] ?? f.tipo}{' '}
-                      <span className={`pill ${e.cls}`} style={{ fontSize: 10 }}>
-                        {e.texto}
-                      </span>
-                    </p>
-                    {f.faltantes.length > 0 && (
-                      <p className="s muted" style={{ margin: 0 }}>
-                        Falta: {f.faltantes.join(' · ')}
-                      </p>
-                    )}
-                  </div>
+          <div className="section">Productos</div>
+          <div className="grid g-3">
+            <div className="card">
+              <div className="section" style={{ margin: '0 0 10px' }}>Más venden (por ingresos)</div>
+              <ol className="stack" style={{ margin: 0, paddingLeft: 18, fontSize: 14 }}>
+                {ventas.lineaBase.porProducto.filter((p) => p.clave !== '(desconocido)').slice(0, 5).map((p) => (
+                  <li key={p.clave}><code>#{p.clave}</code> — <b>{clp(p.ingreso)}</b> <span className="muted">({p.unidades} u.)</span></li>
+                ))}
+              </ol>
+            </div>
+            <div className="card">
+              <div className="section" style={{ margin: '0 0 10px' }}>Más venden (por unidades)</div>
+              <ol className="stack" style={{ margin: 0, paddingLeft: 18, fontSize: 14 }}>
+                {[...ventas.lineaBase.porProducto].filter((p) => p.clave !== '(desconocido)').sort((a, b) => b.unidades - a.unidades).slice(0, 5).map((p) => (
+                  <li key={p.clave}><code>#{p.clave}</code> — <b>{p.unidades} u.</b> <span className="muted">({clp(p.ingreso)})</span></li>
+                ))}
+              </ol>
+            </div>
+            <div className="card">
+              <div className="section" style={{ margin: '0 0 10px' }}>Cobertura del catálogo</div>
+              {ventas.productos?.catalogoObservado ? (
+                <div className="stack">
+                  <div className="spread"><span className="s">Con ventas observadas</span><b>{num(ventas.productos.conVentasObservadas)}</b></div>
+                  <div className="spread"><span className="s">Sin ventas en la ventana</span><b>{num(ventas.productos.sinVentasObservadas)}</b></div>
+                  <div className="track"><i style={{ width: `${((ventas.productos.conVentasObservadas ?? 0) / (ventas.productos.catalogoObservado || 1)) * 100}%` }} /></div>
+                  <p className="small muted" style={{ margin: 0 }}>«Sin ventas observadas» no es «sin ventas»: es sin ventas en este período y esta tienda.</p>
                 </div>
-              );
-            })}
+              ) : <p className="s muted">Catálogo aún no cruzado.</p>}
+            </div>
           </div>
+        </>
+      )}
+      {esEcom && ventas && !ventas.observado && (
+        <div style={{ marginTop: 18 }}>
+          <EmptyState ico="🧾" titulo="Todavía no hay ventas observadas" detalle="No es que no haya ventas: es que SOEC aún no puede leerlas de la tienda." />
+        </div>
+      )}
 
-          {detalle.datosHumanosPendientes.length > 0 && (
-            <>
-              <h3 className="block">Lo que SOEC necesita de vos</h3>
-              <div className="card" style={{ padding: '8px 16px', marginBottom: 14 }}>
-                <p className="s muted" style={{ margin: '6px 0' }}>
-                  SOEC no inventa estos datos. Hasta tenerlos, este negocio no puede evaluarse.
-                </p>
-                <ul className="s" style={{ margin: '4px 0 10px 18px' }}>
-                  {detalle.datosHumanosPendientes.map((d) => (
-                    <li key={d}>{d}</li>
-                  ))}
-                </ul>
+      {/* ══════════════ SAAS (SmileFlow) ══════════════ */}
+      {!esEcom && panel?.ads && (
+        <>
+          <div className="section">Cómo va la captación <span className="hint">del anuncio al cliente</span></div>
+          <div className="grid g-main">
+            <div className="card">
+              <div className="section" style={{ margin: '0 0 12px' }}>Tu embudo de clientes</div>
+              <Funnel steps={[
+                { label: 'Vieron tu anuncio', value: panel.ads.impressions },
+                { label: 'Hicieron clic', value: panel.ads.clicks },
+                { label: 'Pidieron demo', value: panel.growthFunnel?.comercial?.demo_cta_clicked ?? 0 },
+                { label: 'Empezaron el formulario', value: panel.growthFunnel?.comercial?.demo_form_started ?? 0 },
+                { label: 'Se volvieron clientes', value: panel.growthFunnel?.comercial?.lead_created ?? 0 },
+              ]} />
+            </div>
+            <div className="card">
+              <div className="section" style={{ margin: '0 0 10px' }}>Búsquedas que te muestran</div>
+              <div className="stack" style={{ fontSize: 13.5 }}>
+                {(panel.searchTerms ?? []).slice(0, 5).map((t) => (
+                  <div className="spread" key={t.termino}>
+                    <span className="s">{t.termino}</span>
+                    <span className="muted">{t.impresiones} vistas · {t.clics} clics</span>
+                  </div>
+                ))}
               </div>
-            </>
-          )}
-
-          {detalle.experienciasHabilitadas.length > 0 ? (
-            <p className="s">
-              <Link href="/resultados">Ver resultados de {detalle.displayName} →</Link>
-            </p>
-          ) : (
-            <p className="s muted">
-              Este negocio todavía no tiene ninguna vista de resultados: no hay fuentes conectadas
-              ni criterios de evaluación.
-            </p>
+            </div>
+          </div>
+          {plan?.oportunidadesTacticas && plan.oportunidadesTacticas.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <Callout tono="warn" ico="💡">
+                <b>Oportunidad:</b> hay {plan.oportunidadesTacticas.length} búsqueda(s) que muestran tu
+                anuncio pero nadie hace clic (por ejemplo «{plan.oportunidadesTacticas[0]!.termino}»).
+                SOEC no las excluye —siguen siendo relevantes— y sugiere <b>revisar el mensaje del anuncio</b>.
+              </Callout>
+            </div>
           )}
         </>
       )}
 
-      <p style={{ marginTop: 20 }}>
-        <Link href="/">← Volver al inicio</Link>
-      </p>
+      {/* ── Fuentes ──────────────────────────────────────────────────────── */}
+      {negocio && (
+        <>
+          <div className="section">De dónde saca SOEC los datos</div>
+          <div className="card">
+            {negocio.fuentes.map((f) => {
+              const e = ETIQUETA_ESTADO_FUENTE[f.estado] ?? { texto: f.estado, cls: 'mut' };
+              return (
+                <SourceRow
+                  key={f.sourceId}
+                  ico={ICO_FUENTE[f.tipo] ?? '◆'}
+                  nombre={TIPO_FUENTE[f.tipo] ?? f.tipo}
+                  estado={{ texto: e.texto, tono: (e.cls as Tono) }}
+                  falta={f.faltantes.length > 0 ? f.faltantes.join(' · ') : undefined}
+                />
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* ── Lo que SOEC todavía no puede saber ───────────────────────────── */}
+      {esEcom && ventas?.lineaBase && (
+        <>
+          <div className="section">Lo que SOEC todavía no puede saber</div>
+          <div className="card">
+            <div className="grid g-2">
+              <NoSabe k="Margen de cada venta" v="faltan tus costos" />
+              <NoSabe k="Ganancia real" v="depende del margen" />
+              <NoSabe k="Cuánto cuesta traer un cliente" v="falta medición web" />
+              <NoSabe k="Ventas fuera de la tienda (WhatsApp, mostrador)" v="sin instrumentar" />
+            </div>
+            <p className="small muted" style={{ marginTop: 12 }}>Ninguno de estos es «cero»: es «todavía no medido». Por eso SOEC no recomienda gastar en publicidad aún.</p>
+          </div>
+        </>
+      )}
+
+      {/* ── Detalles técnicos (jerga colapsada) ──────────────────────────── */}
+      <div style={{ marginTop: 20 }}>
+        <TechDetails>
+          organización: {org} · modelo: {negocio?.modeloDeNegocio ?? '—'} · veredicto Director: {fundamentos?.veredicto ?? director?.veredicto ?? '—'} ·
+          modo: AUTONOMOUS_REAL = false (sin cambios reales) · fuente de ventas: {esEcom ? 'woocommerce-rest-api (solo lectura)' : 'google-ads + growth (solo lectura)'}
+        </TechDetails>
+      </div>
+
+      {negocio && negocio.datosHumanosPendientes.length > 0 && (
+        <>
+          <div className="section">Lo que SOEC necesita de vos</div>
+          <div className="card">
+            <ul className="stack" style={{ margin: 0, paddingLeft: 18, fontSize: 14 }}>
+              {negocio.datosHumanosPendientes.map((d) => <li key={d}>{d}</li>)}
+            </ul>
+          </div>
+        </>
+      )}
     </div>
   );
+}
+
+function NoSabe(props: { k: string; v: string }): React.ReactElement {
+  return (
+    <div className="spread" style={{ padding: '8px 0', borderBottom: '1px solid var(--line-soft)' }}>
+      <span className="s">{props.k}</span>
+      <Badge tono="mut">{props.v}</Badge>
+    </div>
+  );
+}
+
+const TIPO_FUENTE: Record<string, string> = {
+  WEBSITE: 'Sitio web', ECOMMERCE: 'Tienda online', ADS: 'Google Ads', ANALYTICS: 'Medición web (GA4)',
+  MERCHANT: 'Google Shopping', SALES: 'Ventas', CATALOG: 'Catálogo', CRM: 'Clientes', PAYMENTS: 'Medios de pago',
+  SHIPPING: 'Despacho', GROWTH: 'Eventos del sitio', MESSAGING: 'WhatsApp', SOCIAL: 'Redes sociales', TAG_MANAGER: 'Etiquetas del sitio',
+};
+const ICO_FUENTE: Record<string, string> = {
+  WEBSITE: '🌐', ECOMMERCE: '🛒', ADS: '📣', ANALYTICS: '📊', MERCHANT: '🏷', SALES: '🧾', CATALOG: '📦',
+  CRM: '👥', PAYMENTS: '💳', SHIPPING: '🚚', GROWTH: '✨', MESSAGING: '💬', SOCIAL: '📱', TAG_MANAGER: '🔖',
+};
+
+/** Prioridades honestas para un negocio SaaS, derivadas de la evidencia real (no del evaluador e-commerce). */
+function saasPrioridades(panel: Panel | null, plan: Plan | null): { t: string; s?: string }[] {
+  const out: { t: string; s?: string }[] = [];
+  const leads = panel?.growthFunnel?.comercial?.lead_created ?? 0;
+  const clicks = panel?.ads?.clicks ?? 0;
+  if (clicks > 0 && leads === 0)
+    out.push({ t: 'Revisar el mensaje del anuncio y la página de destino', s: 'llega tráfico pero todavía no se convierte en clientes' });
+  if (plan?.oportunidadesTacticas && plan.oportunidadesTacticas.length > 0)
+    out.push({ t: 'Revisar los anuncios de las búsquedas que no reciben clic', s: `por ejemplo «${plan.oportunidadesTacticas[0]!.termino}»` });
+  out.push({ t: 'Medir las conversiones del sitio', s: 'para saber qué anuncios traen clientes reales, no solo visitas' });
+  return out;
+}
+
+/** Frase HUMANA de SOEC, compuesta de la evidencia real del negocio. */
+function frase(esEcom: boolean, ventas: Ventas | null, panel: Panel | null, puedeRecomendar: boolean): string {
+  if (esEcom) {
+    const lb = ventas?.lineaBase;
+    const base = lb
+      ? `Ya conozco tus ventas y tu catálogo: vendiste ${valor(lb.ingresoConfirmado, clp)} en ${num(lb.pedidos)} pedidos.`
+      : 'Todavía estoy conociendo tu tienda.';
+    return puedeRecomendar
+      ? `${base} Con esto ya puedo ayudarte a decidir dónde invertir.`
+      : `${base} Todavía no puedo recomendarte publicidad porque no conozco tu margen ni tengo medición web instalada.`;
+  }
+  const a = panel?.ads;
+  if (a && a.clicks > 0 && (panel?.growthFunnel?.comercial?.lead_created ?? 0) === 0)
+    return `El tráfico está llegando (${num(a.impressions)} personas vieron tu anuncio y ${num(a.clicks)} hicieron clic), pero todavía no se convierte en clientes. Antes de tocar la campaña, conviene revisar el mensaje.`;
+  if (a) return `Estoy observando tu campaña: ${num(a.impressions)} impresiones y ${num(a.clicks)} clics. Reúno evidencia antes de proponer cambios.`;
+  return 'Todavía estoy reuniendo datos de tus campañas.';
 }
