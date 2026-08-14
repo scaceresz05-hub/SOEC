@@ -89,7 +89,7 @@ export class G2AService {
       id, org, customerId: CONFINAMIENTO.customerId, campaignId: CAMPANIA_SMILEFLOW.campaignId,
       lever: 'negativa_termino', entityRef: termino, actionType: 'ADD_NEGATIVE_KEYWORD',
       before: 'la búsqueda muestra el anuncio', after: 'la búsqueda queda excluida (palabra negativa)',
-      reason: `El término "${termino}" mostró el anuncio ${muestra} veces con 0 clics y sin relación con el público objetivo.`,
+      reason: `El término "${termino}" mostró el anuncio ${muestra} veces con 0 clics y coincide con lo que el negocio marcó como fuera de su oferta (política de irrelevancia). El bajo rendimiento por sí solo no justifica excluir.`,
       evidence: { resumen: evidenciaResumen, muestra, suficiente: true, sinConversionAtribuible: true, ventana: 'acumulado' },
       confidence: 'alta', risk: 'bajo', authorizationRef: null, createdAt: ahora, status: 'PROPUESTA',
     };

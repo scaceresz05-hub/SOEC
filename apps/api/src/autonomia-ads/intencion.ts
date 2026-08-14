@@ -9,7 +9,7 @@
  * `PlanificadorDeCambios` (capa Decision) es PURO: traduce la decisión de M9 + la evidencia real en cero o más
  * intenciones. Con evidencia insuficiente por palanca ⇒ CERO intenciones (prevalece OBSERVAR). No fabrica.
  */
-import { clasificarTermino } from '../ingesta/mapa-google-ads';
+import { crearPredicadoIrrelevancia, evaluarTermino, type EvaluacionTermino } from './evaluacion-termino';
 import type { LimitesAutonomia } from './limites-smileflow';
 
 /** Palancas posibles sobre la campaña. La habilitación de cada una la fija la ETAPA (ver HabilitacionEtapa). */
@@ -82,18 +82,19 @@ function idNegativa(termino: string): string {
 
 /**
  * Planifica intenciones de cambio a partir de evidencia REAL. PURO y determinista. En G1 la ÚNICA palanca que
- * se ejercita (en dry-run) es `agregar_negativa` para términos DEMOSTRABLEMENTE irrelevantes; el resto de
- * palancas NO se proponen para ejecutar en esta etapa. Sin evidencia por-término suficiente ⇒ CERO intenciones.
+ * se ejercita (en dry-run) es `agregar_negativa`, y SÓLO cuando la EVALUACIÓN del término concluye
+ * `NEGATIVA_JUSTIFICADA` — lo que exige evidencia de IRRELEVANCIA (política del negocio), no sólo "N
+ * impresiones sin clics". Un término de bajo rendimiento con relevancia desconocida NO se excluye: se observa /
+ * se optimiza el mensaje (ver `evaluarOportunidadesTacticas`). Sin evidencia ⇒ CERO intenciones. No fabrica.
  */
 export function planificarCambios(insumos: InsumosPlan): IntencionDeCambio[] {
   const intenciones: IntencionDeCambio[] = [];
   const min = insumos.limites.muestraMinimaNegativaImpresiones;
+  const esIrrelevante = crearPredicadoIrrelevancia(insumos.limites.politicaIrrelevancia);
 
   for (const t of insumos.terminos) {
-    // Evidencia por-término: exige muestra suficiente Y 0 clics Y clasificación IRRELEVANTE (heurística existente).
-    if (t.impresiones < min) continue; // muestra insuficiente sobre el término ⇒ no se propone (prevalece observar)
-    if (t.clics > 0) continue; // tuvo clics ⇒ no es "claramente irrelevante"
-    if (clasificarTermino(t.termino, t.clics, t.impresiones) !== 'IRRELEVANTE') continue;
+    const ev = evaluarTermino(t.termino, t.clics, t.impresiones, { muestraMinima: min, esIrrelevante });
+    if (ev.accion !== 'NEGATIVA_JUSTIFICADA') continue; // sólo se excluye con evidencia de IRRELEVANCIA
 
     intenciones.push({
       id: idNegativa(t.termino),
@@ -105,17 +106,17 @@ export function planificarCambios(insumos: InsumosPlan): IntencionDeCambio[] {
       habilitacionEtapa: 'HABILITADA_G1_DRYRUN',
       autorizacionRequerida: 'HUMANA_POR_CAMBIO', // en G1/ASISTIDO toda acción se aprueba a mano
       riesgo: 'bajo',
-      confianza: 'alta',
-      problema: `La búsqueda "${t.termino}" mostró tu anuncio ${t.impresiones} veces y nadie hizo clic. Parece no tener que ver con lo que ofreces.`,
+      confianza: ev.confianza,
+      problema: `La búsqueda "${t.termino}" mostró tu anuncio ${t.impresiones} veces con 0 clics y coincide con lo que tu negocio marcó como fuera de su oferta.`,
       recomendacion: `Dejar de mostrar el anuncio en la búsqueda "${t.termino}" (agregarla como palabra excluida).`,
-      impactoEsperado: 'Evita gastar en una búsqueda que no atrae clientes. No sube tu gasto; puede reducir desperdicio.',
+      impactoEsperado: 'Evita gastar en una búsqueda fuera de tu oferta. No sube tu gasto; reduce desperdicio.',
       riesgoExplicacion: 'Bajo: si en el futuro esa búsqueda sí fuera útil, se puede quitar la exclusión en segundos.',
       rollbackPrevisto: `Quitar la palabra excluida "${t.termino}" y todo vuelve a como estaba.`,
       valorAntes: 'la búsqueda muestra el anuncio',
       valorDespues: 'la búsqueda queda excluida',
       unidad: 'término',
-      evidencia: { resumen: `${t.impresiones} impresiones, 0 clics sobre el término`, muestra: t.impresiones, suficiente: true },
-      limitesAplicados: [`muestra mínima por término ≥ ${min} impresiones`, `máx ${insumos.limites.maxCambiosPorDia} cambios/día`, `cooldown ${insumos.limites.cooldownHoras} h`],
+      evidencia: { resumen: ev.motivo, muestra: t.impresiones, suficiente: true },
+      limitesAplicados: [`muestra mínima por término ≥ ${min} impresiones`, `evidencia de irrelevancia (política del negocio)`, `máx ${insumos.limites.maxCambiosPorDia} cambios/día`, `cooldown ${insumos.limites.cooldownHoras} h`],
       detalleTecnico: {
         operacion: 'campaign_criterion.create (negative keyword, match EXACT)',
         descripcionMutate: `AdGroupCriterion/CampaignCriterion negativo EXACT "${t.termino}" en campaña ${insumos.campaniaRef}`,
@@ -123,4 +124,18 @@ export function planificarCambios(insumos: InsumosPlan): IntencionDeCambio[] {
     });
   }
   return intenciones;
+}
+
+/**
+ * OPORTUNIDADES TÁCTICAS (no ejecutables): términos con muestra suficiente y bajo rendimiento (0 clics) cuya
+ * relevancia es DESCONOCIDA. NO se proponen para excluir — se sugiere revisar el anuncio/message-match. Es la
+ * diferencia entre "esta búsqueda no sirve" (que aquí NO se afirma) y "esta búsqueda no está convirtiendo, quizá
+ * el mensaje no coincide". Devuelve la evaluación completa (evidencia para el usuario), sin fabricar acciones.
+ */
+export function evaluarOportunidadesTacticas(insumos: InsumosPlan): EvaluacionTermino[] {
+  const min = insumos.limites.muestraMinimaNegativaImpresiones;
+  const esIrrelevante = crearPredicadoIrrelevancia(insumos.limites.politicaIrrelevancia);
+  return insumos.terminos
+    .map((t) => evaluarTermino(t.termino, t.clics, t.impresiones, { muestraMinima: min, esIrrelevante }))
+    .filter((e) => e.accion === 'OPTIMIZAR_MENSAJE' || e.accion === 'CANDIDATO_NEGATIVA');
 }

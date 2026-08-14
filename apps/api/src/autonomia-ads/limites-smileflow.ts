@@ -16,6 +16,13 @@ export interface LimitesAutonomia {
   readonly cooldownHoras: number;
   /** Impresiones mínimas SOBRE UN TÉRMINO para siquiera considerar una negativa (evidencia por-palanca). */
   readonly muestraMinimaNegativaImpresiones: number;
+  /**
+   * Política de IRRELEVANCIA del negocio (opcional): patrones (subcadena) que la organización considera
+   * fuera de su oferta. Es la ÚNICA fuente de "irrelevancia" para proponer una negativa — SOEC nunca la
+   * infiere del CTR. Vacía/ausente ⇒ ninguna negativa automática (prevalece observar/optimizar). Por-org
+   * (tenant-safe): no se comparte entre organizaciones.
+   */
+  readonly politicaIrrelevancia?: readonly string[];
 }
 
 /**

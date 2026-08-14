@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { planificarCambios, type InsumosPlan } from '../src/autonomia-ads/intencion';
-import { LIMITES_SMILEFLOW } from '../src/autonomia-ads/limites-smileflow';
+import { LIMITES_SMILEFLOW, type LimitesAutonomia } from '../src/autonomia-ads/limites-smileflow';
 
-const base = (terminos: InsumosPlan['terminos']): InsumosPlan => ({
+const base = (terminos: InsumosPlan['terminos'], limites: LimitesAutonomia = LIMITES_SMILEFLOW): InsumosPlan => ({
   org: 'org-smileflow', customerId: '24120966895', campaniaRef: 'cmp-smileflow-search-chile',
   evidenciaSuficiente: false, clasificacionDesempeno: 'evidencia_insuficiente', roiClasificacion: 'NO_CONCLUYENTE',
-  decisionTipo: 'esperar_datos', terminos, limites: LIMITES_SMILEFLOW,
+  decisionTipo: 'esperar_datos', terminos, limites,
 });
 
 describe('planificarCambios (Decision, puro)', () => {
@@ -18,8 +18,14 @@ describe('planificarCambios (Decision, puro)', () => {
     expect(planificarCambios(insumos)).toEqual([]);
   });
 
-  it('un término con muestra suficiente + 0 clics + IRRELEVANTE ⇒ 1 intención de negativa (bajo riesgo, humana)', () => {
-    const insumos = base([{ termino: 'reparacion de autos', impresiones: 40, clics: 0 }]);
+  it('0 clics con muestra pero SIN evidencia de irrelevancia ⇒ CERO intenciones (bajo rendimiento ≠ irrelevancia)', () => {
+    // Corrección epistemológica: SOEC no infiere irrelevancia del CTR. Sin política del negocio ⇒ no excluye.
+    expect(planificarCambios(base([{ termino: 'reparacion de autos', impresiones: 40, clics: 0 }]))).toEqual([]);
+  });
+
+  it('un término con muestra suficiente + 0 clics + IRRELEVANTE por política del negocio ⇒ 1 negativa (bajo riesgo, humana)', () => {
+    const limites: LimitesAutonomia = { ...LIMITES_SMILEFLOW, politicaIrrelevancia: ['reparacion de autos'] };
+    const insumos = base([{ termino: 'reparacion de autos', impresiones: 40, clics: 0 }], limites);
     const r = planificarCambios(insumos);
     expect(r).toHaveLength(1);
     const i = r[0]!;
