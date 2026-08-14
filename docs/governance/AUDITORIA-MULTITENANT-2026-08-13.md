@@ -215,7 +215,34 @@ Ejecutar la suite COMPLETA (`vitest run`) contra la base viva **trunca `events`*
 
 **Recuperado**: la ingesta es idempotente y re-leyó ambas fuentes (Google Ads 272 filas de su ventana de 7 días; Growth 29 desde cursor 0). El estado observacional actual es coherente.
 **Perdido de forma no recuperable**: el histórico derivado (secuencia de `lectura-director`, `med`/`opt`, historial de `sync`) y cualquier observación de Ads anterior a la ventana de 7 días.
-**Regla operativa**: usar `pnpm test:unit` (excluye `**/pg/**`) mientras la suite comparta base con el runtime, o dar a las pruebas PG una base propia. Es deuda **preexistente**, pero este bloque la materializó.
+**Corregido en FASE 4.5** (ver abajo). La regla operativa provisional que se dio (`pnpm test:unit`) era además **insuficiente**: `--exclude '**/pg/**'` sólo excluía directorios llamados `pg`, de modo que `cia-routes.pg.test.ts` y cinco suites de API que truncan tablas `identity_*` seguían corriendo contra la base operativa.
+
+## 7-ter. FASE 4.5 — Aislamiento estructural TEST DB ╪ RUNTIME DB
+
+El blocker se cierra por construcción, no por convención. Nuevo contrato en
+`packages/event-store/src/pg/test-db.ts` (`@soec/event-store/test-db`), con **cuatro capas**:
+
+| Capa | Garantía |
+|---|---|
+| Resolución | `urlBaseDePrueba()` **nunca lee `DATABASE_URL`**. Sólo `SOEC_TEST_DATABASE_URL` o el default local `…/soec_test`. El patrón `DATABASE_URL ?? runtime` está erradicado del repositorio. |
+| Contrato de nombre | `assertSafeTestDatabase` exige `NODE_ENV=test`, host local (o `SOEC_TEST_DB_ALLOW_REMOTE=true`), nombre con sufijo `_test`, y rechaza `soec`/`postgres`/`production` y proveedores gestionados (Railway, Neon, Supabase, RDS…) **incluso con el opt-in remoto**. |
+| Guarda destructiva | `ejecutarDestructivoDePrueba(pool, sql)` pregunta a PostgreSQL `select current_database()` y revalida **antes de cada TRUNCATE**. No confía en el llamador ni en la cadena de conexión, sino en la base realmente conectada. |
+| Convención mecánica | Toda prueba que abre un pool se llama `*.pg.test.ts` o vive en `test/pg/`. Una prueba de arquitectura recorre el repositorio y falla si alguien reintroduce el patrón, se salta la guarda, o abre PostgreSQL fuera de la convención. |
+
+**Cambios**: 24 suites migradas a `makeTestPool()` + `ejecutarDestructivoDePrueba`; 5 suites de API renombradas a `*.pg.test.ts` (`auth-api`, `csrf-api`, `seguridad-api`, `generacion-api`, `commercial-knowledge-api`); `vitest.unit.config.ts` / `vitest.pg.config.ts` / `vitest.shared.ts`; `globalSetup` que **crea `soec_test` si falta y nunca toca `soec`**; scripts `test` · `test:unit` · `test:pg`.
+
+**Prueba decisiva** (huella sobre un corte temporal fijo, para no confundir con las escrituras del scheduler vivo):
+
+```
+CORTE                = 2026-08-14 01:45:27+00
+RUNTIME_BEFORE (<=T) = n=595 streams=300 hash=ff3c8cc577806176e8cee6811476a342
+suite COMPLETA       = 239 archivos · 1627 pruebas · PASS
+RUNTIME_AFTER  (<=T) = n=595 streams=300 hash=ff3c8cc577806176e8cee6811476a342
+RUNTIME_DATA_CHANGED = NO
+soec_test            = truncada y reconstruida libremente (events=0 al terminar)
+```
+
+Las únicas escrituras posteriores al corte en `soec` son de `actor_id = ingesta-scheduler`: el runtime haciendo su trabajo, no las pruebas.
 
 ## 8. Estado de la gobernanza al cierre de este documento
 

@@ -5,17 +5,27 @@
  * respetan; sesiones revocables; modo AUTONOMOUS_REAL bloqueado; auditoría registrada.
  */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { makePool, runMigrations } from '@soec/event-store/pg';
+import { runMigrations } from '@soec/event-store/pg';
 import { identityMigrations } from '../../src/pg/migrations';
 import { IdentityService } from '../../src/application/identity-service';
-import { NoAutenticadoError, NoEncontradoError, SinPermisoError, PoliticaError, ConflictoError } from '../../src/domain/errors';
+import {
+  NoAutenticadoError,
+  NoEncontradoError,
+  SinPermisoError,
+  PoliticaError,
+  ConflictoError,
+} from '../../src/domain/errors';
+import { makeTestPool, ejecutarDestructivoDePrueba } from '@soec/event-store/test-db';
 
-const pool = makePool(process.env.DATABASE_URL ?? 'postgres://soec:soec@localhost:5544/soec');
+const pool = makeTestPool();
 const svc = new IdentityService(pool);
 
 beforeEach(async () => {
   await runMigrations(pool, identityMigrations);
-  await pool.query('truncate identity_audit_events, identity_invitations, identity_sessions, identity_memberships, identity_organizations, identity_users cascade');
+  await ejecutarDestructivoDePrueba(
+    pool,
+    'truncate identity_audit_events, identity_invitations, identity_sessions, identity_memberships, identity_organizations, identity_users cascade',
+  );
 });
 afterAll(async () => {
   await pool.end();
@@ -34,7 +44,9 @@ describe('@soec/identity · autenticación', () => {
     expect(ok.token).toBeTruthy();
     expect(ok.session.id).toBeTruthy();
     await expect(svc.login('a@x.com', 'mala')).rejects.toBeInstanceOf(NoAutenticadoError);
-    await expect(svc.login('noexiste@x.com', 'Password123')).rejects.toBeInstanceOf(NoAutenticadoError);
+    await expect(svc.login('noexiste@x.com', 'Password123')).rejects.toBeInstanceOf(
+      NoAutenticadoError,
+    );
   });
 
   it('la sesión se resuelve por token y deja de resolver tras revocar', async () => {
@@ -48,7 +60,9 @@ describe('@soec/identity · autenticación', () => {
 
   it('registrar el mismo email dos veces es conflicto', async () => {
     await svc.registrar('a@x.com', 'A', 'Password123');
-    await expect(svc.registrar('A@X.com', 'A', 'Password123')).rejects.toBeInstanceOf(ConflictoError);
+    await expect(svc.registrar('A@X.com', 'A', 'Password123')).rejects.toBeInstanceOf(
+      ConflictoError,
+    );
   });
 });
 
@@ -60,11 +74,17 @@ describe('@soec/identity · aislamiento multi-tenant (matriz)', () => {
     const ctxA = await svc.resolverContextoOrganizacion(a.user, 'org-a');
     expect(ctxA.membership.role).toBe('OWNER');
     // A_OWNER vs B → 404 (no revela existencia)
-    await expect(svc.resolverContextoOrganizacion(a.user, 'org-b')).rejects.toBeInstanceOf(NoEncontradoError);
+    await expect(svc.resolverContextoOrganizacion(a.user, 'org-b')).rejects.toBeInstanceOf(
+      NoEncontradoError,
+    );
     // B_OWNER vs A → 404
-    await expect(svc.resolverContextoOrganizacion(b.user, 'org-a')).rejects.toBeInstanceOf(NoEncontradoError);
+    await expect(svc.resolverContextoOrganizacion(b.user, 'org-a')).rejects.toBeInstanceOf(
+      NoEncontradoError,
+    );
     // slug inexistente → 404
-    await expect(svc.resolverContextoOrganizacion(a.user, 'no-existe')).rejects.toBeInstanceOf(NoEncontradoError);
+    await expect(svc.resolverContextoOrganizacion(a.user, 'no-existe')).rejects.toBeInstanceOf(
+      NoEncontradoError,
+    );
   });
 
   it('permisos por rol: VIEWER no administra miembros; OWNER sí', async () => {
@@ -76,10 +96,14 @@ describe('@soec/identity · aislamiento multi-tenant (matriz)', () => {
     const ctxViewer = await svc.resolverContextoOrganizacion(viewer, 'org-a');
     // VIEWER puede LEER miembros (rol de lectura) pero NO administrarlos (invitar) → 403.
     expect((await svc.listarMiembros(ctxViewer)).length).toBe(2);
-    await expect(svc.invitarMiembro(ctxViewer, 'x@x.com', 'ANALYST')).rejects.toBeInstanceOf(SinPermisoError);
+    await expect(svc.invitarMiembro(ctxViewer, 'x@x.com', 'ANALYST')).rejects.toBeInstanceOf(
+      SinPermisoError,
+    );
     expect((await svc.listarMiembros(ctxOwner)).length).toBe(2);
     // VIEWER intenta cambiar modo → 403.
-    await expect(svc.cambiarModoOperativo(ctxViewer, 'SUPERVISED_REAL')).rejects.toBeInstanceOf(SinPermisoError);
+    await expect(svc.cambiarModoOperativo(ctxViewer, 'SUPERVISED_REAL')).rejects.toBeInstanceOf(
+      SinPermisoError,
+    );
   });
 
   it('membresía suspendida deja de dar acceso (404)', async () => {
@@ -89,7 +113,9 @@ describe('@soec/identity · aislamiento multi-tenant (matriz)', () => {
     const { user: op, membership } = await svc.aceptarInvitacion(token, 'Op', 'Password123');
     await svc.resolverContextoOrganizacion(op, 'org-a'); // funciona
     await svc.cambiarEstadoMiembro(ctxOwner, membership.id, 'SUSPENDED');
-    await expect(svc.resolverContextoOrganizacion(op, 'org-a')).rejects.toBeInstanceOf(NoEncontradoError);
+    await expect(svc.resolverContextoOrganizacion(op, 'org-a')).rejects.toBeInstanceOf(
+      NoEncontradoError,
+    );
   });
 
   it('un miembro no puede modificar/suspender a un OWNER', async () => {
@@ -100,7 +126,9 @@ describe('@soec/identity · aislamiento multi-tenant (matriz)', () => {
     const ctxAdmin = await svc.resolverContextoOrganizacion(admin, 'org-a');
     const miembros = await svc.listarMiembros(ctxAdmin);
     const ownerMembership = miembros.find((m) => m.membership.role === 'OWNER')!;
-    await expect(svc.cambiarEstadoMiembro(ctxAdmin, ownerMembership.membership.id, 'REVOKED')).rejects.toBeInstanceOf(PoliticaError);
+    await expect(
+      svc.cambiarEstadoMiembro(ctxAdmin, ownerMembership.membership.id, 'REVOKED'),
+    ).rejects.toBeInstanceOf(PoliticaError);
   });
 });
 
@@ -108,8 +136,12 @@ describe('@soec/identity · modo operativo y auditoría', () => {
   it('cambiar a AUTONOMOUS_REAL es rechazado por política', async () => {
     const a = await ownerConOrg('a@x.com', 'org-a');
     const ctx = await svc.resolverContextoOrganizacion(a.user, 'org-a');
-    expect((await svc.cambiarModoOperativo(ctx, 'SUPERVISED_REAL')).operationalMode).toBe('SUPERVISED_REAL');
-    await expect(svc.cambiarModoOperativo(ctx, 'AUTONOMOUS_REAL')).rejects.toBeInstanceOf(PoliticaError);
+    expect((await svc.cambiarModoOperativo(ctx, 'SUPERVISED_REAL')).operationalMode).toBe(
+      'SUPERVISED_REAL',
+    );
+    await expect(svc.cambiarModoOperativo(ctx, 'AUTONOMOUS_REAL')).rejects.toBeInstanceOf(
+      PoliticaError,
+    );
   });
 
   it('la auditoría registra el login y es visible para quien tiene permiso', async () => {

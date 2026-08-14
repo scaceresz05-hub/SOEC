@@ -1,12 +1,17 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { makePool, runMigrations, PgEventStore, PgOutbox } from '@soec/event-store/pg';
+import { runMigrations, PgEventStore, PgOutbox } from '@soec/event-store/pg';
 import { migracionesHastaOperaciones } from '@soec/operaciones/pg';
-import { capMigrations, PgCapExecProjectionStore, PgCapDefProjectionStore, drenarCapacidades } from '@soec/capacidades/pg';
+import {
+  capMigrations,
+  PgCapExecProjectionStore,
+  PgCapDefProjectionStore,
+  drenarCapacidades,
+} from '@soec/capacidades/pg';
 import { IDS, ejecutarComprenderEstado, instanciarPyme } from '../../src';
 import { cadena, ctxFor, seedOpts } from '../helpers';
+import { makeTestPool, ejecutarDestructivoDePrueba } from '@soec/event-store/test-db';
 
-const CONN = process.env.DATABASE_URL ?? 'postgres://soec:soec@localhost:5544/soec';
-const pool = makePool(CONN);
+const pool = makeTestPool();
 const store = new PgEventStore(pool);
 const e = cadena(store);
 
@@ -17,7 +22,8 @@ afterAll(async () => {
   await pool.end();
 });
 beforeEach(async () => {
-  await pool.query(
+  await ejecutarDestructivoDePrueba(
+    pool,
     'truncate table events, outbox, projection_checkpoints, proj_med_current, proj_mdm_current, proj_ece_current, proj_oi_current, proj_capdef_current, proj_capexec_current restart identity cascade',
   );
 });
@@ -27,7 +33,10 @@ describe('Primer dominio real sobre PostgreSQL', () => {
     const ctx = ctxFor('pyme-a');
     await instanciarPyme(ctx, e, seedOpts);
     const r = await ejecutarComprenderEstado(ctx, e.orchestrator, 'ce-1', seedOpts);
-    expect(r.producto.operacionesEjecutadas.map((p) => p.operacion)).toEqual(['detectar', 'esclarecer']);
+    expect(r.producto.operacionesEjecutadas.map((p) => p.operacion)).toEqual([
+      'detectar',
+      'esclarecer',
+    ]);
     expect(r.producto.bindingDecision).toBe(false);
 
     const prod = await e.capQuery.producto(ctx, 'ce-1');
@@ -46,7 +55,10 @@ describe('Primer dominio real sobre PostgreSQL', () => {
     await ejecutarComprenderEstado(ctx, e.orchestrator, 'ce-1', seedOpts);
 
     const outbox = new PgOutbox(pool);
-    const stores = { def: new PgCapDefProjectionStore(pool), exec: new PgCapExecProjectionStore(pool) };
+    const stores = {
+      def: new PgCapDefProjectionStore(pool),
+      exec: new PgCapExecProjectionStore(pool),
+    };
     const n = await drenarCapacidades(outbox, stores);
     expect(n).toBeGreaterThan(0);
     const proj = (await stores.exec.list('pyme-a')).find((s) => s.executionId === 'ce-1');

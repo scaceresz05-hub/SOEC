@@ -6,7 +6,8 @@
   "main": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./pg": "./src/pg/index.ts"
+    "./pg": "./src/pg/index.ts",
+    "./test-db": "./src/pg/test-db.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

@@ -1,15 +1,25 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ConcurrencyError } from '@soec/contracts';
-import { makePool, migrations as baseMigrations, runMigrations, PgEventStore, PgOutbox } from '@soec/event-store/pg';
+import {
+  migrations as baseMigrations,
+  runMigrations,
+  PgEventStore,
+  PgOutbox,
+} from '@soec/event-store/pg';
 import { MedService, MdmService } from '@soec/models';
 import { modelMigrations, PgProjectionStore } from '@soec/models/pg';
 import { EceBuildService, EceQueryService } from '../../src';
 import { eceStreamId } from '../../src/domain/ece';
-import { eceMigrations, PgEceProjectionStore, drenarModelosYEce, reconstruirProyeccionesEce } from '../../src/pg';
+import {
+  eceMigrations,
+  PgEceProjectionStore,
+  drenarModelosYEce,
+  reconstruirProyeccionesEce,
+} from '../../src/pg';
 import { ambitoMdm, ambitoMed, attr, cmdBase, ctxFor, sleep, vigencia } from '../helpers';
+import { makeTestPool, ejecutarDestructivoDePrueba } from '@soec/event-store/test-db';
 
-const CONN = process.env.DATABASE_URL ?? 'postgres://soec:soec@localhost:5544/soec';
-const pool = makePool(CONN);
+const pool = makeTestPool();
 const store = new PgEventStore(pool);
 const med = new MedService(store);
 const mdm = new MdmService(store);
@@ -24,14 +34,22 @@ afterAll(async () => {
   await pool.end();
 });
 beforeEach(async () => {
-  await pool.query(
+  await ejecutarDestructivoDePrueba(
+    pool,
     'truncate table events, outbox, projection_checkpoints, proj_med_current, proj_mdm_current, proj_ece_current restart identity cascade',
   );
 });
 
 async function baseMedMdm(ctx = ctxFor('orgA')) {
   await med.crear(ctx, { instanceId: 'm1', ambito: ambitoMed, vigencia, ...cmdBase });
-  await med.emitirAfirmacion(ctx, { instanceId: 'm1', afirmacionId: 'a1', enunciado: 'x', dimension: 'hace', incertidumbre: 'alta', ...cmdBase });
+  await med.emitirAfirmacion(ctx, {
+    instanceId: 'm1',
+    afirmacionId: 'a1',
+    enunciado: 'x',
+    dimension: 'hace',
+    incertidumbre: 'alta',
+    ...cmdBase,
+  });
   await mdm.crear(ctx, { instanceId: 'w1', ambito: ambitoMdm, vigencia, ...cmdBase });
   return ctx;
 }
@@ -42,7 +60,9 @@ describe('ECE sobre PostgreSQL real', () => {
     await build.construir(ctx, { eceId: 'ece1', ...construir });
     const st = await query.estadoActual(ctx, 'ece1');
     expect(st.existe).toBe(true);
-    expect(Object.values(st.elementos).some((e) => e.tipo === 'ausencia' && e.noEvaluable)).toBe(true);
+    expect(Object.values(st.elementos).some((e) => e.tipo === 'ausencia' && e.noEvaluable)).toBe(
+      true,
+    );
     expect(st.medCorte?.instanceId).toBe('m1');
   });
 
@@ -55,7 +75,9 @@ describe('ECE sobre PostgreSQL real', () => {
       eceId: 'ece1',
       tipo: 'brecha',
       id: 'b1',
-      referencias: [{ modelo: 'MED', instanceId: 'm1', elementoId: 'a1', elementoTipo: 'afirmacion' }],
+      referencias: [
+        { modelo: 'MED', instanceId: 'm1', elementoId: 'a1', elementoTipo: 'afirmacion' },
+      ],
       procedencia: 'p',
       alcance: 'a',
       incertidumbre: 'media',
@@ -71,7 +93,12 @@ describe('ECE sobre PostgreSQL real', () => {
     await build.construir(ctx, { eceId: 'ece1', ...construir });
     await expect(
       store.append(ctx, eceStreamId('ece1'), 0, [
-        { type: 'ece.invalidado', payload: { motivo: 'x' }, attribution: attr, occurredAt: cmdBase.occurredAt },
+        {
+          type: 'ece.invalidado',
+          payload: { motivo: 'x' },
+          attribution: attr,
+          occurredAt: cmdBase.occurredAt,
+        },
       ]),
     ).rejects.toBeInstanceOf(ConcurrencyError);
   });
@@ -106,7 +133,14 @@ describe('ECE sobre PostgreSQL real', () => {
     expect(projInicial?.vigente).toBe(true);
 
     // Cambio posterior en el MED → nuevo evento en el outbox.
-    await med.registrarEntidad(ctx, { instanceId: 'm1', entidadId: 'u1', dimension: 'es', tipo: 'unidad', atributos: {}, ...cmdBase });
+    await med.registrarEntidad(ctx, {
+      instanceId: 'm1',
+      entidadId: 'u1',
+      dimension: 'es',
+      tipo: 'unidad',
+      atributos: {},
+      ...cmdBase,
+    });
     const r2 = await drenarModelosYEce(outbox, modelProj, deps);
     expect(r2.invalidaciones).toBe(1); // se emitió ece.invalidado (con causación)
 
@@ -123,7 +157,11 @@ describe('ECE sobre PostgreSQL real', () => {
   });
 
   it('la migración desde base vacía es idempotente', async () => {
-    const applied = await runMigrations(pool, [...baseMigrations, ...modelMigrations, ...eceMigrations]);
+    const applied = await runMigrations(pool, [
+      ...baseMigrations,
+      ...modelMigrations,
+      ...eceMigrations,
+    ]);
     expect(applied).toEqual([]);
   });
 });
