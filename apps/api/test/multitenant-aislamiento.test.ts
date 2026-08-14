@@ -242,12 +242,12 @@ describe('AISLAMIENTO · intención, aprobación y ejecución', () => {
   it('TEST 7 — una intención de C Y P NO puede portar el externalAccountId de SmileFlow', async () => {
     const store = new InMemoryEventStore();
     const g2a = new G2AService(store);
-    // Intención del segundo tenant apuntando a la CUENTA de SmileFlow ⇒ rechazo duro. Desde el
-    // endurecimiento D-1…D-4 el rechazo ocurre AÚN ANTES: `org-cyp` no tiene negocio registrado, así
-    // que no puede resolver NINGUNA cuenta externa (menos aún la de otra organización).
+    // Intención del segundo tenant apuntando a la CUENTA de SmileFlow ⇒ rechazo duro. El rechazo
+    // ocurre AÚN ANTES de comparar cuentas: `org-cyp` no tiene perfil de negocio, así que no puede
+    // resolver NINGUNA cuenta externa (menos aún la de otra organización).
     await expect(
       g2a.registrarIntencion(ORG_CYP, intencion(ORG_CYP, CONFINAMIENTO.customerId, CAMP_SF), AHORA),
-    ).rejects.toThrow(/no está registrada|confinamiento/i);
+    ).rejects.toThrow(/no tiene BusinessEvaluationProfile|no está registrada|confinamiento/i);
     // Y a la inversa: el tenant correcto con una cuenta ajena tampoco pasa.
     await expect(
       g2a.registrarIntencion(ORG_SF, intencion(ORG_SF, CUSTOMER_AJENO, CAMP_SF), AHORA),

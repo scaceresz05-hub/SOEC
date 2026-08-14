@@ -11,9 +11,9 @@
  *   D-3  el Director evalúa con el perfil de negocio de SU organización, o no evalúa
  *   D-4  toda experiencia REAL exige binding explícito organización↔experiencia
  *
- * `org-cyp` se usa como SEGUNDA ORGANIZACIÓN DE PRUEBA (aún NO creada en SOEC). Precisamente por
- * eso sirve: representa el caso "organización que todavía no está configurada", que es donde un
- * fallback silencioso a SmileFlow sería catastrófico.
+ * Se usa una organización DELIBERADAMENTE NO REGISTRADA (`org-no-registrada-de-prueba`) porque es
+ * el caso donde un fallback silencioso a SmileFlow sería catastrófico. El caso de una organización
+ * registrada pero aún sin perfil —Distribuidora C Y P— se cubre en `cyp-onboarding.test.ts`.
  */
 import { describe, expect, it } from 'vitest';
 import { InMemoryEventStore } from '@soec/event-store';
@@ -52,8 +52,8 @@ import {
   EVENTO_ADS_SNAPSHOT,
 } from '../src/ingesta/ingesta-google-ads-service';
 
-/** Organización de prueba NO registrada: representa a C Y P antes de su alta. */
-const ORG_CYP = 'org-cyp';
+/** Organización de prueba que NUNCA se registra: el caso duro del fail-closed. */
+const ORG_CYP = 'org-no-registrada-de-prueba';
 const AHORA = '2026-08-13T12:00:00.000Z';
 const ATR: Attribution = {
   source: 't',
@@ -137,8 +137,9 @@ describe('IDENTIDAD · una sola identidad canónica de organización', () => {
   it('la canonización de un alias es EXPLÍCITA y nunca ocurre en el camino de autorización', () => {
     expect(canonizarAliasLegado('smileflow-clinic')).toBe(ORG_SMILEFLOW);
     expect(canonizarAliasLegado('org-cyp')).toBeNull();
-    // El registro sólo conoce claves canónicas.
-    expect(organizacionesRegistradas()).toEqual([ORG_SMILEFLOW]);
+    // El registro sólo conoce claves canónicas: los alias legados no son organizaciones.
+    expect(organizacionesRegistradas()).toContain(ORG_SMILEFLOW);
+    expect(organizacionesRegistradas()).not.toContain(BUSINESS_KEY_SMILEFLOW);
     expect(buscarNegocio(BUSINESS_KEY_SMILEFLOW)).toBeNull();
   });
 

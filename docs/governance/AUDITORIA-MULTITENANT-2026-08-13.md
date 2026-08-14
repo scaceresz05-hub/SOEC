@@ -244,6 +244,98 @@ soec_test            = truncada y reconstruida libremente (events=0 al terminar)
 
 Las únicas escrituras posteriores al corte en `soec` son de `actor_id = ingesta-scheduler`: el runtime haciendo su trabajo, no las pruebas.
 
+## 7-quater. FASE 5 — Incorporación de Distribuidora C Y P SpA
+
+Segunda organización real creada como **configuración registrada** (`plataforma/negocios/org-cyp.ts`),
+sin tocar el núcleo. El registro pasó a `crearResolutorDeNegocios(configs)`: incorporar una
+organización es añadir su módulo y una línea, nada más.
+
+### Identidad — cuatro conceptos separados
+
+```
+organizationId (tenant) = org-cyp
+businessKey             = distribuidora-cyp
+displayName             = Distribuidora C Y P
+legalName               = Distribuidora C Y P SpA
+RUT                     = null  ← pendiente del propietario, NO se inventa
+```
+
+`getBusiness('distribuidora-cyp')` lanza: la businessKey no es una clave de tenant.
+
+### Estado y perfil — honestidad por diseño
+
+`estado = SOURCES_PENDING` (no `OBSERVING`: no hay nada de dónde observar).
+`perfil = null` ⇒ `getProfile('org-cyp')` lanza `BUSINESS_PROFILE_NOT_CONFIGURED`.
+
+**No se copió nada de SmileFlow** y **no se fijó ningún objetivo comercial**: ni ROAS, ni CPA, ni
+ticket, ni margen, ni tasa de conversión, ni presupuesto. Una prueba verifica que la configuración
+no contiene ninguno de esos campos. `experienciasHabilitadas = []`: ninguna experiencia REAL se
+vincula a C Y P.
+
+### Registro de fuentes — estado real de cada una
+
+| Fuente | Estado | Falta |
+|---|---|---|
+| WEBSITE | NOT_CONNECTED | dominio/URL confirmado |
+| ECOMMERCE | NOT_CONNECTED | plataforma + acceso de lectura |
+| GOOGLE_ADS | NOT_CONNECTED | `customer_id`, `login_customer_id`, credencial propia |
+| GA4 | NOT_CONNECTED | `property_id`, acceso de lectura |
+| MERCHANT_CENTER | NOT_CONNECTED | `merchant_id`, acceso de lectura |
+| SALES | NOT_CONNECTED | fuente autorizada de historial |
+| CATALOG | NOT_CONNECTED | acceso de lectura a catálogo/SKU |
+| CRM | NOT_CONNECTED | sistema de clientes, si existe |
+| PAYMENTS | NOT_CONNECTED | medios de pago en uso |
+| SHIPPING | NOT_CONNECTED | operador y cobertura |
+
+Ninguna `credentialRef`, ningún `externalAccountId`. `CERO ≠ NO CONECTADO`: la UI muestra
+«no conectada» + lo que falta, nunca un cero.
+
+### UI multiempresa
+
+Nueva vista `/negocios` («Mis negocios»): **selector**, no portafolio. Lista nombre y estado de
+incorporación; ninguna cifra comercial, ninguna cuenta externa. Al entrar en un negocio, todo el
+panel queda acotado a él. Nueva ruta `GET /plataforma/negocio` que **no exige perfil**, para que una
+organización recién incorporada pueda describirse honestamente.
+
+**Limitación declarada**: `GET /plataforma/negocios` no filtra por membresía porque el plano de
+identidad todavía no tiene organizaciones dadas de alta. Antes de que SOEC sea multi-usuario, esa
+lista DEBE filtrarse por las membresías del usuario autenticado.
+
+### Discovery — BLOQUEADO
+
+§9 exige auditar la tienda real en solo lectura. **No hay URL ni dominio confirmado**, así que el
+discovery no se inició: cualquier sitio que eligiéramos sería una atribución inventada. Bloqueado a
+la espera del dominio.
+
+### Capacidades de e-commerce que SOEC aún no tiene
+
+| Capacidad | Estado |
+|---|---|
+| catalog · sku · product · category · stock · price | **MISSING** |
+| merchant feed · Shopping | **MISSING** |
+| order · cart · checkout · purchase | **MISSING** |
+| margin · costos | **MISSING** |
+| repeat purchase · cohortes | **MISSING** |
+| shipping (cobertura, costo) | **MISSING** |
+| revenue / conversion value | **EXISTS parcial** — `@soec/medicion` maneja ingresos/gasto/ROI sin línea de producto |
+| observación multi-proveedor con procedencia | **EXISTS** — `@soec/motor-medicion` es agnóstico del proveedor |
+| **REQUIRED_NOW** | ninguna: nada puede especificarse sin el discovery real |
+| **REQUIRED_LATER** | catálogo, pedido/revenue, embudo e-commerce, Merchant Center, margen |
+
+Los eventos de e-commerce (`product_view`, `search`, `add_to_cart`, `begin_checkout`, `purchase`)
+**no se implementaron**: primero hay que verificar qué eventos existen realmente en la fuente de C Y P.
+
+### Extensibilidad probada
+
+`THIRD_ORG_CAN_BE_REGISTERED_WITHOUT_CORE_CHANGE`: una tercera organización **ficticia y de prueba**
+se registra con `crearResolutorDeNegocios([...])` sin modificar el núcleo, y sigue siendo fail-closed
+(sin perfil no evalúa, no hereda el de nadie). No se incorpora al despliegue.
+
+### Verificación
+
+`typecheck` 48/48 · `eslint` limpio · `next build` OK · **suite completa 240 archivos / 1648 pruebas**
+(+21 de C Y P) · huella del runtime idéntica antes y después · secret-scan sin coincidencias reales.
+
 ## 8. Estado de la gobernanza al cierre de este documento
 
 ```
@@ -253,7 +345,9 @@ GOOGLE_ADS                   = READ ONLY
 G2-A                         = FUNCIONALMENTE INTACTO (sólo wiring al registro por organización)
 G2-B                         = NO AUTORIZADO / NO INICIADO
 SMILEFLOW EXTERNO            = NO MODIFICADO (campañas, presupuestos, GA4, landing)
-CYP_ORGANIZATION_CREATED     = NO (por decisión: FASE 5 requiere autorización + datos humanos)
 D-1..D-4                     = CORREGIDOS
-PLATFORM_READY_FOR_SECOND_ORG = YES (técnicamente); faltan los datos reales de C Y P
+TEST_DB ╪ RUNTIME_DB         = AISLADAS ESTRUCTURALMENTE
+CYP_ORGANIZATION_CREATED     = SÍ (org-cyp · SOURCES_PENDING · sin perfil · sin fuentes conectadas)
+CYP_MARKETING                = NO INICIADO (sin campañas, sin presupuesto, sin anuncios)
+DISCOVERY C Y P              = BLOQUEADO (falta dominio/URL)
 ```

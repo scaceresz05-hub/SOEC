@@ -79,7 +79,24 @@ export interface BusinessEvaluationProfile {
   readonly directorContext: DirectorContext;
 }
 
-export type TipoFuente = 'ADS' | 'ANALYTICS' | 'ECOMMERCE' | 'CRM' | 'GROWTH' | 'MERCHANT';
+export type TipoFuente =
+  | 'WEBSITE'
+  | 'ECOMMERCE'
+  | 'ADS'
+  | 'ANALYTICS'
+  | 'MERCHANT'
+  | 'SALES'
+  | 'CATALOG'
+  | 'CRM'
+  | 'PAYMENTS'
+  | 'SHIPPING'
+  | 'GROWTH';
+
+/**
+ * Estado REAL de una fuente. `NOT_CONNECTED` y `PENDING` existen para poder decir la verdad:
+ * una fuente sin conectar NO es una fuente con cero datos. `CERO ≠ NO CONECTADO`.
+ */
+export type EstadoFuente = 'CONNECTED_READ_ONLY' | 'NOT_CONNECTED' | 'PENDING' | 'NOT_APPLICABLE';
 
 /** Una fuente de datos SIEMPRE pertenece a una organización. No existen fuentes globales. */
 export interface FuenteRegistrada {
@@ -89,8 +106,10 @@ export interface FuenteRegistrada {
   readonly tipo: TipoFuente;
   readonly externalAccountId: string | null;
   readonly credentialRef: string | null;
-  readonly estado: 'CONNECTED_READ_ONLY' | 'NOT_CONNECTED' | 'PENDING';
+  readonly estado: EstadoFuente;
   readonly soloLectura: true;
+  /** Qué falta para conectarla. Vacío sólo cuando ya está conectada o no aplica. */
+  readonly faltantes: readonly string[];
 }
 
 /** Configuración de la experiencia legacy "decisión del primer piloto" para una organización. */
@@ -107,12 +126,18 @@ export interface NegocioRegistrado {
   readonly businessKey: string;
   readonly legalName: string;
   readonly displayName: string;
+  /** Identificación tributaria. `null` mientras el propietario no la aporte: JAMÁS se inventa. */
+  readonly rut: string | null;
   readonly modeloDeNegocio: ModeloDeNegocio;
   readonly mercado: string;
   readonly estado: EstadoNegocio;
+  /** Rubros/categorías DECLARADOS por el propietario. No es el catálogo: eso se descubre. */
+  readonly categoriasDeclaradas: readonly string[];
   readonly legacyAliases: readonly string[];
   readonly experienciasHabilitadas: readonly ExperienciaReal[];
   readonly decisionPiloto: ConfiguracionDecisionPiloto | null;
+  /** Datos que SOEC no puede deducir y debe aportar una persona. Visibles en la UI. */
+  readonly datosHumanosPendientes: readonly string[];
 }
 
 /** Configuración completa de una organización dentro de la plataforma. */

@@ -30,6 +30,16 @@ export function orgActiva(): string | null {
   }
 }
 
+/** Fija el negocio activo de este navegador. Acto explícito del usuario; nunca automático. */
+export function fijarOrgActiva(org: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(CLAVE, org);
+  } catch {
+    /* almacenamiento no disponible: la selección vale sólo para esta vista */
+  }
+}
+
 /**
  * Cabeceras de organización para el proxy. `x-organization-slug` es la que valida el gateway contra
  * la membresía; `x-organization-id` es la que consumen las rutas verticales.

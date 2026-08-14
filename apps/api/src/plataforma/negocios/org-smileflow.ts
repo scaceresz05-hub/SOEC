@@ -38,9 +38,12 @@ export const CONFIGURACION_ORG_SMILEFLOW: ConfiguracionOrganizacion = {
     businessKey: BUSINESS_KEY_SMILEFLOW,
     legalName: 'SmileFlow Clinic',
     displayName: 'SmileFlow Clinic',
+    // La identidad legal sigue siendo un pendiente del propietario (ver expediente del piloto).
+    rut: null,
     modeloDeNegocio: 'SAAS_FUNNEL',
     mercado: 'Chile',
     estado: 'OBSERVING',
+    categoriasDeclaradas: ['clínica dental', 'software de gestión dental'],
     legacyAliases: aliasLegados(),
     experienciasHabilitadas: ['medicion-real', 'director-real', 'autonomia-ads', 'piloto-decision'],
     decisionPiloto: {
@@ -48,6 +51,7 @@ export const CONFIGURACION_ORG_SMILEFLOW: ConfiguracionOrganizacion = {
       expedienteId: 'exp-smileflow-piloto-1',
       nombreComercial: 'SmileFlow Clinic',
     },
+    datosHumanosPendientes: ['identidad legal (nombre legal y RUT)'],
   },
   perfil: {
     organizationId: ORG_SMILEFLOW,
@@ -92,6 +96,7 @@ export const CONFIGURACION_ORG_SMILEFLOW: ConfiguracionOrganizacion = {
       credentialRef: 'env:GOOGLE_ADS_REFRESH_TOKEN',
       estado: 'CONNECTED_READ_ONLY',
       soloLectura: true,
+      faltantes: [],
     },
     {
       sourceId: 'src-smileflow-growth',
@@ -102,6 +107,7 @@ export const CONFIGURACION_ORG_SMILEFLOW: ConfiguracionOrganizacion = {
       credentialRef: 'env:SMILEFLOW_GROWTH_TOKEN',
       estado: 'CONNECTED_READ_ONLY',
       soloLectura: true,
+      faltantes: [],
     },
   ],
 };

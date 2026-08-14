@@ -144,6 +144,7 @@ import { RateLimiter } from './rate-limit';
 import { registerOrganizationsRoutes } from './organizations-routes';
 import { registrarVerticalesAutenticadas } from './vertical-gateway';
 import { PlataformaError } from './plataforma';
+import { registerPlataformaRoutes } from './plataforma-routes';
 import { registrarProteccionCsrf } from './csrf';
 
 export interface AppDeps {
@@ -402,6 +403,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerGeneracionRoutes(target, deps.store, clock, deps.generationRateLimit); // Motor de Generación (M3, Tramo J)
     registerCommercialKnowledgeRoutes(target, deps.store, clock); // Conocimiento comercial / CRM (M3, A-1)
     registerCiaRoutes(target, deps.store); // Centro de Integraciones Autónomas (CIA, preparación cerrada)
+    registerPlataformaRoutes(target); // Estado de incorporación del negocio (no exige perfil)
 
     target.post('/events', async (req, reply) => {
       const ctx = contextFrom(req);
