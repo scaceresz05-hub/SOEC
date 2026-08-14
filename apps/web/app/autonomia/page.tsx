@@ -18,6 +18,19 @@ export default function Autonomia() {
         Vos fijás el límite y podés cambiarlo cuando quieras. SOEC nunca cruza el nivel que elegiste.
       </p>
 
+      <div className="grid g-2" style={{ maxWidth: 720, marginBottom: 18 }}>
+        <div className="card pad-sm">
+          <div className="mlabel" style={{ marginBottom: 4 }}>Nivel que preferís</div>
+          <div style={{ fontWeight: 750, fontSize: 16 }}>Ejecutar con mi aprobación</div>
+          <div className="s" style={{ marginTop: 2 }}>SOEC prepara los cambios y espera tu confirmación.</div>
+        </div>
+        <div className="card pad-sm">
+          <div className="mlabel" style={{ marginBottom: 4 }}>Lo que SOEC puede hacer hoy</div>
+          <div style={{ fontWeight: 750, fontSize: 16 }}>Modo seguro (solo simulación)</div>
+          <div className="s" style={{ marginTop: 2 }}>La escritura real está desactivada: ningún cambio externo puede ocurrir todavía.</div>
+        </div>
+      </div>
+
       <div role="radiogroup" aria-label="Nivel de control" style={{ maxWidth: 720 }}>
         {NIVELES.map((n) => (
           <div className={`lvl ${n.actual ? 'on' : ''}`} key={n.n} role="radio" aria-checked={n.actual ? 'true' : 'false'} tabIndex={0}>

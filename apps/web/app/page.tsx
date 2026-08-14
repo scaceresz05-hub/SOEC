@@ -39,6 +39,7 @@ function tipoTexto(m: string): string {
 interface Titular {
   a: { k: string; v: string };
   b: { k: string; v: string };
+  dice: string;
 }
 
 /** Cifra titular real por negocio, según su modelo. Desconocido ≠ cero. */
@@ -55,18 +56,24 @@ async function titularDe(n: Negocio): Promise<Titular | null> {
       return {
         a: { k: 'Facturación confirmada', v: d.lineaBase.ingresoConfirmado.conocido ? clp(d.lineaBase.ingresoConfirmado.valor) : '—' },
         b: { k: 'Pedidos', v: num(d.lineaBase.pedidos) },
+        dice: 'Ya conozco tus ventas y tu catálogo; todavía necesito medición y márgenes para recomendarte publicidad.',
       };
     }
     if (n.modeloDeNegocio === 'SAAS_FUNNEL') {
       const r = await fetch('/api/medicion/panel', { cache: 'no-store', headers: h });
       const d = (await r.json()) as {
-        ads?: { impressions: number };
+        ads?: { impressions: number; clicks: number };
         growthFunnel?: { comercial?: { lead_created: number } };
       };
       if (!d.ads) return null;
+      const leads = d.growthFunnel?.comercial?.lead_created ?? 0;
       return {
         a: { k: 'Impresiones', v: num(d.ads.impressions) },
-        b: { k: 'Leads reales', v: num(d.growthFunnel?.comercial?.lead_created ?? 0) },
+        b: { k: 'Leads reales', v: num(leads) },
+        dice:
+          d.ads.clicks > 0 && leads === 0
+            ? 'El tráfico llega, pero todavía no se convierte en clientes.'
+            : 'Estoy observando tu campaña y reuniendo evidencia.',
       };
     }
   } catch {
@@ -162,6 +169,11 @@ export default function Home(): React.ReactElement {
                       <div className="v">{t.b.v}</div>
                     </div>
                   </div>
+                )}
+                {t && (
+                  <p style={{ margin: '10px 0 0', fontFamily: 'var(--voice)', fontSize: 14.5, color: 'var(--ink-soft)', lineHeight: 1.4 }}>
+                    <span aria-hidden="true" style={{ color: 'var(--brass)', fontWeight: 700 }}>SOEC:</span> “{t.dice}”
+                  </p>
                 )}
               </div>
               <div className="bcfoot">

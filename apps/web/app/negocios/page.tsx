@@ -440,6 +440,8 @@ export default function Panel(): React.ReactElement {
               ))}
             </>
           )}
+          <div className="section">Historial</div>
+          <div className="card"><p className="s muted" style={{ margin: 0 }}>Todavía no hay decisiones registradas. Cuando autorices o rechaces un cambio, quedará aquí con su fecha y su resultado.</p></div>
         </>
       )}
 
