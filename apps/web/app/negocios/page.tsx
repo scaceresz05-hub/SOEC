@@ -124,9 +124,13 @@ interface LineaBaseVentas {
   fechaMax: string | null;
   moneda: string | null;
   ingresoObservadoEnLaFuente: Desconocible;
+  ingresoConfirmado: Desconocible;
+  reembolsosConfirmados: Desconocible;
   ticketPromedio: Desconocible;
+  medianaTicket: Desconocible;
   articulosPorPedido: Desconocible;
   unidadesVendidas: number;
+  productosConVentasObservadas: number;
   clientesUnicosSeudonimos: number;
   clientesRecurrentes: number;
   tasaDeRecompra: Desconocible;
@@ -146,11 +150,20 @@ interface LineaBaseVentas {
   coberturaDelNegocio: string;
 }
 
+interface ProductosCruce {
+  catalogoObservado?: number;
+  conVentasObservadas?: number;
+  sinVentasObservadas?: number;
+  vendidosFueraDelCatalogo?: number;
+  motivo?: string;
+}
+
 interface VentasVista {
   observado: boolean;
   motivo?: string;
   estadoFuente?: string;
   lineaBase?: LineaBaseVentas;
+  productos?: ProductosCruce;
 }
 
 interface CatalogoVista {
@@ -415,21 +428,46 @@ export default function Negocios(): React.ReactElement {
                       transferencia o mostrador siguen siendo desconocidas.
                     </p>
                     <p className="s" style={{ margin: '6px 0' }}>
-                      <b>{ventas.lineaBase.pedidos}</b> pedidos ·{' '}
+                      <b>{ventas.lineaBase.pedidos}</b> pedidos · pago confirmado en{' '}
+                      <b>{ventas.lineaBase.pedidosConEvidenciaDePago}</b> de{' '}
+                      {ventas.lineaBase.pedidos}
+                      {ventas.lineaBase.pedidosSinEvidenciaDePago > 0 && (
+                        <>
+                          {' '}
+                          · <b>{ventas.lineaBase.pedidosSinEvidenciaDePago}</b> sin evidencia de pago
+                        </>
+                      )}
+                    </p>
+                    <p className="s" style={{ margin: '6px 0' }}>
+                      <b>Facturación confirmada:</b>{' '}
+                      <b>{formatoValor(ventas.lineaBase.ingresoConfirmado, ventas.lineaBase.moneda)}</b>{' '}
+                      <span className="muted">
+                        (sólo pedidos con pago confirmado, neto de reembolsos demostrables:{' '}
+                        {formatoValor(ventas.lineaBase.reembolsosConfirmados, ventas.lineaBase.moneda)}
+                        )
+                      </span>
+                    </p>
+                    <p className="s muted" style={{ margin: '6px 0' }}>
+                      Valor bruto de pedidos observados:{' '}
                       {formatoValor(
                         ventas.lineaBase.ingresoObservadoEnLaFuente,
                         ventas.lineaBase.moneda,
                       )}{' '}
-                      observados · ticket{' '}
-                      {formatoValor(ventas.lineaBase.ticketPromedio, ventas.lineaBase.moneda)} ·{' '}
+                      — es «lo que pasó por la tienda», puede incluir pedidos con pago desconocido; no
+                      es lo mismo que la facturación confirmada.
+                    </p>
+                    <p className="s" style={{ margin: '6px 0' }}>
+                      Ticket promedio{' '}
+                      {formatoValor(ventas.lineaBase.ticketPromedio, ventas.lineaBase.moneda)} ·
+                      mediana {formatoValor(ventas.lineaBase.medianaTicket, ventas.lineaBase.moneda)} ·{' '}
                       {formatoValor(ventas.lineaBase.articulosPorPedido, null)} artículos/pedido
                     </p>
                     <p className="s" style={{ margin: '6px 0' }}>
-                      Período: {ventas.lineaBase.fechaMin?.slice(0, 10) ?? '—'} a{' '}
+                      Ventana observada: {ventas.lineaBase.fechaMin?.slice(0, 10) ?? '—'} a{' '}
                       {ventas.lineaBase.fechaMax?.slice(0, 10) ?? '—'} ·{' '}
-                      <b>{ventas.lineaBase.unidadesVendidas}</b> unidades · pago confirmado en{' '}
-                      <b>{ventas.lineaBase.pedidosConEvidenciaDePago}</b> de{' '}
-                      {ventas.lineaBase.pedidos}
+                      <b>{ventas.lineaBase.unidadesVendidas}</b> unidades ·{' '}
+                      <b>{ventas.lineaBase.productosConVentasObservadas}</b> productos con ventas
+                      observadas
                     </p>
                     <p className="s" style={{ margin: '6px 0' }}>
                       Clientes observados (seudónimos):{' '}
@@ -443,17 +481,73 @@ export default function Negocios(): React.ReactElement {
                       )}
                     </p>
 
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                      <div>
+                        <p className="s" style={{ margin: '10px 0 4px' }}>
+                          <b>Top productos por ingresos</b>
+                        </p>
+                        <ul className="s" style={{ margin: '0 0 10px 18px' }}>
+                          {ventas.lineaBase.porProducto
+                            .filter((p) => p.clave !== '(desconocido)')
+                            .slice(0, 5)
+                            .map((p) => (
+                              <li key={p.clave}>
+                                producto <code>{p.clave}</code> —{' '}
+                                {p.ingreso.toLocaleString('es-CL')} {ventas.lineaBase!.moneda ?? ''} (
+                                {p.unidades} u.)
+                              </li>
+                            ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="s" style={{ margin: '10px 0 4px' }}>
+                          <b>Top productos por unidades</b>
+                        </p>
+                        <ul className="s" style={{ margin: '0 0 10px 18px' }}>
+                          {[...ventas.lineaBase.porProducto]
+                            .filter((p) => p.clave !== '(desconocido)')
+                            .sort((a, b) => b.unidades - a.unidades)
+                            .slice(0, 5)
+                            .map((p) => (
+                              <li key={p.clave}>
+                                producto <code>{p.clave}</code> — {p.unidades} u. ·{' '}
+                                {p.ingreso.toLocaleString('es-CL')} {ventas.lineaBase!.moneda ?? ''}
+                              </li>
+                            ))}
+                        </ul>
+                      </div>
+                    </div>
+
                     <p className="s" style={{ margin: '10px 0 4px' }}>
-                      <b>Top productos</b>
+                      <b>Evolución mensual</b> <span className="muted">(pedidos · facturación observada)</span>
                     </p>
                     <ul className="s" style={{ margin: '0 0 10px 18px' }}>
-                      {ventas.lineaBase.porProducto.slice(0, 5).map((p) => (
-                        <li key={p.clave}>
-                          producto <code>{p.clave}</code> — {p.unidades} u. en {p.pedidos} pedidos ·{' '}
-                          {p.ingreso.toLocaleString('es-CL')} {ventas.lineaBase!.moneda ?? ''}
+                      {ventas.lineaBase.porMes.map((m) => (
+                        <li key={m.clave}>
+                          {m.clave} — <b>{m.pedidos}</b> pedidos · {m.ingreso.toLocaleString('es-CL')}{' '}
+                          {ventas.lineaBase!.moneda ?? ''} · {m.unidades} u.
                         </li>
                       ))}
                     </ul>
+
+                    {ventas.productos && 'catalogoObservado' in ventas.productos && (
+                      <p className="s" style={{ margin: '10px 0 4px' }}>
+                        <b>Productos:</b> {ventas.productos.conVentasObservadas} con ventas observadas ·{' '}
+                        {ventas.productos.sinVentasObservadas} del catálogo sin ventas observadas en la
+                        ventana
+                        {(ventas.productos.vendidosFueraDelCatalogo ?? 0) > 0 && (
+                          <>
+                            {' '}
+                            · {ventas.productos.vendidosFueraDelCatalogo} vendidos que ya no están en el
+                            catálogo (referencia histórica, no se elimina)
+                          </>
+                        )}{' '}
+                        <span className="muted">
+                          «sin ventas observadas» no es «sin ventas»: es sin ventas en esta ventana y
+                          fuente.
+                        </span>
+                      </p>
+                    )}
 
                     <p className="s" style={{ margin: '10px 0 4px' }}>
                       <b>Por región</b>

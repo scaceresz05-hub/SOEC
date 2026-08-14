@@ -215,11 +215,48 @@ export function registerPlataformaRoutes(app: FastifyInstance, store?: EventStor
             : 'VENTAS_AUN_NO_OBSERVADAS',
       });
     }
+
+    // Productos CON / SIN ventas observadas: cruce con el catálogo, si está observado. La resta
+    // es honesta —un producto vendido puede NO estar en el catálogo actual (referencia histórica),
+    // y se cuenta aparte en `vendidosFueraDelCatalogo` en vez de forzar una diferencia negativa.
+    const fuenteCatalogo = buscarFuentes(org).find((f) => f.tipo === 'CATALOG');
+    let productos:
+      | {
+          catalogoObservado: number;
+          conVentasObservadas: number;
+          sinVentasObservadas: number;
+          vendidosFueraDelCatalogo: number;
+        }
+      | { motivo: string }
+      | undefined;
+    if (fuenteCatalogo) {
+      const catalogoIds = await new CatalogoComercioService(store).listarProductoIds(
+        ctx,
+        fuenteCatalogo.provider,
+      );
+      if (catalogoIds.length === 0) {
+        productos = { motivo: 'CATALOGO_AUN_NO_OBSERVADO' };
+      } else {
+        const setCatalogo = new Set(catalogoIds);
+        const vendidos = new Set(
+          lineaBase.porProducto.map((p) => p.clave).filter((k) => k !== '(desconocido)'),
+        );
+        const conVentas = [...setCatalogo].filter((id) => vendidos.has(id)).length;
+        productos = {
+          catalogoObservado: catalogoIds.length,
+          conVentasObservadas: conVentas,
+          sinVentasObservadas: catalogoIds.length - conVentas,
+          vendidosFueraDelCatalogo: [...vendidos].filter((id) => !setCatalogo.has(id)).length,
+        };
+      }
+    }
+
     return reply.send({
       organizationId: org,
       observado: true,
       estadoFuente: fuente.estado,
       lineaBase,
+      productos,
     });
   });
 

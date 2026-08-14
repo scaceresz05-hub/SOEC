@@ -55,8 +55,12 @@ export interface LineaBaseDeVentas {
    */
   readonly reembolsosConfirmados: DesconocidoOValor;
   readonly ticketPromedio: DesconocidoOValor;
+  /** Mediana del total de pedido (más robusta que el promedio ante outliers). `UNKNOWN` sin pedidos. */
+  readonly medianaTicket: DesconocidoOValor;
   readonly articulosPorPedido: DesconocidoOValor;
   readonly unidadesVendidas: number;
+  /** Nº de productos DISTINTOS con al menos una venta observada en la ventana (excluye desconocidos). */
+  readonly productosConVentasObservadas: number;
 
   readonly clientesUnicosSeudonimos: number;
   readonly clientesRecurrentes: number;
@@ -174,6 +178,19 @@ export function calcularLineaBaseDeVentas(
   );
   const ingresoProductos = porProducto.reduce((s, p) => s + p.ingreso, 0);
   const top5 = porProducto.slice(0, 5).reduce((s, p) => s + p.ingreso, 0);
+  const productosConVentas = porProducto.filter((p) => p.clave !== '(desconocido)').length;
+
+  // Mediana del total de pedido: más robusta que el promedio ante pocos pedidos grandes.
+  const valoresOrdenados = totales.map((t) => t.valor).sort((a, b) => a - b);
+  const n = valoresOrdenados.length;
+  const mediana =
+    n === 0
+      ? desconocido('NO_MEDIDO')
+      : conocido(
+          n % 2 === 1
+            ? valoresOrdenados[(n - 1) / 2]!
+            : Math.round((valoresOrdenados[n / 2 - 1]! + valoresOrdenados[n / 2]!) / 2),
+        );
 
   return {
     organizationId,
@@ -198,11 +215,13 @@ export function calcularLineaBaseDeVentas(
       totales.length > 0
         ? conocido(Math.round(ingreso / totales.length))
         : desconocido('NO_MEDIDO'),
+    medianaTicket: mediana,
     articulosPorPedido:
       pedidos.length > 0
         ? conocido(Number((unidades / pedidos.length).toFixed(2)))
         : desconocido('NO_MEDIDO'),
     unidadesVendidas: unidades,
+    productosConVentasObservadas: productosConVentas,
 
     clientesUnicosSeudonimos: unicos,
     clientesRecurrentes: recurrentes,
