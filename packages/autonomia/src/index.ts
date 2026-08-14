@@ -17,3 +17,4 @@ export * from './mandato/elegibilidad';
 export * from './mandato/sombra';
 export * from './mandato/certificacion';
 export * from './mandato/ledger';
+export * from './canary/canary';
