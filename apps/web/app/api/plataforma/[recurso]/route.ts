@@ -1,6 +1,6 @@
 import { API_BASE } from '../../../../lib/config';
 
-const GET_RECURSOS = new Set(['negocio', 'negocios']);
+const GET_RECURSOS = new Set(['negocio', 'negocios', 'catalogo', 'fundamentos']);
 
 /** Reenvía la organización declarada por el navegador. Sin organización no hay negocio: hay rechazo. */
 function cabecerasDe(req: Request): Record<string, string> {

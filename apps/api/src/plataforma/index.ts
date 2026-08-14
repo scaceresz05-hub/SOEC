@@ -10,3 +10,4 @@ export * from './identidad-organizacion';
 export * from './tipos';
 export * from './registro';
 export * from './experience-binding';
+export * from './fundamentos';

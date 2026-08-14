@@ -48,6 +48,22 @@ export function cabecerasOrg(org: string): Record<string, string> {
   return { 'x-organization-slug': org, 'x-organization-id': org };
 }
 
+/**
+ * Etiquetas honestas del estado de una fuente. Ninguna se traduce a un número: «no configurado» y
+ * «requiere credenciales» son estados, no ceros.
+ */
+export const ETIQUETA_ESTADO_FUENTE: Record<string, { texto: string; cls: string }> = {
+  OBSERVED: { texto: 'Observada', cls: 'ok' },
+  CONNECTED_READ_ONLY: { texto: 'Conectada (solo lectura)', cls: 'ok' },
+  CONNECTED_UNKNOWN: { texto: 'Activa · aporte no medible', cls: 'warn' },
+  CREDENTIALS_REQUIRED: { texto: 'Requiere credenciales', cls: 'warn' },
+  PARTIAL_CONFIGURATION: { texto: 'Configuración parcial', cls: 'warn' },
+  NOT_CONFIGURED: { texto: 'No configurado', cls: 'mut' },
+  NOT_CONNECTED: { texto: 'No conectada', cls: 'mut' },
+  PENDING: { texto: 'Pendiente', cls: 'warn' },
+  NOT_APPLICABLE: { texto: 'No aplica', cls: 'mut' },
+};
+
 /** Traduce el error del backend a un estado honesto de la UI (nunca "cero"). */
 export function estadoNoConfigurado(codigo: string | undefined): string | null {
   switch (codigo) {

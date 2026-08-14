@@ -11,7 +11,13 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { cabecerasOrg, estadoNoConfigurado, orgActiva, fijarOrgActiva } from '../../lib/org-activa';
+import {
+  ETIQUETA_ESTADO_FUENTE,
+  cabecerasOrg,
+  estadoNoConfigurado,
+  fijarOrgActiva,
+  orgActiva,
+} from '../../lib/org-activa';
 
 interface NegocioEnLista {
   organizationId: string;
@@ -61,12 +67,47 @@ const ESTADO_NEGOCIO: Record<string, { texto: string; cls: string }> = {
 };
 
 /** Etiqueta humana del estado de una fuente. «Pendiente» ╪ «cero». */
-const ESTADO_FUENTE: Record<string, { texto: string; cls: string }> = {
-  CONNECTED_READ_ONLY: { texto: 'Conectada (solo lectura)', cls: 'ok' },
-  PENDING: { texto: 'Pendiente', cls: 'warn' },
-  NOT_CONNECTED: { texto: 'No conectada', cls: 'mut' },
-  NOT_APPLICABLE: { texto: 'No aplica', cls: 'mut' },
+const ESTADO_FUENTE = ETIQUETA_ESTADO_FUENTE;
+
+const VEREDICTO_FUNDAMENTOS: Record<string, string> = {
+  FOUNDATION_REQUIRED: 'Faltan cimientos',
+  OBSERVABLE_SIN_POLITICA: 'Observable, sin criterios',
+  EVALUABLE: 'Evaluable',
 };
+
+interface Fundamentos {
+  veredicto: string;
+  motivos: { codigo: string; explicacion: string; resuelveCon: string }[];
+  cimientosPresentes: string[];
+  embudo: { pasos: { paso: string; estado: string }[] };
+}
+
+interface ResumenCatalogoVista {
+  productosObservados: number;
+  categoriasObservadas: number;
+  precioMin: number | null;
+  precioMax: number | null;
+  moneda: string | null;
+  enStock: number;
+  sinStock: number;
+  disponibilidadDesconocida: number;
+}
+
+interface CatalogoVista {
+  observado: boolean;
+  motivo?: string;
+  source?: string;
+  observedAt?: string;
+  completo?: boolean;
+  resumen?: ResumenCatalogoVista;
+  hallazgos?: {
+    codigo: string;
+    severidad: string;
+    afectados: number;
+    total: number;
+    detalle: string;
+  }[];
+}
 
 const TIPO_FUENTE: Record<string, string> = {
   WEBSITE: 'Sitio web',
@@ -86,6 +127,8 @@ export default function Negocios(): React.ReactElement {
   const [lista, setLista] = useState<NegocioEnLista[] | null>(null);
   const [org, setOrg] = useState<string | null | undefined>(undefined);
   const [detalle, setDetalle] = useState<DetalleNegocio | null>(null);
+  const [fundamentos, setFundamentos] = useState<Fundamentos | null>(null);
+  const [catalogo, setCatalogo] = useState<CatalogoVista | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
 
   useEffect(() => {
@@ -115,15 +158,15 @@ export default function Negocios(): React.ReactElement {
   useEffect(() => {
     if (!org) {
       setDetalle(null);
+      setFundamentos(null);
+      setCatalogo(null);
       return;
     }
+    const h = cabecerasOrg(org);
     (async () => {
       setAviso(null);
       try {
-        const r = await fetch('/api/plataforma/negocio', {
-          cache: 'no-store',
-          headers: cabecerasOrg(org),
-        });
+        const r = await fetch('/api/plataforma/negocio', { cache: 'no-store', headers: h });
         if (!r.ok) {
           const cuerpo = (await r.json().catch(() => ({}))) as { error?: string };
           setDetalle(null);
@@ -133,6 +176,22 @@ export default function Negocios(): React.ReactElement {
         setDetalle((await r.json()) as DetalleNegocio);
       } catch {
         setAviso('No se pudo contactar el servicio.');
+      }
+    })();
+    (async () => {
+      try {
+        const r = await fetch('/api/plataforma/fundamentos', { cache: 'no-store', headers: h });
+        setFundamentos(r.ok ? ((await r.json()) as Fundamentos) : null);
+      } catch {
+        setFundamentos(null);
+      }
+    })();
+    (async () => {
+      try {
+        const r = await fetch('/api/plataforma/catalogo', { cache: 'no-store', headers: h });
+        setCatalogo(r.ok ? ((await r.json()) as CatalogoVista) : null);
+      } catch {
+        setCatalogo(null);
       }
     })();
   }, [org]);
@@ -230,6 +289,98 @@ export default function Negocios(): React.ReactElement {
               )}
             </p>
           </div>
+
+          {fundamentos && (
+            <>
+              <h3 className="block">¿Puede SOEC dirigir este negocio todavía?</h3>
+              <div className="card" style={{ padding: '8px 16px', marginBottom: 14 }}>
+                <p className="s" style={{ margin: '6px 0' }}>
+                  Veredicto:{' '}
+                  <span
+                    className={`pill ${fundamentos.veredicto === 'EVALUABLE' ? 'ok' : 'warn'}`}
+                    style={{ fontSize: 10 }}
+                  >
+                    {VEREDICTO_FUNDAMENTOS[fundamentos.veredicto] ?? fundamentos.veredicto}
+                  </span>
+                </p>
+                {fundamentos.cimientosPresentes.length > 0 && (
+                  <p className="s" style={{ margin: '6px 0' }}>
+                    Ya está: {fundamentos.cimientosPresentes.join(' · ')}
+                  </p>
+                )}
+                {fundamentos.motivos.length > 0 && (
+                  <ul className="s" style={{ margin: '4px 0 10px 18px' }}>
+                    {fundamentos.motivos.map((m) => (
+                      <li key={m.codigo}>
+                        <b>{m.explicacion}</b>
+                        <br />
+                        <span className="muted">Se resuelve con: {m.resuelveCon}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="s muted" style={{ margin: '6px 0' }}>
+                  Medición de embudo: {fundamentos.embudo.pasos.length} pasos sin instrumentar. Cero
+                  eventos observados no es cero eventos ocurridos.
+                </p>
+              </div>
+            </>
+          )}
+
+          {catalogo && (
+            <>
+              <h3 className="block">Catálogo</h3>
+              <div className="card" style={{ padding: '8px 16px', marginBottom: 14 }}>
+                {!catalogo.observado ? (
+                  <p className="s muted" style={{ margin: '6px 0' }}>
+                    Catálogo todavía no observado ({catalogo.motivo}). No hay cifras que mostrar.
+                  </p>
+                ) : (
+                  <>
+                    <p className="s" style={{ margin: '6px 0' }}>
+                      <b>{catalogo.resumen!.productosObservados}</b> productos ·{' '}
+                      <b>{catalogo.resumen!.categoriasObservadas}</b> categorías · precios{' '}
+                      {catalogo.resumen!.precioMin !== null
+                        ? `${catalogo.resumen!.precioMin!.toLocaleString('es-CL')} – ${catalogo.resumen!.precioMax!.toLocaleString('es-CL')} ${catalogo.resumen!.moneda ?? ''}`
+                        : 'no observados'}
+                    </p>
+                    <p className="s" style={{ margin: '6px 0' }}>
+                      Disponibilidad: {catalogo.resumen!.enStock} en stock ·{' '}
+                      {catalogo.resumen!.sinStock} sin stock
+                      {catalogo.resumen!.disponibilidadDesconocida > 0 &&
+                        ` · ${catalogo.resumen!.disponibilidadDesconocida} desconocida`}
+                    </p>
+                    <p className="s muted" style={{ margin: '6px 0' }}>
+                      Observado el {new Date(catalogo.observedAt!).toLocaleString('es-CL')} desde{' '}
+                      {catalogo.source} (solo lectura)
+                      {catalogo.completo === false && ' · lectura incompleta'}
+                    </p>
+                    {catalogo.hallazgos && catalogo.hallazgos.length > 0 && (
+                      <>
+                        <p className="s" style={{ margin: '10px 0 4px' }}>
+                          <b>Calidad de datos</b>{' '}
+                          <span className="muted">(SOEC observa, no corrige)</span>
+                        </p>
+                        <ul className="s" style={{ margin: '0 0 10px 18px' }}>
+                          {catalogo.hallazgos.map((h) => (
+                            <li key={h.codigo}>
+                              {h.detalle} — <b>{h.afectados}</b> de {h.total}{' '}
+                              <span
+                                className={`pill ${h.severidad === 'IMPIDE_MEDIR' ? 'warn' : 'mut'}`}
+                                style={{ fontSize: 10 }}
+                              >
+                                {h.severidad}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            </>
+          )}
 
           <h3 className="block">Fuentes de datos</h3>
           <div className="card" style={{ padding: '8px 16px', marginBottom: 14 }}>

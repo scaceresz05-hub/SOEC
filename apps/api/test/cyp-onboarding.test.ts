@@ -166,24 +166,23 @@ describe('C Y P · existencia e identidad', () => {
     expect(getBusiness(ORG_SMILEFLOW).rut).toBeNull();
   });
 
-  it('CYP_STATUS — no arranca operativa: declara SOURCES_PENDING', () => {
-    expect(getBusiness(ORG_CYP).estado).toBe('SOURCES_PENDING');
+  it('CYP_STATUS — no arranca operativa: tras el discovery declara SOURCES_PARTIAL', () => {
+    // Unas fuentes se observan (sitio, tienda, catálogo) y otras no existen: se conoce EN PARTE.
+    expect(getBusiness(ORG_CYP).estado).toBe('SOURCES_PARTIAL');
     expect(getBusiness(ORG_SMILEFLOW).estado).toBe('OBSERVING');
   });
 
   it('las categorías son CONTEXTO DECLARADO, no un catálogo', () => {
     const cyp = getBusiness(ORG_CYP);
     expect(cyp.categoriasDeclaradas).toEqual([
-      'insumos médicos',
       'insumos dentales',
-      'insumos de aseo',
+      'aseo industrial',
+      'desechables',
     ]);
     // No hay catálogo, SKU, precios, stock ni ventas INVENTADOS: no existe ningún campo de datos
     // comerciales en la configuración. (Nombrarlos como "lo que falta" sí es legítimo y esperado.)
     const serializado = JSON.stringify(CONFIGURACION_ORG_CYP);
-    expect(serializado).not.toMatch(
-      /"(sku|skus|productos|precios?|stock|ventas|margen|ticket)"\s*:/i,
-    );
+    expect(serializado).not.toMatch(/"(sku|skus|productos|precios?|stock|ventas)"\s*:/i);
     expect(CONFIGURACION_ORG_CYP.fuentes.every((f) => f.externalAccountId === null)).toBe(true);
   });
 });
@@ -199,20 +198,30 @@ describe('C Y P · perfil, fuentes y credenciales propias', () => {
     expect(getProfile(ORG_SMILEFLOW).organizationId).toBe(ORG_SMILEFLOW);
   });
 
-  it('no se fijó ningún objetivo comercial sin datos: ni ROAS, ni CPA, ni ticket, ni margen', () => {
-    const s = JSON.stringify(CONFIGURACION_ORG_CYP);
-    expect(s).not.toMatch(/roas|cpa|ticket|margen|margin|conversion_rate|presupuesto/i);
-    expect(CONFIGURACION_ORG_CYP.perfil).toBeNull();
+  it('no se fijó ningún objetivo comercial sin datos: ROAS, CPA, ticket y margen son DESCONOCIDOS', () => {
+    // No basta con que no aparezcan: aparecen, declarados explícitamente como no medidos.
+    // Lo que se prohíbe es que tengan VALOR.
+    expect(CONFIGURACION_ORG_CYP.perfil).toBeNull(); // sin política de evaluación
+    const economia = CONFIGURACION_ORG_CYP.perfilComercial!.economia;
+    for (const [clave, v] of Object.entries(economia)) {
+      expect(v.conocido, `${clave} no puede tener valor`).toBe(false);
+      expect(v.valor, `${clave} debe ser null, jamás 0`).toBeNull();
+    }
+    // Y en ninguna parte de la configuración hay una cifra económica suelta.
+    expect(JSON.stringify(CONFIGURACION_ORG_CYP)).not.toMatch(/"(roas|cpa|cac|ltv)"\s*:\s*\d/i);
   });
 
-  it('CYP_SOURCES_NOT_SMILEFLOW — todas sus fuentes son suyas y ninguna está conectada', () => {
+  it('CYP_SOURCES_NOT_SMILEFLOW — todas sus fuentes son suyas y sólo lectura', () => {
     const fuentes = getSources(ORG_CYP);
     expect(fuentes.length).toBeGreaterThan(0);
     expect(fuentes.every((f) => f.organizationId === ORG_CYP)).toBe(true);
-    expect(fuentes.every((f) => f.estado !== 'CONNECTED_READ_ONLY')).toBe(true);
     expect(fuentes.every((f) => f.soloLectura === true)).toBe(true);
-    // Cada fuente no conectada explica QUÉ falta (nunca aparece como "cero datos").
-    expect(fuentes.every((f) => f.faltantes.length > 0)).toBe(true);
+    // Ninguna fuente de C Y P usa credenciales: lo observado es público o está sin conectar.
+    expect(fuentes.every((f) => f.estado !== 'CONNECTED_READ_ONLY')).toBe(true);
+    // Toda fuente que NO se está leyendo explica qué falta (nunca aparece como "cero datos").
+    const sinLectura = fuentes.filter((f) => f.estado !== 'OBSERVED');
+    expect(sinLectura.length).toBeGreaterThan(0);
+    expect(sinLectura.every((f) => f.faltantes.length > 0)).toBe(true);
     // Cubre el inventario pedido.
     const tipos = fuentes.map((f) => f.tipo);
     for (const t of [
@@ -220,12 +229,15 @@ describe('C Y P · perfil, fuentes y credenciales propias', () => {
       'ECOMMERCE',
       'ADS',
       'ANALYTICS',
+      'TAG_MANAGER',
       'MERCHANT',
       'SALES',
       'CATALOG',
       'CRM',
       'PAYMENTS',
       'SHIPPING',
+      'MESSAGING',
+      'SOCIAL',
     ]) {
       expect(tipos).toContain(t);
     }
@@ -240,7 +252,8 @@ describe('C Y P · perfil, fuentes y credenciales propias', () => {
     // Y su fuente de Ads no lleva la credencial de SmileFlow.
     const ads = buscarFuente(ORG_CYP, 'google-ads');
     expect(ads?.credentialRef).toBeNull();
-    expect(ads?.estado).toBe('NOT_CONNECTED');
+    // El discovery confirmó que ni siquiera hay etiqueta de Ads en el sitio.
+    expect(ads?.estado).toBe('NOT_CONFIGURED');
     // La configuración de C Y P no menciona ninguna referencia de secreto ajena.
     expect(JSON.stringify(CONFIGURACION_ORG_CYP)).not.toContain('env:');
   });
@@ -354,7 +367,7 @@ describe('C Y P · superficie HTTP de incorporación', () => {
     expect(c.organizationId).toBe(ORG_CYP);
     expect(c.legalName).toBe('Distribuidora C Y P SpA');
     expect(c.rut).toBeNull();
-    expect(c.estado).toBe('SOURCES_PENDING');
+    expect(c.estado).toBe('SOURCES_PARTIAL');
     expect(c.perfilDeEvaluacion.configurado).toBe(false);
     expect(c.perfilDeEvaluacion.motivo).toBe('BUSINESS_PROFILE_NOT_CONFIGURED');
     expect(c.resumenFuentes.conectadas).toBe(0);
@@ -458,6 +471,7 @@ describe('EXTENSIBILIDAD · una tercera organización se registra por configurac
       decisionPiloto: null,
       datosHumanosPendientes: ['todo: es una organización ficticia de prueba'],
     },
+    perfilComercial: null,
     perfil: null,
     fuentes: [],
   };

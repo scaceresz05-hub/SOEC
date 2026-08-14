@@ -12,11 +12,15 @@
  *  · `CERO ≠ NO CONECTADO`: cada fuente informa su estado real y qué falta para conectarla.
  */
 import type { FastifyInstance } from 'fastify';
+import { ActorId, OrganizationId, type EventStore, type RequestContext } from '@soec/contracts';
+import { CatalogoComercioService, embudoNoInstrumentado } from '@soec/comercio';
 import { contextoDe } from './superficie-auth';
 import {
   getBusiness,
   buscarFuentes,
+  buscarPerfilComercial,
   buscarProfile,
+  evaluarFundamentos,
   organizacionesRegistradas,
   buscarNegocio,
 } from './plataforma';
@@ -30,7 +34,23 @@ interface FuenteVista {
   readonly faltantes: readonly string[];
 }
 
-export function registerPlataformaRoutes(app: FastifyInstance): void {
+export function registerPlataformaRoutes(app: FastifyInstance, store?: EventStore): void {
+  /** Contexto de lectura de la organización AUTENTICADA. */
+  const ctxDe = (req: Parameters<typeof contextoDe>[0]): { ctx: RequestContext; org: string } => {
+    const autenticado = contextoDe(req);
+    const org = String(autenticado.organizationId);
+    const o = OrganizationId(org);
+    return {
+      ctx: {
+        organizationId: o,
+        actor: ActorId(String(autenticado.actor)),
+        scope: { organizationId: o, permissions: ['events:read'] },
+        correlationId: autenticado.correlationId,
+      },
+      org,
+    };
+  };
+
   /**
    * Estado de incorporación del negocio AUTENTICADO. 404 si la organización no está registrada.
    */
@@ -99,5 +119,64 @@ export function registerPlataformaRoutes(app: FastifyInstance): void {
         mercado: n.mercado,
       }));
     return reply.send({ negocios, filtradoPorMembresia: false });
+  });
+
+  /**
+   * FUNDAMENTOS: ¿puede el Director razonar sobre este negocio todavía?
+   *
+   * Devuelve un veredicto DETERMINISTA con motivos estructurados. Nunca devuelve métricas, y
+   * `puedeRecomendarInversionPublicitaria` es del tipo literal `false`.
+   */
+  app.get('/plataforma/fundamentos', async (req, reply) => {
+    const { org } = ctxDe(req);
+    const negocio = getBusiness(org);
+    const fundamentos = evaluarFundamentos(
+      negocio,
+      buscarFuentes(org),
+      buscarPerfilComercial(org),
+      buscarProfile(org) !== null,
+    );
+    return reply.send({
+      ...fundamentos,
+      // El embudo de comercio, hoy sin instrumentar. Ningún paso reporta «0 eventos».
+      embudo: embudoNoInstrumentado(org),
+    });
+  });
+
+  /**
+   * CATÁLOGO observado de la organización. 404 si la organización no está registrada.
+   * Si nunca se observó, responde `observado: false` — NUNCA un resumen en cero.
+   */
+  app.get('/plataforma/catalogo', async (req, reply) => {
+    const { ctx, org } = ctxDe(req);
+    getBusiness(org); // 404 si no está registrada
+    const fuente = buscarFuentes(org).find((f) => f.tipo === 'CATALOG');
+    if (!store || !fuente) {
+      return reply.send({
+        organizationId: org,
+        observado: false,
+        motivo: fuente ? 'SIN_ALMACEN_DE_EVENTOS' : 'CATALOG_SOURCE_NOT_REGISTERED',
+      });
+    }
+    const catalogo = await new CatalogoComercioService(store).ultimoCatalogo(ctx, fuente.provider);
+    if (!catalogo) {
+      return reply.send({
+        organizationId: org,
+        observado: false,
+        source: fuente.provider,
+        estadoFuente: fuente.estado,
+        motivo: 'CATALOGO_AUN_NO_OBSERVADO',
+      });
+    }
+    return reply.send({
+      organizationId: org,
+      observado: true,
+      source: catalogo.source,
+      observedAt: catalogo.observedAt,
+      completo: catalogo.completo,
+      advertencias: catalogo.advertencias,
+      resumen: catalogo.resumen,
+      hallazgos: catalogo.hallazgos,
+    });
   });
 }

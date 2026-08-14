@@ -336,6 +336,91 @@ se registra con `crearResolutorDeNegocios([...])` sin modificar el núcleo, y si
 `typecheck` 48/48 · `eslint` limpio · `next build` OK · **suite completa 240 archivos / 1648 pruebas**
 (+21 de C Y P) · huella del runtime idéntica antes y después · secret-scan sin coincidencias reales.
 
+## 7-quinquies. FASE 6B — Fundamentos y observabilidad real de C Y P
+
+Tras el discovery de solo lectura de `https://distribuidoracyp.cl/`, C Y P deja de ser una ficha vacía.
+
+### Modelo genérico de comercio — `@soec/comercio` (paquete nuevo)
+
+No nombra ninguna empresa ni plataforma: `CommerceProduct`, `CommerceCategory`, `CommercePrice`,
+`CommerceCart`, `CommerceCheckout`, `CommerceOrder`, `CommerceRevenue`, `CommerceDataQualityFinding`.
+Tres invariantes están impuestos **por tipo**, no por convención:
+
+1. **El SKU no es clave.** La identidad es `organizationId + source + externalId`. Con 129/129
+   productos sin SKU, usarlo como clave habría colapsado el catálogo en una sola entidad.
+2. **Desconocido ╪ cero.** `DesconocidoOValor` obliga a mirar `conocido` antes de leer `valor`; un
+   paso de embudo `NO_INSTRUMENTADO` **no tiene** campo `eventos`, así que no puede reportar 0.
+3. **Sólo lectura.** `CommerceCatalogSource` no declara ninguna operación de escritura.
+
+### Adaptador WooCommerce — solo lectura demostrable
+
+`GET` fijo en código, lista blanca cerrada (`/products`, `/products/categories`), sin credenciales
+ni cookies. Una prueba lee el propio código fuente (sin comentarios) y falla si aparece cualquier
+`method: 'POST'|'PUT'|'DELETE'|'PATCH'` o una ruta `/cart`, `/checkout`, `/orders`, `/batch`.
+
+### Snapshot REAL ingerido (solo lectura sobre producción)
+
+| | |
+|---|---|
+| PRODUCTS_DISCOVERED | **129** |
+| CATEGORIES_DISCOVERED | **15** |
+| PRICE_RANGE | **500 – 40.000 CLP** |
+| IN_STOCK / OUT_OF_STOCK | **125 / 4** |
+| PRODUCTS_WITH_SKU | **0** |
+| PRODUCTS_WITH_BRAND | **0** |
+| PRODUCTS_WITH_ATTRIBUTES | **0** |
+| PRODUCTS_WITH_IMAGE / PRICE | **129 / 129** |
+| Relación producto↔categoría demostrable | **112 de 129** |
+
+**Corrección al discovery previo:** la anomalía de taxonomía existe pero es **parcial**, no total.
+Con `per_page=100`, 112 productos sí exponen su categoría y **17 llegan con `categories: []`**. Esos
+17 quedan marcados `NO_DEMOSTRABLE` — no se les inventa categoría. Las categorías se ingieren igual
+por su propio endpoint, como fuente independiente.
+
+Hallazgos de calidad (SOEC observa, no corrige): `MISSING_SKU` 129/129 · `MISSING_BRAND` 129/129 ·
+`MISSING_ATTRIBUTES` 129/129 · `PRODUCT_CATEGORY_LINK_NOT_DEMOSTRABLE` 17/129 ·
+`DUPLICATE_PRODUCT_CANDIDATE` 2 · `DUPLICATE_CATEGORY_NAME` 6/15 ·
+`CATEGORY_NAME_WITH_INVISIBLE_CHARS` 1/15 (un nombre de categoría lleva un carácter invisible que
+rompe coincidencias exactas y feeds).
+
+### Estado real de las fuentes de C Y P
+
+`WEBSITE` `ECOMMERCE` `CATALOG` `SOCIAL` = **OBSERVED** · `ANALYTICS` `TAG_MANAGER` `ADS`
+`MERCHANT` `CRM` = **NOT_CONFIGURED** · `SALES` `PAYMENTS` = **CREDENTIALS_REQUIRED** ·
+`SHIPPING` = **PARTIAL_CONFIGURATION** · `WHATSAPP` = **CONNECTED_UNKNOWN**.
+Estado del negocio: **SOURCES_PARTIAL**.
+
+El envío «$0» del checkout **no** se interpreta como ingreso ni costo cero: es `PAGO_EXTERNO`.
+WhatsApp opera de verdad pero su contribución comercial es `desconocida`: no se le atribuye venta
+alguna, y por tanto WooCommerce **no** se asume como el 100% de los ingresos.
+
+### Perfil comercial ╪ política de evaluación
+
+Se separaron dos conceptos que estaban fundidos:
+
+- **`PerfilComercial`** — qué ES el negocio: `ECOMMERCE_DISTRIBUCION`, `CL`, `CLP`, orientación
+  `B2B_LEAN` (sin imponer B2B puro: el checkout admite consumidor final), verticales `DENTAL` /
+  `INDUSTRIAL_CLEANING` / `GENERAL_DISPOSABLES` — **sin línea MEDICAL**, que el discovery no
+  encontró como vertical propia. Toda su economía (`ticket`, `margen`, `CAC`, `CPA`, `ROAS`, `LTV`,
+  `recompra`, `devolución`, `costo de envío`) está declarada **desconocida**, jamás cero.
+- **`BusinessEvaluationProfile`** — la política (objetivo, criterio, cuenta externa). C Y P sigue en
+  `null`: fijarla sin datos sería inventarla.
+
+### Director: FOUNDATION_REQUIRED
+
+`evaluarFundamentos` produce un veredicto determinista y explicable.
+C Y P → **`FOUNDATION_REQUIRED`**, con motivos `ANALYTICS_NOT_CONFIGURED`, `SALES_NOT_CONNECTED`,
+`ECONOMICS_UNKNOWN`, `NATIONWIDE_SHIPPING_NOT_READY`, `ADS_NOT_CONFIGURED`,
+`BUSINESS_PROFILE_NOT_CONFIGURED` — y reconoce lo que sí está (catálogo observable, modelo y canales
+identificados). No es el `OBSERVAR` de SmileFlow: ahí hay datos insuficientes; aquí no hay de dónde
+sacarlos. `puedeRecomendarInversionPublicitaria` es del **tipo literal `false`**: habilitarla exigirá
+cambiar el contrato, no los datos.
+
+### Verificación
+
+`typecheck` 49/49 · `eslint` limpio · `next build` OK · **suite completa 241 archivos / 1666 pruebas**
+(+18 de comercio) · huella del runtime idéntica antes y después · secret-scan sin coincidencias.
+
 ## 8. Estado de la gobernanza al cierre de este documento
 
 ```

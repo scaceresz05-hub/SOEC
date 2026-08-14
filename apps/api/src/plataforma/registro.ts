@@ -29,6 +29,7 @@ import type {
   ConfiguracionOrganizacion,
   FuenteRegistrada,
   NegocioRegistrado,
+  PerfilComercial,
   RecursoGoogleAds,
 } from './tipos';
 
@@ -42,6 +43,7 @@ export interface ResolutorDeNegocios {
   organizacionesRegistradas(): readonly string[];
   buscarConfiguracion(org: string): ConfiguracionOrganizacion | null;
   buscarNegocio(org: string): NegocioRegistrado | null;
+  buscarPerfilComercial(org: string): PerfilComercial | null;
   buscarProfile(org: string): BusinessEvaluationProfile | null;
   buscarFuentes(org: string): readonly FuenteRegistrada[];
   buscarFuente(org: string, provider: string): FuenteRegistrada | null;
@@ -110,6 +112,7 @@ export function crearResolutorDeNegocios(
     organizacionesRegistradas: () => [...registro.keys()],
     buscarConfiguracion,
     buscarNegocio: (org) => buscarConfiguracion(org)?.negocio ?? null,
+    buscarPerfilComercial: (org) => buscarConfiguracion(org)?.perfilComercial ?? null,
     buscarProfile: (org) => buscarConfiguracion(org)?.perfil ?? null,
     buscarFuentes,
     buscarFuente: (org, provider) =>
@@ -140,6 +143,9 @@ export const buscarConfiguracion = (org: string): ConfiguracionOrganizacion | nu
   RESOLUTOR.buscarConfiguracion(org);
 export const buscarNegocio = (org: string): NegocioRegistrado | null =>
   RESOLUTOR.buscarNegocio(org);
+/** Qué ES el negocio (hechos del discovery). `null` si aún no se ha caracterizado. */
+export const buscarPerfilComercial = (org: string): PerfilComercial | null =>
+  RESOLUTOR.buscarPerfilComercial(org);
 export const buscarProfile = (org: string): BusinessEvaluationProfile | null =>
   RESOLUTOR.buscarProfile(org);
 export const buscarFuentes = (org: string): readonly FuenteRegistrada[] =>

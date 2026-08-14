@@ -18,7 +18,9 @@ import {
   POLICY_SMILEFLOW,
 } from '../../real-director/criterio-smileflow';
 import { LIMITES_SMILEFLOW } from '../../autonomia-ads/limites-smileflow';
+import { desconocido } from '@soec/comercio';
 import { BUSINESS_KEY_SMILEFLOW, ORG_SMILEFLOW, aliasLegados } from '../identidad-organizacion';
+import { economiaSinMedir } from '../tipos';
 import type { ConfiguracionOrganizacion } from '../tipos';
 
 /** Cuenta de Google Ads gobernada por SmileFlow. Antes era el `CONFINAMIENTO` global de la plataforma. */
@@ -53,6 +55,29 @@ export const CONFIGURACION_ORG_SMILEFLOW: ConfiguracionOrganizacion = {
     },
     datosHumanosPendientes: ['identidad legal (nombre legal y RUT)'],
   },
+  /** Qué ES SmileFlow. Su economía tampoco se inventa: se mide o se declara desconocida. */
+  perfilComercial: {
+    organizationId: ORG_SMILEFLOW,
+    businessModel: 'SAAS_FUNNEL',
+    market: 'CL',
+    currency: 'CLP',
+    orientacion: 'B2B_LEAN',
+    plataforma: null,
+    sitio: null,
+    base: 'Chile',
+    canales: [
+      {
+        canal: 'ECOMMERCE',
+        estado: 'NOT_APPLICABLE',
+        contribucionComercial: desconocido('NO_APLICA'),
+        detalle: 'no vende productos: capta solicitudes de demostración',
+      },
+    ],
+    verticales: ['DENTAL_SAAS'],
+    economia: economiaSinMedir('NO_MEDIDO'),
+    procedencia: 'declaración del propietario + observación de Google Ads y Growth',
+  },
+
   perfil: {
     organizationId: ORG_SMILEFLOW,
     modeloDeNegocio: 'SAAS_FUNNEL',
