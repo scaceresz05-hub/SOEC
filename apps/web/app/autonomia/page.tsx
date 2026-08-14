@@ -7,7 +7,7 @@ const NIVELES = [
   { n: 1, t: 'Solo observar', s: 'SOEC mira tus datos y aprende. No propone cambios.' },
   { n: 2, t: 'Recomendar', s: 'SOEC te trae propuestas. Vos decidís todo.' },
   { n: 3, t: 'Ejecutar con mi aprobación', s: 'SOEC prepara los cambios y espera tu confirmación antes de aplicarlos.', actual: true },
-  { n: 4, t: 'Automático', s: 'SOEC puede actuar solo, dentro de los límites que vos definas.' },
+  { n: 4, t: 'Piloto automático', s: 'SOEC puede realizar cambios dentro de los límites que vos autorizás, sin pedirte permiso por cada uno.' },
 ];
 
 export default function Autonomia() {
@@ -52,6 +52,37 @@ export default function Autonomia() {
           simula: prepara cada cambio, te lo muestra y espera tu aprobación. Nada se publica, se gasta
           ni se modifica de verdad todavía. Cuando eso se habilite, será una decisión explícita tuya.
         </Callout>
+      </div>
+
+      <div className="section" style={{ maxWidth: 720 }}>Piloto automático en prueba</div>
+      <div className="card" style={{ maxWidth: 720 }}>
+        <p className="s" style={{ marginTop: 0 }}>
+          <b>SOEC está aprendiendo a administrar tus campañas en modo de prueba (modo sombra).</b> Con
+          tus datos reales, decide qué haría —usando exactamente los mismos controles de seguridad que
+          usaría de verdad— pero <b>todavía no modifica ninguna plataforma externa</b>.
+        </p>
+        <div className="grid g-2" style={{ marginTop: 10 }}>
+          <div>
+            <div className="mlabel" style={{ marginBottom: 6 }}>Mis límites (por empresa)</div>
+            <ul className="s" style={{ margin: 0, paddingLeft: 18 }}>
+              <li>Presupuesto máximo y aumento máximo</li>
+              <li>Cambios máximos por día y enfriamiento</li>
+              <li>Acciones permitidas, con aprobación o prohibidas</li>
+            </ul>
+          </div>
+          <div>
+            <div className="mlabel" style={{ marginBottom: 6 }}>Seguridad</div>
+            <ul className="s" style={{ margin: 0, paddingLeft: 18 }}>
+              <li>Interruptor de emergencia (global, empresa y cuenta)</li>
+              <li>Cada acción exige evidencia suficiente y un plan de reversión</li>
+              <li>El mandato tiene fecha de vencimiento y podés revocarlo cuando quieras</li>
+            </ul>
+          </div>
+        </div>
+        <p className="small muted" style={{ marginTop: 10, marginBottom: 0 }}>
+          Una empresa sin fundamentos (por ejemplo, sin medición ni márgenes) no es elegible para
+          piloto automático: SOEC lo bloquea hasta tener con qué decidir.
+        </p>
       </div>
 
       <CapacidadesCIA />
