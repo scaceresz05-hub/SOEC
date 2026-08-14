@@ -16,7 +16,8 @@ import {
   evaluarElegibilidadMandato,
   type AccionPropuesta,
 } from '@soec/autonomia';
-import { construirMandatoConservador, evaluarSombraAds, type Termino } from '../src/autonomia/shadow-ads';
+import { construirMandatoConservador, evaluarSombraAds, type EntradaSombraAds, type Termino } from '../src/autonomia/shadow-ads';
+import { evaluarCanaryReal } from '../src/autonomia/canary-real';
 import { ORG_SMILEFLOW } from '../src/plataforma';
 import {
   buscarFuentes,
@@ -80,7 +81,7 @@ async function main(): Promise<void> {
     diasVigencia: 30,
   });
 
-  const sombra = evaluarSombraAds({
+  const entradaSombra: EntradaSombraAds = {
     mandato,
     interruptores: INTERRUPTORES_TODOS_ON,
     ahora,
@@ -89,7 +90,9 @@ async function main(): Promise<void> {
     gastoDiarioPrevio: panel.ads?.cost ?? 0,
     cambiosHoy: 0,
     terminos,
-  });
+  };
+  const sombra = evaluarSombraAds(entradaSombra);
+  const canary = evaluarCanaryReal(ORG, entradaSombra);
 
   const informe = {
     organizationId: ORG,
@@ -107,6 +110,9 @@ async function main(): Promise<void> {
     REVISAR_MENSAJE: sombra.revisarMensaje,
     EXTERNAL_MUTATIONS: sombra.reporte.mutacionesExternas,
     dentalink_agenda: sombra.evaluacionesTermino.find((e) => e.termino.includes('dentalink'))?.accion ?? 'N/A',
+    CANARY_CANDIDATE: canary.candidato,
+    CANARY_WRITE_READY: canary.writeEstado,
+    CANARY_PUEDE_MUTAR_HOY: canary.puedeMutarHoy,
     AUTONOMOUS_REAL: false,
   };
   console.log('\n=== REAL_COMMERCIAL_SHADOW (decisión con datos reales, 0 efecto externo) ===');

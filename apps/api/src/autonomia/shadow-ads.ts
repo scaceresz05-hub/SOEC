@@ -91,6 +91,8 @@ export interface ResultadoSombraAds {
   readonly revisarMensaje: number;
   /** Clasificación de cada término (auditable: por qué). */
   readonly evaluacionesTermino: readonly EvaluacionTermino[];
+  /** Acciones mutantes candidatas (sólo negativas JUSTIFICADAS). Insumo del canary. */
+  readonly candidatas: readonly AccionPropuesta[];
 }
 
 /**
@@ -148,5 +150,6 @@ export function evaluarSombraAds(entrada: EntradaSombraAds): ResultadoSombraAds 
     situacionesEvaluadas: evaluaciones.length,
     revisarMensaje: evaluaciones.filter((e) => e.accion === 'OPTIMIZAR_MENSAJE').length,
     evaluacionesTermino: evaluaciones,
+    candidatas,
   };
 }

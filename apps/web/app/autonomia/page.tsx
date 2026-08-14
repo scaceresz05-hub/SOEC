@@ -112,6 +112,30 @@ export default function Autonomia() {
         </p>
       </div>
 
+      <div className="section" style={{ maxWidth: 720 }}>Piloto real</div>
+      <div className="card" style={{ maxWidth: 720 }}>
+        <div className="spread" style={{ marginBottom: 8 }}>
+          <b>Estado actual</b>
+          <span className="badge info"><span className="bdot" aria-hidden="true" /> Esperando una oportunidad segura</span>
+        </div>
+        <p className="s" style={{ marginTop: 0 }}>
+          No hay ninguna acción que justifique una prueba real por ahora. SOEC no fabrica una para
+          probar: espera a detectar una oportunidad real, reversible y de bajo riesgo, con evidencia
+          suficiente. Que no haya ninguna es un buen resultado, no una falla.
+        </p>
+        <p className="small muted" style={{ margin: '4px 0 12px' }}>
+          Cuando aparezca una, verás aquí: qué haría, por qué, qué podría salir mal, cómo lo revertiría,
+          el impacto máximo y los datos que usó.
+        </p>
+        <button className="btn" disabled title="Se habilitará solo cuando exista una oportunidad real y validada">
+          Autorizar primer canary (no disponible: sin oportunidad)
+        </button>
+        <p className="small muted" style={{ marginTop: 10, marginBottom: 0 }}>
+          Aun con una oportunidad, la escritura real sigue desactivada y sin credencial: nada se
+          ejecuta sin tu autorización explícita.
+        </p>
+      </div>
+
       <CapacidadesCIA />
     </div>
   );
