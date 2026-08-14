@@ -89,6 +89,7 @@ function pedido(
     descuento: conocido(0),
     totalDeEnvio: conocido(0),
     impuestos: conocido(0),
+    reembolso: conocido(0),
     medioDePago: 'flowpayment',
     metodoDeEnvio: 'flat_rate',
     geografia: { pais: 'CL', region: 'CL-ML', ciudad: 'Curicó' },

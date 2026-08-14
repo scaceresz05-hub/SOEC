@@ -94,6 +94,8 @@ interface PedidoWoo {
   shipping?: DireccionWoo;
   line_items?: LineaWoo[];
   shipping_lines?: { method_id?: string; method_title?: string }[];
+  /** Reembolsos que WooCommerce embebe en el pedido. `total` llega NEGATIVO (p. ej. "-1000.00"). */
+  refunds?: { total?: string }[];
 }
 
 /** Estados de WooCommerce que la fuente declara como NO pagados. El resto no se presume. */
@@ -287,6 +289,12 @@ export class WooCommerceRestAdapter implements CommerceSalesReadPort {
       return n === null ? desconocido('NO_MEDIDO') : conocido(n);
     };
 
+    // Reembolso: DEMOSTRABLE sólo si la fuente expone la lista. `total` de cada reembolso es
+    // negativo; se acumula en positivo. Lista ausente ⇒ desconocido, JAMÁS cero por convención.
+    const reembolso: DesconocidoOValor = Array.isArray(p.refunds)
+      ? conocido(p.refunds.reduce((s, r) => s + Math.abs(numeroOpcional(r.total) ?? 0), 0))
+      : desconocido('NO_MEDIDO');
+
     // Identidad del cliente: se usa SÓLO para derivar la huella y se descarta acto seguido.
     const identificador =
       textoOpcional(p.billing?.email) ??
@@ -327,6 +335,7 @@ export class WooCommerceRestAdapter implements CommerceSalesReadPort {
       descuento: monto(p.discount_total),
       totalDeEnvio: monto(p.shipping_total),
       impuestos: monto(p.total_tax),
+      reembolso,
       medioDePago: textoOpcional(p.payment_method),
       metodoDeEnvio: textoOpcional(envio?.method_id),
       // Geografía COMERCIAL: país, región y ciudad. Nada de calle, número ni código postal.

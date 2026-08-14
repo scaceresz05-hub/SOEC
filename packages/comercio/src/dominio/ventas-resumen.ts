@@ -36,8 +36,24 @@ export interface LineaBaseDeVentas {
   readonly fechaMax: string | null;
   readonly moneda: string | null;
 
-  /** Ingreso observado EN ESTA FUENTE. No es el ingreso de la empresa. */
+  /**
+   * VALOR BRUTO de los pedidos observados en la fuente (GROSS_ORDER_VALUE_OBSERVED): suma de TODOS
+   * los pedidos con total conocido, con pago CONFIRMADO o no. No es revenue ni ingreso de la empresa.
+   * Puede incluir pedidos con pago UNKNOWN: es "lo que pasó por la tienda", no "lo que se cobró".
+   */
   readonly ingresoObservadoEnLaFuente: DesconocidoOValor;
+  /**
+   * REVENUE ELEGIBLE (REVENUE_COUNTS_ONLY_ELIGIBLE_ORDERS): suma de los totales de los pedidos con
+   * evidencia de pago CONFIRMED, MENOS los reembolsos DEMOSTRABLES sobre esos mismos pedidos. Un
+   * pedido `processing` sin fecha de pago NO cuenta aquí aunque figure en el bruto. `UNKNOWN` si
+   * ningún pedido confirmado tiene total conocido.
+   */
+  readonly ingresoConfirmado: DesconocidoOValor;
+  /**
+   * Reembolsos DEMOSTRABLES aplicados a pedidos confirmados (ya restados de `ingresoConfirmado`).
+   * `UNKNOWN` si ningún pedido confirmado expone su lista de reembolsos: no se asume 0.
+   */
+  readonly reembolsosConfirmados: DesconocidoOValor;
   readonly ticketPromedio: DesconocidoOValor;
   readonly articulosPorPedido: DesconocidoOValor;
   readonly unidadesVendidas: number;
@@ -125,6 +141,20 @@ export function calcularLineaBaseDeVentas(
   const ingreso = totales.reduce((s, t) => s + t.valor, 0);
   const unidades = pedidos.reduce((s, p) => s + p.lineas.reduce((a, l) => a + l.cantidad, 0), 0);
 
+  // REVENUE ELEGIBLE: sólo pedidos con pago CONFIRMED y total conocido, neto de reembolsos
+  // DEMOSTRABLES. La ausencia de fecha de pago excluye el pedido; la ausencia de lista de
+  // reembolsos deja el reembolso desconocido (no se resta) pero NO inventa un cero.
+  const confirmados = pedidos.filter((p) => p.evidenciaDePago === 'CONFIRMED' && p.total.conocido);
+  const brutoConfirmado = confirmados.reduce(
+    (s, p) => s + (p.total.conocido ? p.total.valor : 0),
+    0,
+  );
+  const reembolsosConocidos = confirmados.reduce(
+    (s, p) => s + (p.reembolso.conocido ? p.reembolso.valor : 0),
+    0,
+  );
+  const algunReembolsoDemostrable = confirmados.some((p) => p.reembolso.conocido);
+
   const huellas = pedidos.map((p) => p.cliente.huella).filter((h): h is string => h !== null);
   const porHuella = new Map<string, number>();
   for (const h of huellas) porHuella.set(h, (porHuella.get(h) ?? 0) + 1);
@@ -157,6 +187,13 @@ export function calcularLineaBaseDeVentas(
     moneda: monedas.size === 1 ? [...monedas][0]! : null,
 
     ingresoObservadoEnLaFuente: totales.length > 0 ? conocido(ingreso) : desconocido('NO_MEDIDO'),
+    ingresoConfirmado:
+      confirmados.length > 0
+        ? conocido(brutoConfirmado - reembolsosConocidos)
+        : desconocido('NO_MEDIDO'),
+    reembolsosConfirmados: algunReembolsoDemostrable
+      ? conocido(reembolsosConocidos)
+      : desconocido('NO_MEDIDO'),
     ticketPromedio:
       totales.length > 0
         ? conocido(Math.round(ingreso / totales.length))

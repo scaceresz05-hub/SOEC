@@ -50,6 +50,9 @@ importers:
       '@soec/cia':
         specifier: workspace:*
         version: link:../../packages/cia
+      '@soec/comercio':
+        specifier: workspace:*
+        version: link:../../packages/comercio
       '@soec/contenido':
         specifier: workspace:*
         version: link:../../packages/contenido
@@ -377,6 +380,16 @@ importers:
       '@soec/plataforma-capacidades':
         specifier: workspace:*
         version: link:../plataforma-capacidades
+    devDependencies:
+      '@soec/event-store':
+        specifier: workspace:*
+        version: link:../event-store
+
+  packages/comercio:
+    dependencies:
+      '@soec/contracts':
+        specifier: workspace:*
+        version: link:../contracts
     devDependencies:
       '@soec/event-store':
         specifier: workspace:*
