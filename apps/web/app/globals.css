@@ -92,6 +92,30 @@ h1.big{font-size:27px;font-weight:750;letter-spacing:-.02em;margin:0}
 .block{font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--ink-faint);font-weight:600;margin:30px 0 12px;display:flex;align-items:center;gap:10px}
 .block::after{content:"";flex:1;height:1px;background:var(--line-soft)}
 
+/* ── Header de negocio (prominente: el negocio pesa más que "SOEC") ───────── */
+.bizhead{display:flex;align-items:center;gap:15px;margin:24px 0 6px;flex-wrap:wrap}
+.bizhead .bhav{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;color:#fff;font-weight:800;font-size:20px;flex:none}
+.bizhead .bhname{font-size:26px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
+.bizhead .bhkind{color:var(--ink-faint);font-size:13.5px;margin-top:2px}
+.bizhead .bhright{margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
+/* ── Tabs de sección del negocio ─────────────────────────────────────────── */
+.tabs{display:flex;gap:3px;overflow-x:auto;border-bottom:1px solid var(--line);margin:14px 0 22px;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{font:inherit;font-size:14px;font-weight:600;color:var(--ink-soft);background:none;border:0;border-bottom:2px solid transparent;padding:10px 14px;cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:7px}
+.tab:hover{color:var(--ink)}
+.tab[aria-selected="true"]{color:var(--brass);border-bottom-color:var(--brass)}
+.tab .tcount{font-size:11px;font-weight:800;background:var(--brass);color:#fff;border-radius:100px;padding:0 6px;min-width:17px;text-align:center}
+
+/* ── Checklist de preparación ────────────────────────────────────────────── */
+.check{display:flex;gap:11px;padding:12px 2px;align-items:flex-start}
+.check+.check{border-top:1px solid var(--line-soft)}
+.check .cmark{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;font-size:13px;font-weight:800;flex:none;margin-top:1px}
+.check .cmark.done{background:var(--ok-wash);color:var(--ok)}
+.check .cmark.todo{background:var(--sunken);color:var(--ink-faint)}
+.check .cmark.partial{background:var(--warn-wash);color:var(--warn)}
+.check .ct{font-weight:600;font-size:14.5px} .check .cs{color:var(--ink-soft);font-size:13px;margin-top:1px}
+
 /* ══════════════════════════════════════════════════════════════════════════
    GRID responsivo
    ══════════════════════════════════════════════════════════════════════════ */

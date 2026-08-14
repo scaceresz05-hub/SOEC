@@ -24,19 +24,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <BusinessSelector />
             <nav className="mainnav" aria-label="Principal">
               <Link href="/">Mis empresas</Link>
-              <Link href="/negocios">Panel</Link>
+              <Link href="/negocios">Panel del negocio</Link>
               <Link href="/autonomia">Nivel de control</Link>
             </nav>
           </div>
         </header>
-        <nav className="subnav" aria-label="Más">
-          <div className="row">
-            <Link href="/objetivos">Objetivos</Link>
-            <Link href="/decisiones">Decisiones</Link>
-            <Link href="/explicaciones">Por qué SOEC piensa esto</Link>
-            <Link href="/onboarding">Poner en marcha</Link>
-          </div>
-        </nav>
         <main>{children}</main>
         <footer className="pie">
           SOEC está en <b>modo seguro</b>: observa tus datos, te explica y te propone. No publica, no
