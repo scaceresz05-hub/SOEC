@@ -3,17 +3,32 @@
  * re-ejecutar no duplica ni sobrescribe. Nunca credenciales hardcodeadas (vienen del entorno).
  */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { makePool, runMigrations } from '@soec/event-store/pg';
+import { runMigrations } from '@soec/event-store/pg';
 import { identityMigrations } from '../../src/pg/migrations';
 import { ejecutarBootstrap } from '../../src/application/bootstrap';
-import { organizacionPorSlug, organizacionesDeUsuario, usuarioPorEmail } from '../../src/pg/repositories';
+import {
+  organizacionPorSlug,
+  organizacionesDeUsuario,
+  usuarioPorEmail,
+} from '../../src/pg/repositories';
+import { makeTestPool, ejecutarDestructivoDePrueba } from '@soec/event-store/test-db';
 
-const pool = makePool(process.env.DATABASE_URL ?? 'postgres://soec:soec@localhost:5544/soec');
-const env = { enabled: true, ownerEmail: 'owner@smileflow.test', ownerPassword: 'Password123', ownerName: 'Owner', orgSlug: 'smileflow-boot', orgName: 'SmileFlow' };
+const pool = makeTestPool();
+const env = {
+  enabled: true,
+  ownerEmail: 'owner@smileflow.test',
+  ownerPassword: 'Password123',
+  ownerName: 'Owner',
+  orgSlug: 'smileflow-boot',
+  orgName: 'SmileFlow',
+};
 
 beforeEach(async () => {
   await runMigrations(pool, identityMigrations);
-  await pool.query('truncate identity_audit_events, identity_invitations, identity_sessions, identity_memberships, identity_organizations, identity_users cascade');
+  await ejecutarDestructivoDePrueba(
+    pool,
+    'truncate identity_audit_events, identity_invitations, identity_sessions, identity_memberships, identity_organizations, identity_users cascade',
+  );
 });
 afterAll(async () => {
   await pool.end();

@@ -4,16 +4,20 @@
  * contraseña (token de un solo uso, invalida sesiones). Requiere PostgreSQL de test.
  */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { makePool, runMigrations } from '@soec/event-store/pg';
+import { runMigrations } from '@soec/event-store/pg';
 import { identityMigrations } from '../../src/pg/migrations';
 import { IdentityService } from '../../src/application/identity-service';
+import { makeTestPool, ejecutarDestructivoDePrueba } from '@soec/event-store/test-db';
 
-const pool = makePool(process.env.DATABASE_URL ?? 'postgres://soec:soec@localhost:5544/soec');
+const pool = makeTestPool();
 const svc = new IdentityService(pool);
 
 beforeEach(async () => {
   await runMigrations(pool, identityMigrations);
-  await pool.query('truncate identity_password_resets, identity_audit_events, identity_invitations, identity_sessions, identity_memberships, identity_organizations, identity_users cascade');
+  await ejecutarDestructivoDePrueba(
+    pool,
+    'truncate identity_password_resets, identity_audit_events, identity_invitations, identity_sessions, identity_memberships, identity_organizations, identity_users cascade',
+  );
 });
 afterAll(async () => {
   await pool.end();

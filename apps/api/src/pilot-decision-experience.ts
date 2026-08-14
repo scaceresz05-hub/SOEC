@@ -1,10 +1,20 @@
 /**
- * Decisión del PRIMER PILOTO REAL — SmileFlow Clinic (F2-PILOT-DEC-01). Registra la
- * configuración estratégica APROBADA por el propietario como un expediente en modo
- * `real_preparado`, y DEMUESTRA que la readiness real permanece BLOQUEADA (falta una
- * credencial real verificada y la cuenta real de LinkedIn). Produce el expediente exacto
- * de las autorizaciones estratégicas y operativas que el propietario aún debe proveer.
- * NINGÚN efecto real ocurre aquí: no se conecta ninguna cuenta, no se publica, no se gasta.
+ * Decisión del PRIMER PILOTO REAL (F2-PILOT-DEC-01). Registra la configuración estratégica
+ * APROBADA por el propietario como un expediente en modo `real_preparado`, y DEMUESTRA que la
+ * readiness real permanece BLOQUEADA. NINGÚN efecto real ocurre aquí: no se conecta ninguna
+ * cuenta, no se publica, no se gasta.
+ *
+ * MULTIEMPRESA (D-2): esta experiencia YA NO fija la organización en código. Recibe:
+ *   - la ORGANIZACIÓN autenticada (clave de tenant) — gobierna el aislamiento de los streams;
+ *   - la CONFIGURACIÓN de decisión de piloto de esa organización (`businessKey`, `expedienteId`,
+ *     nombre comercial), resuelta desde el registro de negocios.
+ *
+ * `businessKey` (p. ej. `smileflow-clinic`) es el identificador del NEGOCIO dentro del dominio
+ * `@soec/piloto`; NO es una clave de tenant y no puede usarse como tal.
+ *
+ * Alcance honesto: el CONTENIDO del expediente (identidad, perfil, presupuesto, criterios) sigue
+ * siendo la configuración registrada de SmileFlow. Una segunda organización requerirá su propia
+ * configuración; hasta entonces, el registro no habilita esta experiencia para nadie más.
  */
 import {
   ActorId,
@@ -18,7 +28,6 @@ import {
   ReadinessService,
   ExpedienteService,
   proponerPoliticaInicial,
-  IDS_SMILEFLOW,
   identidadSmileFlow,
   perfilSmileFlow,
   presupuestoSmileFlow,
@@ -30,10 +39,11 @@ import {
   PROHIBICIONES_SMILEFLOW,
 } from '@soec/piloto';
 
-const ORG = 'smileflow-clinic';
+import type { ConfiguracionDecisionPiloto } from './plataforma';
+
 const A: Attribution = {
   source: 'decision-piloto',
-  purpose: 'registrar la decisión del primer piloto real (SmileFlow)',
+  purpose: 'registrar la decisión del primer piloto real',
   assumptions: [
     'decisión estratégica del propietario; activación real bloqueada; sin efecto/gasto real',
   ],
@@ -47,18 +57,26 @@ export class PilotDecisionExperience {
   private readonly readinessSvc: ReadinessService;
   private readonly expSvc: ExpedienteService;
 
-  constructor(store: EventStore) {
+  /**
+   * @param org  clave de TENANT autenticada (autoridad del aislamiento).
+   * @param cfg  configuración de decisión de piloto de ESA organización (desde el registro).
+   */
+  constructor(
+    store: EventStore,
+    private readonly org: string,
+    private readonly cfg: ConfiguracionDecisionPiloto,
+  ) {
     this.orgSvc = new OrganizacionService(store);
     this.readinessSvc = new ReadinessService(store);
     this.expSvc = new ExpedienteService(store);
   }
   private ctx(): RequestContext {
-    const organizationId = OrganizationId(ORG);
+    const organizationId = OrganizationId(this.org);
     return {
       organizationId,
       actor: ActorId('propietario'),
       scope: { organizationId, permissions: ['events:append', 'events:read'] },
-      correlationId: `dec-${ORG}`,
+      correlationId: `dec-${this.org}`,
     };
   }
   private now(): string {
@@ -68,11 +86,11 @@ export class PilotDecisionExperience {
   /** Registra la decisión aprobada (idempotente). No activa nada: prepara el expediente en real_preparado. */
   async preparar(): Promise<void> {
     const ctx = this.ctx();
-    const org = await this.orgSvc.cargar(ctx, IDS_SMILEFLOW.org);
+    const org = await this.orgSvc.cargar(ctx, this.cfg.businessKey);
     if (org.existe) return;
     await this.orgSvc.registrar(
       ctx,
-      IDS_SMILEFLOW.org,
+      this.cfg.businessKey,
       identidadSmileFlow,
       ['marketing'],
       A,
@@ -82,7 +100,7 @@ export class PilotDecisionExperience {
       if (!d) continue;
       await this.orgSvc.actualizarEtapa(
         ctx,
-        IDS_SMILEFLOW.org,
+        this.cfg.businessKey,
         etapa as never,
         d.estado,
         d.datos,
@@ -92,27 +110,27 @@ export class PilotDecisionExperience {
         this.now(),
       );
     }
-    await this.orgSvc.definirPerfil(ctx, IDS_SMILEFLOW.org, perfilSmileFlow, A, this.now());
+    await this.orgSvc.definirPerfil(ctx, this.cfg.businessKey, perfilSmileFlow, A, this.now());
     await this.orgSvc.definirPresupuesto(
       ctx,
-      IDS_SMILEFLOW.org,
+      this.cfg.businessKey,
       presupuestoSmileFlow,
       A,
       this.now(),
     );
     await this.orgSvc.declararConexion(
       ctx,
-      IDS_SMILEFLOW.org,
+      this.cfg.businessKey,
       conexionLinkedinPendiente,
       A,
       this.now(),
     );
-    await this.orgSvc.aceptarPolitica(ctx, IDS_SMILEFLOW.org, 1, A, this.now());
+    await this.orgSvc.aceptarPolitica(ctx, this.cfg.businessKey, 1, A, this.now());
     await this.expSvc.crear(
       ctx,
-      IDS_SMILEFLOW.expediente,
+      this.cfg.expedienteId,
       {
-        orgRef: IDS_SMILEFLOW.org,
+        orgRef: this.cfg.businessKey,
         departamento: 'marketing',
         entorno: 'real_preparado',
         objetivo:
@@ -129,21 +147,27 @@ export class PilotDecisionExperience {
 
   async estado() {
     const ctx = this.ctx();
-    const org = await this.orgSvc.cargar(ctx, IDS_SMILEFLOW.org);
-    const exp = await this.expSvc.cargar(ctx, IDS_SMILEFLOW.expediente);
-    const evReal = await this.readinessSvc.evaluar(ctx, IDS_SMILEFLOW.org, 'real_preparado', false);
-    const evSandbox = await this.readinessSvc.evaluar(ctx, IDS_SMILEFLOW.org, 'sandbox', false);
+    const org = await this.orgSvc.cargar(ctx, this.cfg.businessKey);
+    const exp = await this.expSvc.cargar(ctx, this.cfg.expedienteId);
+    const evReal = await this.readinessSvc.evaluar(
+      ctx,
+      this.cfg.businessKey,
+      'real_preparado',
+      false,
+    );
+    const evSandbox = await this.readinessSvc.evaluar(ctx, this.cfg.businessKey, 'sandbox', false);
     // El expediente de activación: exactamente qué falta (siempre bloqueado).
     const activacion = await this.expSvc.intentarActivacion(
       ctx,
-      IDS_SMILEFLOW.expediente,
+      this.cfg.expedienteId,
       'real_preparado',
       A,
       this.now(),
     );
     return {
       existe: org.existe,
-      empresa: 'SmileFlow Clinic',
+      organizationId: this.org,
+      empresa: this.cfg.nombreComercial,
       decision: {
         departamento: 'marketing',
         objetivo: exp.objetivo,
@@ -191,7 +215,7 @@ export class PilotDecisionExperience {
   async intentarActivar() {
     return this.expSvc.intentarActivacion(
       this.ctx(),
-      IDS_SMILEFLOW.expediente,
+      this.cfg.expedienteId,
       'real_preparado',
       A,
       this.now(),

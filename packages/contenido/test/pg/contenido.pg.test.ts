@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ConcurrencyError } from '@soec/contracts';
-import { makePool, runMigrations, PgEventStore, PgOutbox } from '@soec/event-store/pg';
+import { runMigrations, PgEventStore, PgOutbox } from '@soec/event-store/pg';
 import { migracionesHastaCapacidades } from '@soec/capacidades/pg';
 import { operacionalMigrations } from '@soec/operacional/pg';
 import { marketingMigrations } from '@soec/marketing/pg';
@@ -32,10 +32,15 @@ import {
   promptPiezaDemo,
 } from '../../src/fixtures';
 import { attr, ctxFor, fechaInicio, now } from '../helpers';
+import { makeTestPool, ejecutarDestructivoDePrueba } from '@soec/event-store/test-db';
 
-const CADENA = [...migracionesHastaCapacidades, ...operacionalMigrations, ...marketingMigrations, ...contenidoMigrations];
-const CONN = process.env.DATABASE_URL ?? 'postgres://soec:soec@localhost:5544/soec';
-const pool = makePool(CONN);
+const CADENA = [
+  ...migracionesHastaCapacidades,
+  ...operacionalMigrations,
+  ...marketingMigrations,
+  ...contenidoMigrations,
+];
+const pool = makeTestPool();
 const store = new PgEventStore(pool);
 const operational = new OperationalService(store, [new AdaptadorSimulado()]);
 const planning = new PlanningService(store, operational);
@@ -55,7 +60,8 @@ afterAll(async () => {
   await pool.end();
 });
 beforeEach(async () => {
-  await pool.query(
+  await ejecutarDestructivoDePrueba(
+    pool,
     `truncate table events, outbox, projection_checkpoints, proj_med_current, proj_mdm_current, proj_ece_current, proj_oi_current,
        proj_capdef_current, proj_capexec_current, proj_policy_current, proj_accion_current, proj_objetivo_current, proj_plan_current,
        proj_brief_current, proj_paquete_current
@@ -71,14 +77,37 @@ async function sembrar(ctx = ctxFor('orgA')) {
   const rp2 = await prompts.registrarVersion(ctx, IDS_CONT.promptAdapt, promptAdaptDemo, attr, now);
   await prompts.publicar(ctx, IDS_CONT.promptAdapt, rp2.version, attr, now);
   await objetivos.registrar(ctx, IDS_MKT_CONT.objetivo, objetivoContenidoDemo, attr, now);
-  const rpol = await policies.registrarVersion(ctx, IDS_MKT_CONT.politica, politicaContenidoDemo, attr, now);
+  const rpol = await policies.registrarVersion(
+    ctx,
+    IDS_MKT_CONT.politica,
+    politicaContenidoDemo,
+    attr,
+    now,
+  );
   await policies.publicar(ctx, IDS_MKT_CONT.politica, rpol.version, attr, now);
-  await planning.generarPlan(ctx, { planId: PLAN, objetivoId: IDS_MKT_CONT.objetivo, policyId: IDS_MKT_CONT.politica, fechaInicio, opts: optsContenidoDemo, attribution: attr, occurredAt: now });
+  await planning.generarPlan(ctx, {
+    planId: PLAN,
+    objetivoId: IDS_MKT_CONT.objetivo,
+    policyId: IDS_MKT_CONT.politica,
+    fechaInicio,
+    opts: optsContenidoDemo,
+    attribution: attr,
+    occurredAt: now,
+  });
   return ctx;
 }
 
 function cmd(actividadId: string) {
-  return { planId: PLAN, actividadId, marcaId: IDS_CONT.marca, promptPiezaId: IDS_CONT.promptPieza, promptAdaptId: IDS_CONT.promptAdapt, ganchosPromocionales: CONT_GANCHOS, attribution: attr, occurredAt: now };
+  return {
+    planId: PLAN,
+    actividadId,
+    marcaId: IDS_CONT.marca,
+    promptPiezaId: IDS_CONT.promptPieza,
+    promptAdaptId: IDS_CONT.promptAdapt,
+    ganchosPromocionales: CONT_GANCHOS,
+    attribution: attr,
+    occurredAt: now,
+  };
 }
 
 describe('Fábrica de contenido sobre PostgreSQL real', () => {
@@ -96,7 +125,13 @@ describe('Fábrica de contenido sobre PostgreSQL real', () => {
     await content.prepararContenidoParaActividad(ctx, cmd(actBlog));
     const e = await planning.ejecutarSiguiente(ctx, PLAN, attr, now);
     expect(e.permitida).toBe(true);
-    const paquete = await content.registrarEjecucion(ctx, `${PLAN}--${e.actividad}`, { permitida: e.permitida, resultado: e.resultado, executionRef: `${PLAN}:${e.actividad}`, attribution: attr, occurredAt: now });
+    const paquete = await content.registrarEjecucion(ctx, `${PLAN}--${e.actividad}`, {
+      permitida: e.permitida,
+      resultado: e.resultado,
+      executionRef: `${PLAN}:${e.actividad}`,
+      attribution: attr,
+      occurredAt: now,
+    });
     expect(paquete.estado).toBe('verificado');
   });
 
@@ -104,7 +139,10 @@ describe('Fábrica de contenido sobre PostgreSQL real', () => {
     const ctx = await sembrar();
     await content.prepararContenidoParaActividad(ctx, cmd(actBlog));
     const outbox = new PgOutbox(pool);
-    const stores = { brief: new PgBriefProjectionStore(pool), paquete: new PgPaqueteProjectionStore(pool) };
+    const stores = {
+      brief: new PgBriefProjectionStore(pool),
+      paquete: new PgPaqueteProjectionStore(pool),
+    };
     const n = await drenarContenido(outbox, stores);
     expect(n).toBeGreaterThan(0);
     expect((await stores.paquete.list('orgA')).length).toBeGreaterThan(0);
@@ -117,7 +155,9 @@ describe('Fábrica de contenido sobre PostgreSQL real', () => {
     const ctx = await sembrar();
     await content.prepararContenidoParaActividad(ctx, cmd(actBlog));
     await expect(
-      store.append(ctx, paqueteStreamId(`${PLAN}--${actBlog}`), 0, [{ type: 'paq.retirado', payload: { motivo: 'x' }, attribution: attr, occurredAt: now }]),
+      store.append(ctx, paqueteStreamId(`${PLAN}--${actBlog}`), 0, [
+        { type: 'paq.retirado', payload: { motivo: 'x' }, attribution: attr, occurredAt: now },
+      ]),
     ).rejects.toBeInstanceOf(ConcurrencyError);
   });
 

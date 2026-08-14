@@ -6,7 +6,9 @@ import { InMemoryEventStore } from '@soec/event-store';
 import { ActorId, OrganizationId, type Attribution, type RequestContext } from '@soec/contracts';
 import { AutonomiaService } from '@soec/autonomia';
 import { KillSwitchService } from '@soec/cia';
-import { G2AService, ORG_REAL } from '../src/autonomia-ads/g2a-service';
+import { G2AService } from '../src/autonomia-ads/g2a-service';
+// La organización ya no es una constante del servicio: es la identidad canónica registrada.
+import { ORG_SMILEFLOW as ORG_REAL } from '../src/plataforma';
 import { IntencionService, intencionId, type IntencionDeCambio } from '../src/autonomia-ads/intencion-cambio';
 import { AprobacionService, AutoaprobacionProhibidaError } from '../src/autonomia-ads/aprobacion-service';
 import { ExecutorGovernado } from '../src/autonomia-ads/executor-governado';

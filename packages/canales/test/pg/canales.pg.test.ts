@@ -1,22 +1,35 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { ConcurrencyError } from '@soec/contracts';
-import { makePool, runMigrations, PgEventStore, PgOutbox } from '@soec/event-store/pg';
+import { runMigrations, PgEventStore, PgOutbox } from '@soec/event-store/pg';
 import { migracionesHastaCapacidades } from '@soec/capacidades/pg';
 import { operacionalMigrations } from '@soec/operacional/pg';
 import { marketingMigrations } from '@soec/marketing/pg';
 import { contenidoMigrations } from '@soec/contenido/pg';
 import { SECRETO_WEBHOOK_DEV, pubStreamId, type WebhookEntrante } from '../../src';
-import { canalesMigrations, PgPublicationProjectionStore, drenarCanales, reconstruirProyeccionesCanales } from '../../src/pg';
+import {
+  canalesMigrations,
+  PgPublicationProjectionStore,
+  drenarCanales,
+  reconstruirProyeccionesCanales,
+} from '../../src/pg';
 import { attr, ctxFor, montar, now, publicarCmd, sembrarPaquete } from '../helpers';
+import { makeTestPool, ejecutarDestructivoDePrueba } from '@soec/event-store/test-db';
 
-const CADENA = [...migracionesHastaCapacidades, ...operacionalMigrations, ...marketingMigrations, ...contenidoMigrations, ...canalesMigrations];
-const CONN = process.env.DATABASE_URL ?? 'postgres://soec:soec@localhost:5544/soec';
-const pool = makePool(CONN);
+const CADENA = [
+  ...migracionesHastaCapacidades,
+  ...operacionalMigrations,
+  ...marketingMigrations,
+  ...contenidoMigrations,
+  ...canalesMigrations,
+];
+const pool = makeTestPool();
 const store = new PgEventStore(pool);
 
 function webhook(externalRef: string, status: string, id: string): WebhookEntrante {
-  const firma = createHmac('sha256', SECRETO_WEBHOOK_DEV).update(JSON.stringify({ tipo: 'post.published', externalId: externalRef, status })).digest('hex');
+  const firma = createHmac('sha256', SECRETO_WEBHOOK_DEV)
+    .update(JSON.stringify({ tipo: 'post.published', externalId: externalRef, status }))
+    .digest('hex');
   return { id, tipo: 'post.published', externalRef, status, firma };
 }
 
@@ -27,7 +40,8 @@ afterAll(async () => {
   await pool.end();
 });
 beforeEach(async () => {
-  await pool.query(
+  await ejecutarDestructivoDePrueba(
+    pool,
     `truncate table events, outbox, projection_checkpoints, proj_med_current, proj_mdm_current, proj_ece_current, proj_oi_current,
        proj_capdef_current, proj_capexec_current, proj_policy_current, proj_accion_current, proj_objetivo_current, proj_plan_current,
        proj_brief_current, proj_paquete_current, proj_publicacion_current
@@ -62,9 +76,19 @@ describe('Plano de canales sobre PostgreSQL real (modo simulado, sin red)', () =
     const ctx = ctxFor();
     const paquete = await sembrarPaquete(m, 'act-blog-0', ctx);
     const pub = await m.publicaciones.publicarCiclo(ctx, publicarCmd(paquete, 'blog', 'simulado'));
-    const w1 = await m.webhooks.procesar(ctx, webhook(pub.externalRef!, 'published', 'wh-x'), attr, now);
+    const w1 = await m.webhooks.procesar(
+      ctx,
+      webhook(pub.externalRef!, 'published', 'wh-x'),
+      attr,
+      now,
+    );
     expect(['aplicado', 'sin_efecto']).toContain(w1.resultado);
-    const dup = await m.webhooks.procesar(ctx, webhook(pub.externalRef!, 'published', 'wh-x'), attr, now);
+    const dup = await m.webhooks.procesar(
+      ctx,
+      webhook(pub.externalRef!, 'published', 'wh-x'),
+      attr,
+      now,
+    );
     expect(dup.resultado).toBe('duplicado');
   });
 
@@ -89,7 +113,9 @@ describe('Plano de canales sobre PostgreSQL real (modo simulado, sin red)', () =
     const paquete = await sembrarPaquete(m, 'act-blog-0', ctx);
     const pub = await m.publicaciones.publicarCiclo(ctx, publicarCmd(paquete, 'blog', 'simulado'));
     await expect(
-      store.append(ctx, pubStreamId(pub.publicationId), 0, [{ type: 'pub.cancelada', payload: { motivo: 'x' }, attribution: attr, occurredAt: now }]),
+      store.append(ctx, pubStreamId(pub.publicationId), 0, [
+        { type: 'pub.cancelada', payload: { motivo: 'x' }, attribution: attr, occurredAt: now },
+      ]),
     ).rejects.toBeInstanceOf(ConcurrencyError);
   });
 
@@ -98,7 +124,9 @@ describe('Plano de canales sobre PostgreSQL real (modo simulado, sin red)', () =
     const ctx = ctxFor();
     const paquete = await sembrarPaquete(m, 'act-blog-0', ctx);
     const pub = await m.publicaciones.publicarCiclo(ctx, publicarCmd(paquete, 'blog', 'simulado'));
-    expect((await m.publicaciones.cargar(ctxFor('otra-org'), pub.publicationId)).existe).toBe(false);
+    expect((await m.publicaciones.cargar(ctxFor('otra-org'), pub.publicationId)).existe).toBe(
+      false,
+    );
     expect(await runMigrations(pool, CADENA)).toEqual([]);
   });
 });

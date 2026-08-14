@@ -7,11 +7,16 @@ function makeApp() {
   return buildApp({ store: new InMemoryEventStore(), intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true });
 }
 const j = (r: { json(): unknown }) => r.json() as never;
+/**
+ * Contexto de organización: desde el endurecimiento multiempresa (D-2/D-4) la experiencia ya no fija
+ * la organización en código; la recibe del contexto autenticado que inyecta el gateway.
+ */
+const H = { 'x-organization-id': 'org-smileflow', 'x-actor-id': 'propietario', 'x-scope': 'events:read,events:append' };
 
 describe('API — Decisión del primer piloto real, SmileFlow (F2-PILOT-DEC-01)', () => {
   it('registra la decisión aprobada en modo real_preparado y mantiene la activación real BLOQUEADA', async () => {
     const app = makeApp();
-    expect((await app.inject({ method: 'POST', url: '/piloto/decision/preparar' })).statusCode).toBe(201);
+    expect((await app.inject({ method: 'POST', url: '/piloto/decision/preparar', headers: H })).statusCode).toBe(201);
 
     const est: {
       existe: boolean;
@@ -21,7 +26,7 @@ describe('API — Decisión del primer piloto real, SmileFlow (F2-PILOT-DEC-01)'
       readinessReal: { resultado: string; activacionRealPermitida: boolean; bloqueos: { codigo: string }[] };
       readinessSandbox: { resultado: string };
       activacion: { permitida: boolean; loQueFaltaOperativo: string[]; loQueFaltaEstrategico: string[] };
-    } = j(await app.inject({ method: 'GET', url: '/piloto/decision/estado' }));
+    } = j(await app.inject({ method: 'GET', url: '/piloto/decision/estado', headers: H }));
 
     expect(est.existe).toBe(true);
     expect(est.empresa).toBe('SmileFlow Clinic');
@@ -43,7 +48,7 @@ describe('API — Decisión del primer piloto real, SmileFlow (F2-PILOT-DEC-01)'
     expect(est.activacion.loQueFaltaEstrategico.some((x) => x.includes('autorización estratégica'))).toBe(true);
 
     // El endpoint de activación devuelve una denegación segura (409).
-    const act = await app.inject({ method: 'POST', url: '/piloto/decision/activar' });
+    const act = await app.inject({ method: 'POST', url: '/piloto/decision/activar', headers: H });
     expect(act.statusCode).toBe(409);
     expect((act.json() as { permitida: boolean }).permitida).toBe(false);
     await app.close();

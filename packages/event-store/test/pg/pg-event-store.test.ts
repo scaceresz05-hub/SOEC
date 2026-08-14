@@ -1,18 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { makePool } from '../../src/pg/pool';
 import { runMigrations, migrations } from '../../src/pg/migrate';
 import { PgEventStore } from '../../src/pg/pg-event-store';
 import { PgOutbox } from '../../src/pg/pg-outbox';
 import { runEventStoreConformance } from '../conformance';
-import {
-  ActorId,
-  type Attribution,
-  OrganizationId,
-  type RequestContext,
-} from '@soec/contracts';
+import { ejecutarDestructivoDePrueba, makeTestPool } from '../../src/pg/test-db';
+import { ActorId, type Attribution, OrganizationId, type RequestContext } from '@soec/contracts';
 
-const CONN = process.env.DATABASE_URL ?? 'postgres://soec:soec@localhost:5544/soec';
-const pool = makePool(CONN);
+const pool = makeTestPool();
 
 beforeAll(async () => {
   await runMigrations(pool);
@@ -23,7 +17,10 @@ afterAll(async () => {
 });
 
 async function truncate(): Promise<void> {
-  await pool.query('truncate table events, outbox, projection_checkpoints restart identity cascade');
+  await ejecutarDestructivoDePrueba(
+    pool,
+    'truncate table events, outbox, projection_checkpoints restart identity cascade',
+  );
 }
 
 // Misma batería de conformidad, ahora contra PostgreSQL real → demuestra sustituibilidad.

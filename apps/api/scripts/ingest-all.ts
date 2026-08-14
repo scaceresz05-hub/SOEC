@@ -22,8 +22,15 @@ import { SchedulerIngesta } from '../src/ingesta/scheduler';
 import { LecturaDirectorRealService } from '../src/real-director/lectura-director-real';
 import { PlanAccionDryRunService } from '../src/autonomia-ads/plan-accion-service';
 import { G2AService } from '../src/autonomia-ads/g2a-service';
+import { ORG_SMILEFLOW, buscarFuente, getBusiness, getRecursoGoogleAds } from '../src/plataforma';
 
-const ORG = 'org-smileflow';
+/**
+ * Organización que ingiere en esta corrida. El script sigue siendo de UNA organización por
+ * ejecución (deuda B-4: no hay todavía un planificador de ingesta multiempresa), pero su cuenta
+ * externa y sus fuentes ya NO son globales: se resuelven del registro de negocios. Una organización
+ * no registrada, o sin fuente declarada, detiene la corrida en vez de heredar la de otra.
+ */
+const ORG = process.env.SOEC_INGESTA_ORG ?? ORG_SMILEFLOW;
 const ARCHIVO_ENV = 'C:/proyectos/SOEC/.env.google-ads';
 
 /** Egress cerrado y tipado para Google Ads: sólo query/customerId (strings) pueden salir. READ ONLY. */
@@ -85,10 +92,22 @@ async function main(): Promise<void> {
     const secretStore = new SecretStoreEnv(process.env);
     const observaciones = new ObservacionService(store, {} as never);
 
+    // ── Configuración registrada de la organización (lanza si no está configurada) ──
+    const negocio = getBusiness(ORG);
+    const fuenteAds = buscarFuente(ORG, 'google-ads');
+    const fuenteGrowth = buscarFuente(ORG, 'smileflow-growth');
+    if (!fuenteAds)
+      throw new Error(`NO_DATA_SOURCE_CONFIGURED: ${ORG} no tiene fuente 'google-ads' registrada`);
+    if (!fuenteGrowth)
+      throw new Error(
+        `NO_DATA_SOURCE_CONFIGURED: ${ORG} no tiene fuente 'smileflow-growth' registrada`,
+      );
+
     // ── Fuente: Google Ads (READ ONLY) ────────────────────────────────────────
-    const loginCustomerId = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID;
-    const customerId = process.env.GOOGLE_ADS_CUSTOMER_ID;
-    if (!loginCustomerId || !customerId) throw new Error('Faltan GOOGLE_ADS_LOGIN_CUSTOMER_ID / GOOGLE_ADS_CUSTOMER_ID');
+    // La cuenta externa proviene del PERFIL de la organización, no de una variable global.
+    const ads = getRecursoGoogleAds(ORG);
+    const loginCustomerId = ads.loginCustomerId;
+    const customerId = ads.customerId;
     const adaptadorAds = new GoogleAdsAdapter({
       secretStore,
       esquemaEgress: ESQUEMA_EGRESS_ADS,
@@ -96,32 +115,55 @@ async function main(): Promise<void> {
         developerToken: 'env:GOOGLE_ADS_DEVELOPER_TOKEN',
         clientId: 'env:GOOGLE_ADS_CLIENT_ID',
         clientSecret: 'env:GOOGLE_ADS_CLIENT_SECRET',
-        refreshToken: 'env:GOOGLE_ADS_REFRESH_TOKEN',
+        // Referencia OPACA declarada por la FUENTE de esta organización (nunca el valor).
+        refreshToken:
+          fuenteAds.credenciales.find((c) => c.nombreLogico === 'google-ads-refresh-token')
+            ?.secretRef ?? 'env:GOOGLE_ADS_REFRESH_TOKEN',
       },
       loginCustomerId,
     });
-    const ingestaAds = new IngestaGoogleAds({ adaptador: adaptadorAds, observaciones, store, org: ORG, customerId });
+    const ingestaAds = new IngestaGoogleAds({
+      adaptador: adaptadorAds,
+      observaciones,
+      store,
+      org: ORG,
+      customerId,
+    });
 
     // ── Fuente: SmileFlow Growth ──────────────────────────────────────────────
     const baseUrl = process.env.SMILEFLOW_M2M_URL;
     if (!baseUrl) throw new Error('Falta SMILEFLOW_M2M_URL');
     const adaptadorGrowth = new SmileFlowGrowthAdapter({
       secretStore,
-      secretRef: 'env:SMILEFLOW_GROWTH_TOKEN',
+      secretRef:
+        fuenteGrowth.credenciales.find((c) => c.nombreLogico === 'smileflow-growth-token')
+          ?.secretRef ?? 'env:SMILEFLOW_GROWTH_TOKEN',
       esquemaEgress: ESQUEMA_EGRESS_GROWTH,
       baseUrl,
     });
-    const ingestaGrowth = new IngestaSmileFlowGrowth({ adaptador: adaptadorGrowth, observaciones, store, org: ORG });
+    const ingestaGrowth = new IngestaSmileFlowGrowth({
+      adaptador: adaptadorGrowth,
+      observaciones,
+      store,
+      org: ORG,
+    });
 
     // ── Scheduler autónomo ────────────────────────────────────────────────────
     const scheduler = new SchedulerIngesta({
       store,
       org: ORG,
       fuentes: [
-        { provider: 'smileflow-growth', ingesta: ingestaGrowth },
-        { provider: 'google-ads', ingesta: ingestaAds },
+        { provider: fuenteGrowth.provider, ingesta: ingestaGrowth },
+        { provider: fuenteAds.provider, ingesta: ingestaAds },
       ],
     });
+    console.log(
+      JSON.stringify({
+        organizacion: negocio.organizationId,
+        negocio: negocio.displayName,
+        fuentes: [fuenteGrowth.sourceId, fuenteAds.sourceId],
+      }),
+    );
 
     const resultado = await scheduler.correrTodo(ctx(ORG), { ahora: new Date().toISOString() });
     console.log(JSON.stringify(resultado, null, 2)); // sin secretos
@@ -131,27 +173,50 @@ async function main(): Promise<void> {
     // Idempotente y fail-closed; envuelto para NO afectar el tick de ingesta si falla.
     try {
       const desde = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(); // ventana de 30 días
-      const rec = await ingestaGrowth.reconciliarDiagnostico(ctx(ORG), { ahora: new Date().toISOString(), since: desde });
+      const rec = await ingestaGrowth.reconciliarDiagnostico(ctx(ORG), {
+        ahora: new Date().toISOString(),
+        since: desde,
+      });
       if (rec.reconciliados > 0) console.log(JSON.stringify({ reconcileGrowth: rec }, null, 2));
     } catch (e) {
-      console.error('reconcile-growth falló (no afecta la ingesta):', e instanceof Error ? e.message : String(e));
+      console.error(
+        'reconcile-growth falló (no afecta la ingesta):',
+        e instanceof Error ? e.message : String(e),
+      );
     }
 
     // Tras ingerir, recalcular la LECTURA DEL DIRECTOR sobre datos REALES (M8→MeasurementService→M9→ResultadoCampania).
     // No debe romper el tick de ingesta: si falla, se registra pero no cambia el código de salida.
     try {
-      const lectura = await new LecturaDirectorRealService(store).recalcular(ORG, new Date().toISOString());
+      const lectura = await new LecturaDirectorRealService(store).recalcular(
+        ORG,
+        new Date().toISOString(),
+      );
       // G1 · Plan de acción en DRY-RUN (sin efecto externo; AUTONOMOUS_REAL apagado).
       const plan = await new PlanAccionDryRunService(store).generar(ORG, new Date().toISOString());
       // G2-A · propuesta gobernada desde datos REALES (crea intención + solicita aprobación SÓLO si hay evidencia).
       const g2a = await new G2AService(store).proponerDesdeReal(ORG, new Date().toISOString());
-      console.log(JSON.stringify({ lecturaDirector: { veredicto: lectura.veredicto }, planAccion: { modo: plan.modo, propuestas: plan.totalPropuestas }, g2a }, null, 2));
+      console.log(
+        JSON.stringify(
+          {
+            lecturaDirector: { veredicto: lectura.veredicto },
+            planAccion: { modo: plan.modo, propuestas: plan.totalPropuestas },
+            g2a,
+          },
+          null,
+          2,
+        ),
+      );
     } catch (e) {
-      console.error('lectura-director/plan-accion falló (no afecta la ingesta):', e instanceof Error ? e.message : String(e));
+      console.error(
+        'lectura-director/plan-accion falló (no afecta la ingesta):',
+        e instanceof Error ? e.message : String(e),
+      );
     }
     // Código de salida = observabilidad del scheduler (el launcher lo propaga a Task Scheduler):
     //   GLOBAL_OK ⇒ 0 · PARTIAL_FAILURE ⇒ 3 (una fuente/consulta falló, el resto SÍ persistió) · TOTAL_FAILURE ⇒ 2
-    process.exitCode = resultado.estado === 'GLOBAL_OK' ? 0 : resultado.estado === 'PARTIAL_FAILURE' ? 3 : 2;
+    process.exitCode =
+      resultado.estado === 'GLOBAL_OK' ? 0 : resultado.estado === 'PARTIAL_FAILURE' ? 3 : 2;
   } finally {
     await pool.end();
   }

@@ -1,42 +1,38 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import './globals.css';
-import { decisiones } from '../lib/soec/consultas';
+import BusinessSelector from '../components/BusinessSelector';
 
 export const metadata = {
   title: 'SOEC — Tu Director de Marketing',
-  description: 'SOEC trabaja por tus objetivos. Tú defines el rumbo y apruebas las decisiones; del resto se ocupa SOEC.',
+  description:
+    'SOEC dirige tus negocios: mira tus datos, te dice cómo va cada uno y qué conviene hacer. Tú decides; del resto se ocupa SOEC.',
 };
 
-export default async function RootLayout({ children }: { children: ReactNode }) {
-  let pendientes = 0;
-  try { pendientes = (await decisiones()).length; } catch { pendientes = 0; }
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="es">
       <body>
         <header className="topbar">
           <div className="inner">
-            <Link href="/" className="brand">
+            <Link href="/" className="brand" aria-label="SOEC — inicio">
               <span className="dot" aria-hidden="true" />
-              <span>SOEC<small>Dirección de Marketing</small></span>
+              <span>
+                SOEC<small>Dirección de Marketing</small>
+              </span>
             </Link>
+            <BusinessSelector />
             <nav className="mainnav" aria-label="Principal">
-              <Link href="/">Inicio</Link>
-              <Link href="/decisiones">Decisiones{pendientes > 0 && <span className="badge">·{pendientes}</span>}</Link>
-              <Link href="/explicaciones">Por qué</Link>
+              <Link href="/">Mis empresas</Link>
+              <Link href="/negocios">Panel del negocio</Link>
+              <Link href="/autonomia">Nivel de control</Link>
             </nav>
           </div>
         </header>
-        <nav className="subnav" aria-label="Configuración">
-          <div className="row">
-            <Link href="/objetivos">Objetivos</Link>
-            <Link href="/autonomia">Autonomía</Link>
-            <Link href="/onboarding">Poner en marcha</Link>
-          </div>
-        </nav>
         <main>{children}</main>
         <footer className="pie">
-          SOEC trabaja en modo simulado: propone y explica; tú decides. Nada se publica, gasta ni ejecuta de forma real.
+          SOEC está en <b>modo seguro</b>: observa tus datos, te explica y te propone. No publica, no
+          gasta ni cambia nada real sin tu aprobación.
         </footer>
       </body>
     </html>

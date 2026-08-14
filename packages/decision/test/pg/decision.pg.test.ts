@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { makePool, runMigrations, PgEventStore, PgOutbox } from '@soec/event-store/pg';
+import { runMigrations, PgEventStore, PgOutbox } from '@soec/event-store/pg';
 import { migracionesHastaCapacidades } from '@soec/capacidades/pg';
 import { operacionalMigrations } from '@soec/operacional/pg';
 import { marketingMigrations } from '@soec/marketing/pg';
@@ -16,6 +16,7 @@ import {
   reconstruirProyeccionDecision,
 } from '../../src/pg';
 import { attr, ctxFor, now, propuestaReal } from '../helpers';
+import { makeTestPool, ejecutarDestructivoDePrueba } from '@soec/event-store/test-db';
 
 const CADENA = [
   ...migracionesHastaCapacidades,
@@ -28,8 +29,7 @@ const CADENA = [
   ...pilotoMigrations,
   ...decisionMigrations,
 ];
-const CONN = process.env.DATABASE_URL ?? 'postgres://soec:soec@localhost:5544/soec';
-const pool = makePool(CONN);
+const pool = makeTestPool();
 const store = new PgEventStore(pool);
 const DEP = 'marketing';
 
@@ -40,7 +40,8 @@ afterAll(async () => {
   await pool.end();
 });
 beforeEach(async () => {
-  await pool.query(
+  await ejecutarDestructivoDePrueba(
+    pool,
     `truncate table events, outbox, projection_checkpoints, proj_objetivo_decision_current restart identity cascade`,
   );
 });

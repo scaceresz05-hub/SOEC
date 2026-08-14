@@ -8,7 +8,8 @@ import { InMemoryEventStore } from '@soec/event-store';
 import { ActorId, OrganizationId, type Attribution, type EventStore, type RequestContext } from '@soec/contracts';
 import { ObservacionService, type EntradaObservacionReal } from '@soec/motor-medicion';
 import { adsSnapshotStreamId, EVENTO_ADS_SNAPSHOT } from '../src/ingesta/ingesta-google-ads-service';
-import { LecturaDirectorRealService, ORG_REAL } from '../src/real-director/lectura-director-real';
+import { LecturaDirectorRealService } from '../src/real-director/lectura-director-real';
+import { ORG_SMILEFLOW as ORG_REAL } from '../src/plataforma';
 
 const AHORA = '2026-08-11T12:00:00.000Z';
 const ATR: Attribution = { source: 't', purpose: 't', assumptions: [], claimType: 'observational', regime: 'empirical', uncertainty: 'baja' };

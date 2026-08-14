@@ -1,22 +1,35 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ConcurrencyError } from '@soec/contracts';
-import { makePool, runMigrations, PgEventStore, PgOutbox } from '@soec/event-store/pg';
+import { runMigrations, PgEventStore, PgOutbox } from '@soec/event-store/pg';
 import { MedService, MdmService } from '@soec/models';
 import { migracionesHastaEce } from '@soec/ece/pg';
 import { EceBuildService, EceQueryService } from '@soec/ece';
-import { MecanismoDeterministico, MecanismoSimuladoIA, OperacionesService, OperacionesQueryService } from '../../src';
+import {
+  MecanismoDeterministico,
+  MecanismoSimuladoIA,
+  OperacionesService,
+  OperacionesQueryService,
+} from '../../src';
 import { oiStreamId } from '../../src/domain/aggregate';
-import { oiMigrations, PgOiProjectionStore, drenarOperaciones, reconstruirProyeccionesOi } from '../../src/pg';
+import {
+  oiMigrations,
+  PgOiProjectionStore,
+  drenarOperaciones,
+  reconstruirProyeccionesOi,
+} from '../../src/pg';
 import { attr, ctxFor } from '../helpers';
+import { makeTestPool, ejecutarDestructivoDePrueba } from '@soec/event-store/test-db';
 
-const CONN = process.env.DATABASE_URL ?? 'postgres://soec:soec@localhost:5544/soec';
-const pool = makePool(CONN);
+const pool = makeTestPool();
 const store = new PgEventStore(pool);
 const med = new MedService(store);
 const mdm = new MdmService(store);
 const eceBuild = new EceBuildService(store, med, mdm);
 const eceQuery = new EceQueryService(store, med, mdm);
-const op = new OperacionesService(store, eceQuery, [new MecanismoDeterministico(), new MecanismoSimuladoIA()]);
+const op = new OperacionesService(store, eceQuery, [
+  new MecanismoDeterministico(),
+  new MecanismoSimuladoIA(),
+]);
 const opQuery = new OperacionesQueryService(store);
 const cmd = { attribution: attr, occurredAt: '2026-03-01T00:00:00.000Z' };
 const ambito = { proposito: 'p', representa: 'r', excluye: 'x', supuestos: [] };
@@ -29,21 +42,55 @@ afterAll(async () => {
   await pool.end();
 });
 beforeEach(async () => {
-  await pool.query(
+  await ejecutarDestructivoDePrueba(
+    pool,
     'truncate table events, outbox, projection_checkpoints, proj_med_current, proj_mdm_current, proj_ece_current, proj_oi_current restart identity cascade',
   );
 });
 
 async function eceConContradiccion(ctx = ctxFor('orgA')) {
   await med.crear(ctx, { instanceId: 'm1', ambito, vigencia, ...cmd });
-  await med.emitirAfirmacion(ctx, { instanceId: 'm1', afirmacionId: 'a1', enunciado: 'x', dimension: 'hace', incertidumbre: 'media', ...cmd });
-  await med.incorporarEvidencia(ctx, { instanceId: 'm1', evidenciaId: 'a1-si', afirmacionId: 'a1', relacion: 'sostiene', procedencia: 'A', contenido: 'c', ...cmd });
-  await med.incorporarEvidencia(ctx, { instanceId: 'm1', evidenciaId: 'a1-no', afirmacionId: 'a1', relacion: 'debilita', procedencia: 'B', contenido: 'c', ...cmd });
+  await med.emitirAfirmacion(ctx, {
+    instanceId: 'm1',
+    afirmacionId: 'a1',
+    enunciado: 'x',
+    dimension: 'hace',
+    incertidumbre: 'media',
+    ...cmd,
+  });
+  await med.incorporarEvidencia(ctx, {
+    instanceId: 'm1',
+    evidenciaId: 'a1-si',
+    afirmacionId: 'a1',
+    relacion: 'sostiene',
+    procedencia: 'A',
+    contenido: 'c',
+    ...cmd,
+  });
+  await med.incorporarEvidencia(ctx, {
+    instanceId: 'm1',
+    evidenciaId: 'a1-no',
+    afirmacionId: 'a1',
+    relacion: 'debilita',
+    procedencia: 'B',
+    contenido: 'c',
+    ...cmd,
+  });
   await mdm.crear(ctx, { instanceId: 'w1', ambito, vigencia, ...cmd });
-  await eceBuild.construir(ctx, { eceId: 'ece1', medInstanceId: 'm1', mdmInstanceId: 'w1', ...cmd });
+  await eceBuild.construir(ctx, {
+    eceId: 'ece1',
+    medInstanceId: 'm1',
+    mdmInstanceId: 'w1',
+    ...cmd,
+  });
   return ctx;
 }
-const sol = (operacion: 'detectar' | 'orientar') => ({ operacion, eceId: 'ece1', proposito: `p-${operacion}`, ...cmd });
+const sol = (operacion: 'detectar' | 'orientar') => ({
+  operacion,
+  eceId: 'ece1',
+  proposito: `p-${operacion}`,
+  ...cmd,
+});
 
 describe('Operaciones sobre PostgreSQL real', () => {
   it('ejecuta, persiste y relee un producto', async () => {
@@ -82,10 +129,23 @@ describe('Operaciones sobre PostgreSQL real', () => {
   it('no retroyección: el producto histórico no se recalcula al cambiar el ECE', async () => {
     const ctx = await eceConContradiccion();
     const r = await op.ejecutar(ctx, 'x1', sol('detectar'));
-    const nOriginal = r.producto.operacion === 'detectar' ? r.producto.deteccion.senales.length : -1;
+    const nOriginal =
+      r.producto.operacion === 'detectar' ? r.producto.deteccion.senales.length : -1;
     // Cambia el ECE después.
-    await med.emitirAfirmacion(ctx, { instanceId: 'm1', afirmacionId: 'a2', enunciado: 'y', dimension: 'hace', incertidumbre: 'media', ...cmd });
-    await eceBuild.construir(ctx, { eceId: 'ece1', medInstanceId: 'm1', mdmInstanceId: 'w1', ...cmd });
+    await med.emitirAfirmacion(ctx, {
+      instanceId: 'm1',
+      afirmacionId: 'a2',
+      enunciado: 'y',
+      dimension: 'hace',
+      incertidumbre: 'media',
+      ...cmd,
+    });
+    await eceBuild.construir(ctx, {
+      eceId: 'ece1',
+      medInstanceId: 'm1',
+      mdmInstanceId: 'w1',
+      ...cmd,
+    });
     const prod = await opQuery.producto(ctx, 'x1');
     expect(prod?.operacion === 'detectar' && prod.deteccion.senales.length).toBe(nOriginal);
   });
