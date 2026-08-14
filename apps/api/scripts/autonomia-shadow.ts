@@ -10,7 +10,12 @@
  */
 import { ActorId, OrganizationId, type Attribution, type RequestContext } from '@soec/contracts';
 import { makePool, PgEventStore, runMigrations } from '@soec/event-store/pg';
-import { INTERRUPTORES_TODOS_ON, evaluarElegibilidadMandato } from '@soec/autonomia';
+import {
+  INTERRUPTORES_TODOS_ON,
+  ejecutarCicloCertificacion,
+  evaluarElegibilidadMandato,
+  type AccionPropuesta,
+} from '@soec/autonomia';
 import { construirMandatoConservador, evaluarSombraAds, type Termino } from '../src/autonomia/shadow-ads';
 import { ORG_SMILEFLOW } from '../src/plataforma';
 import {
@@ -104,7 +109,41 @@ async function main(): Promise<void> {
     dentalink_agenda: sombra.evaluacionesTermino.find((e) => e.termino.includes('dentalink'))?.accion ?? 'N/A',
     AUTONOMOUS_REAL: false,
   };
+  console.log('\n=== REAL_COMMERCIAL_SHADOW (decisión con datos reales, 0 efecto externo) ===');
   console.log(JSON.stringify(informe, null, 2));
+
+  // ── CERTIFICATION_SIMULATION — separada, ficticia, jamás una decisión comercial ────────────────
+  if (process.argv.includes('--certificacion')) {
+    const accionFicticia: AccionPropuesta = {
+      actionId: 'CERT:FIXTURE:termino-ficticio-irrelevante',
+      organizationId: ORG,
+      businessKey: negocio.businessKey,
+      externalAccountId: getRecursoGoogleAds(ORG).customerId,
+      targetId: getRecursoGoogleAds(ORG).customerId,
+      tipo: 'SEARCH_TERM_EXCLUDE',
+      desiredState: 'excluded',
+      evidencia: { muestra: 999, ventanaHoras: 168 },
+      credentialRefOwnerOrg: ORG,
+      rollbackDisponible: true,
+      aprobacion: null,
+      mandateVersionVista: mandato.version,
+    };
+    const ciclo = ejecutarCicloCertificacion(
+      accionFicticia,
+      { mandato, interruptores: INTERRUPTORES_TODOS_ON, ahora, gastoDiario: 0, gastoMensual: 0, gastoDiarioPrevio: 0, cambiosUltimaHora: 0, cambiosHoy: 0, cambiosCampaniaHoy: 0, enCooldown: false, accionesYaEjecutadas: [] },
+      'EXITO',
+      { muestra: 200, muestraMinima: 30, mejora: true },
+    );
+    console.log('\n=== CERTIFICATION_SIMULATION · SIMULATION_ONLY — NO ES UNA DECISIÓN COMERCIAL ===');
+    console.log(JSON.stringify({
+      LIFECYCLE: ciclo.estados,
+      DECISION_GATE: ciclo.decisionGate,
+      READ_BACK: ciclo.readBackVerificado,
+      MEASUREMENT: ciclo.medicion,
+      EXTERNAL_MUTATIONS: ciclo.mutacionesExternas,
+      BLIND_RETRY: ciclo.reintentoCiego,
+    }, null, 2));
+  }
 
   if (PERSISTIR) {
     const pool = makePool();

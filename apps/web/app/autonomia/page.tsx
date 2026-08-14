@@ -85,6 +85,33 @@ export default function Autonomia() {
         </p>
       </div>
 
+      <div className="section" style={{ maxWidth: 720 }}>Qué podría y qué no (cuando un negocio es elegible)</div>
+      <div className="card" style={{ maxWidth: 720 }}>
+        <p className="small muted" style={{ marginTop: 0 }}>
+          «Preparado técnicamente» no significa «puede hacer cualquier cambio». Aun elegible, SOEC solo
+          toca lo reversible y de bajo riesgo dentro de tu mandato.
+        </p>
+        <div className="grid g-2" style={{ marginTop: 6 }}>
+          <div>
+            <div className="mlabel" style={{ marginBottom: 6, color: 'var(--ok)' }}>Capacidades disponibles</div>
+            <ul className="s" style={{ margin: 0, paddingLeft: 18 }}>
+              <li>Acciones reversibles dentro del mandato (p. ej. excluir una búsqueda irrelevante, pausar un anuncio)</li>
+            </ul>
+          </div>
+          <div>
+            <div className="mlabel" style={{ marginBottom: 6, color: 'var(--warn)' }}>Todavía bloqueadas</div>
+            <ul className="s" style={{ margin: 0, paddingLeft: 18 }}>
+              <li>Aumentar el presupuesto</li>
+              <li>Acciones financieras sin límites o sin economía conocida</li>
+              <li>Cualquier acción fuera del mandato</li>
+            </ul>
+          </div>
+        </div>
+        <p style={{ marginTop: 12, marginBottom: 0, fontWeight: 750 }}>
+          <span className="badge warn"><span className="bdot" aria-hidden="true" /> Cambios reales: DESACTIVADOS</span>
+        </p>
+      </div>
+
       <CapacidadesCIA />
     </div>
   );
