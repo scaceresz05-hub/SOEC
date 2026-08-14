@@ -10,6 +10,7 @@
  * aún es insuficiente: ahí hay datos y aquí no hay de dónde sacarlos. Semánticas distintas,
  * estados distintos.
  */
+import type { LineaBaseDeVentas } from '@soec/comercio';
 import {
   ESTADOS_CON_LECTURA,
   type FuenteRegistrada,
@@ -65,6 +66,8 @@ export function evaluarFundamentos(
   fuentes: readonly FuenteRegistrada[],
   perfilComercial: PerfilComercial | null,
   tienePoliticaDeEvaluacion: boolean,
+  /** Línea base de ventas OBSERVADA, si ya existe. Lo medido pesa más que lo declarado. */
+  ventas?: LineaBaseDeVentas | null,
 ): EstadoFundamentos {
   const porTipo = (t: FuenteRegistrada['tipo']): FuenteRegistrada | undefined =>
     fuentes.find((f) => f.tipo === t);
@@ -96,9 +99,13 @@ export function evaluarFundamentos(
     });
   }
 
-  const ventas = porTipo('SALES');
-  if (conLectura(ventas)) {
-    presentes.push('ventas legibles');
+  const fuenteVentas = porTipo('SALES');
+  if (conLectura(fuenteVentas)) {
+    presentes.push(
+      ventas
+        ? `ventas legibles: ${ventas.pedidos} pedidos observados en la fuente`
+        : 'ventas legibles',
+    );
   } else {
     motivos.push({
       codigo: 'SALES_NOT_CONNECTED',
@@ -108,18 +115,25 @@ export function evaluarFundamentos(
     });
   }
 
-  const economiaConocida =
-    perfilComercial !== null &&
-    (perfilComercial.economia.ticketPromedio.conocido ||
-      perfilComercial.economia.margenBruto.conocido);
-  if (economiaConocida) {
-    presentes.push('economía unitaria conocida');
+  // La economía se conoce cuando se puede decidir INVERSIÓN, y para eso el ticket no basta: hace
+  // falta el margen. Un ticket observado con margen desconocido sigue siendo insuficiente.
+  const ticketObservado = ventas?.ticketPromedio.conocido === true;
+  const margenConocido =
+    perfilComercial?.economia.margenBruto.conocido === true ||
+    ventas?.margenBruto.conocido === true;
+
+  if (ticketObservado) {
+    presentes.push('ticket promedio observado desde ventas reales');
+  }
+  if (margenConocido) {
+    presentes.push('margen conocido');
   } else {
     motivos.push({
       codigo: 'ECONOMICS_UNKNOWN',
-      explicacion:
-        'ticket, margen y costos son desconocidos (no cero): sin ellos ninguna inversión publicitaria es evaluable',
-      resuelveCon: 'historial de ventas y costos desde una fuente autorizada',
+      explicacion: ticketObservado
+        ? 'el ticket ya es observable, pero el COSTO y el MARGEN siguen desconocidos (no cero): sin margen no se puede decidir cuánto vale captar un pedido'
+        : 'ticket, margen y costos son desconocidos (no cero): sin ellos ninguna inversión publicitaria es evaluable',
+      resuelveCon: 'costos por producto desde una fuente autorizada',
     });
   }
 

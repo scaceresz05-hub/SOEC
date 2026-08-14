@@ -216,10 +216,13 @@ describe('C Y P · perfil, fuentes y credenciales propias', () => {
     expect(fuentes.length).toBeGreaterThan(0);
     expect(fuentes.every((f) => f.organizationId === ORG_CYP)).toBe(true);
     expect(fuentes.every((f) => f.soloLectura === true)).toBe(true);
-    // Ninguna fuente de C Y P usa credenciales: lo observado es público o está sin conectar.
-    expect(fuentes.every((f) => f.estado !== 'CONNECTED_READ_ONLY')).toBe(true);
+    // La única fuente con credenciales es la de ventas, conectada en SOLO LECTURA (FASE 7).
+    const conCredencial = fuentes.filter((f) => f.estado === 'CONNECTED_READ_ONLY');
+    expect(conCredencial.map((f) => f.tipo)).toEqual(['SALES']);
     // Toda fuente que NO se está leyendo explica qué falta (nunca aparece como "cero datos").
-    const sinLectura = fuentes.filter((f) => f.estado !== 'OBSERVED');
+    const sinLectura = fuentes.filter(
+      (f) => f.estado !== 'OBSERVED' && f.estado !== 'CONNECTED_READ_ONLY',
+    );
     expect(sinLectura.length).toBeGreaterThan(0);
     expect(sinLectura.every((f) => f.faltantes.length > 0)).toBe(true);
     // Cubre el inventario pedido.
@@ -372,8 +375,11 @@ describe('C Y P · superficie HTTP de incorporación', () => {
     expect(c.estado).toBe('SOURCES_PARTIAL');
     expect(c.perfilDeEvaluacion.configurado).toBe(false);
     expect(c.perfilDeEvaluacion.motivo).toBe('BUSINESS_PROFILE_NOT_CONFIGURED');
-    expect(c.resumenFuentes.conectadas).toBe(0);
-    expect(c.fuentes.every((f) => f.estado !== 'CONNECTED_READ_ONLY')).toBe(true);
+    // Tener ventas conectadas NO equivale a tener política de evaluación: son cosas distintas.
+    expect(c.resumenFuentes.conectadas).toBe(1);
+    expect(c.fuentes.filter((f) => f.estado === 'CONNECTED_READ_ONLY').map((f) => f.tipo)).toEqual([
+      'SALES',
+    ]);
     expect(c.datosHumanosPendientes.length).toBeGreaterThan(5);
     sinRastroDeSmileFlow(c);
   });

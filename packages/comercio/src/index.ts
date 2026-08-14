@@ -18,5 +18,8 @@ export * from './dominio/pedido';
 export * from './dominio/embudo';
 export * from './dominio/calidad';
 export * from './dominio/snapshot';
+export * from './dominio/venta';
+export * from './dominio/ventas-resumen';
 export * from './puertos';
 export * from './app/catalogo-service';
+export * from './app/ventas-service';

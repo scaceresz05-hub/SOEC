@@ -13,7 +13,11 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { ActorId, OrganizationId, type EventStore, type RequestContext } from '@soec/contracts';
-import { CatalogoComercioService, embudoNoInstrumentado } from '@soec/comercio';
+import {
+  CatalogoComercioService,
+  VentasComercioService,
+  embudoNoInstrumentado,
+} from '@soec/comercio';
 import { contextoDe } from './superficie-auth';
 import { estadoDeposito } from './plataforma/deposito-secretos';
 import {
@@ -161,18 +165,61 @@ export function registerPlataformaRoutes(app: FastifyInstance, store?: EventStor
    * `puedeRecomendarInversionPublicitaria` es del tipo literal `false`.
    */
   app.get('/plataforma/fundamentos', async (req, reply) => {
-    const { org } = ctxDe(req);
+    const { ctx, org } = ctxDe(req);
     const negocio = getBusiness(org);
+    const fuenteVentas = buscarFuentes(org).find((f) => f.tipo === 'SALES');
+    const ventas =
+      store && fuenteVentas
+        ? await new VentasComercioService(store).ultimaLineaBase(ctx, fuenteVentas.provider)
+        : null;
     const fundamentos = evaluarFundamentos(
       negocio,
       buscarFuentes(org),
       buscarPerfilComercial(org),
       buscarProfile(org) !== null,
+      ventas,
     );
     return reply.send({
       ...fundamentos,
       // El embudo de comercio, hoy sin instrumentar. Ningún paso reporta «0 eventos».
       embudo: embudoNoInstrumentado(org),
+    });
+  });
+
+  /**
+   * VENTAS OBSERVADAS EN LA FUENTE. Deliberadamente NO se llama «ventas de la empresa»: mientras
+   * existan canales sin instrumentar, esta fuente no es el 100% del negocio y el campo
+   * `coberturaDelNegocio` lo dice. Sin observación previa responde `observado: false`, nunca ceros.
+   */
+  app.get('/plataforma/ventas', async (req, reply) => {
+    const { ctx, org } = ctxDe(req);
+    getBusiness(org);
+    const fuente = buscarFuentes(org).find((f) => f.tipo === 'SALES');
+    if (!store || !fuente) {
+      return reply.send({
+        organizationId: org,
+        observado: false,
+        motivo: fuente ? 'SIN_ALMACEN_DE_EVENTOS' : 'SALES_SOURCE_NOT_REGISTERED',
+      });
+    }
+    const lineaBase = await new VentasComercioService(store).ultimaLineaBase(ctx, fuente.provider);
+    if (!lineaBase) {
+      return reply.send({
+        organizationId: org,
+        observado: false,
+        source: fuente.provider,
+        estadoFuente: fuente.estado,
+        motivo:
+          fuente.estado === 'CREDENTIALS_REQUIRED'
+            ? 'SALES_PENDING_CREDENTIALS'
+            : 'VENTAS_AUN_NO_OBSERVADAS',
+      });
+    }
+    return reply.send({
+      organizationId: org,
+      observado: true,
+      estadoFuente: fuente.estado,
+      lineaBase,
     });
   });
 

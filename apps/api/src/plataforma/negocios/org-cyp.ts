@@ -101,7 +101,7 @@ export const CONFIGURACION_ORG_CYP: ConfiguracionOrganizacion = {
     decisionPiloto: null,
     datosHumanosPendientes: [
       'RUT / identificación tributaria',
-      'credenciales de lectura de pedidos de WooCommerce (ventas)',
+      'costos por producto (sin ellos no hay margen, ni beneficio, ni decisión de inversión)',
       'Google Ads: customer_id y login_customer_id (si hay cuenta manager)',
       'GA4: property_id (hoy no hay analítica instalada)',
       'Merchant Center: merchant_id',
@@ -174,14 +174,14 @@ export const CONFIGURACION_ORG_CYP: ConfiguracionOrganizacion = {
       'merchant_id',
       'feed de productos (el catálogo carece de SKU y marca)',
     ]),
-    // Ventas: la API privada de pedidos EXIGE dos credenciales, declaradas por referencia opaca.
-    // El estado sigue siendo CREDENTIALS_REQUIRED: declarar la exigencia no es tenerlas depositadas.
+    // Ventas: API privada de pedidos, verificada en solo lectura (2026-08-14). Las credenciales
+    // viven en el depósito local de ESTA organización; aquí sólo constan sus referencias opacas.
     fuente(
       'src-cyp-ventas',
       'woocommerce-rest-api',
       'SALES',
-      'CREDENTIALS_REQUIRED',
-      ['depositar consumer key y consumer secret de solo lectura en el depósito local de org-cyp'],
+      'CONNECTED_READ_ONLY',
+      [],
       CREDENCIALES_WOO_CYP,
     ),
     fuente('src-cyp-pagos', 'pagos', 'PAYMENTS', 'CREDENTIALS_REQUIRED', [

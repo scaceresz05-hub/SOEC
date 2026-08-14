@@ -69,6 +69,15 @@ const ESTADO_NEGOCIO: Record<string, { texto: string; cls: string }> = {
 /** Etiqueta humana del estado de una fuente. «Pendiente» ╪ «cero». */
 const ESTADO_FUENTE = ETIQUETA_ESTADO_FUENTE;
 
+/**
+ * Dibuja un valor que puede ser desconocido. NUNCA lo convierte en 0: si no se conoce, lo dice.
+ * Es la regla visual que separa «no medido» de «medido y dio cero».
+ */
+function formatoValor(v: Desconocible, moneda: string | null): string {
+  if (!v.conocido || v.valor === null) return 'desconocido';
+  return `${v.valor.toLocaleString('es-CL')}${moneda ? ` ${moneda}` : ''}`;
+}
+
 const VEREDICTO_FUNDAMENTOS: Record<string, string> = {
   FOUNDATION_REQUIRED: 'Faltan cimientos',
   OBSERVABLE_SIN_POLITICA: 'Observable, sin criterios',
@@ -91,6 +100,57 @@ interface ResumenCatalogoVista {
   enStock: number;
   sinStock: number;
   disponibilidadDesconocida: number;
+}
+
+/** Valor que puede estar legítimamente sin conocer. La UI NUNCA lo dibuja como 0. */
+interface Desconocible {
+  conocido: boolean;
+  motivo?: string;
+  valor: number | null;
+}
+
+interface AgrupadoVista {
+  clave: string;
+  pedidos: number;
+  unidades: number;
+  ingreso: number;
+}
+
+interface LineaBaseVentas {
+  pedidos: number;
+  pedidosConEvidenciaDePago: number;
+  pedidosSinEvidenciaDePago: number;
+  fechaMin: string | null;
+  fechaMax: string | null;
+  moneda: string | null;
+  ingresoObservadoEnLaFuente: Desconocible;
+  ticketPromedio: Desconocible;
+  articulosPorPedido: Desconocible;
+  unidadesVendidas: number;
+  clientesUnicosSeudonimos: number;
+  clientesRecurrentes: number;
+  tasaDeRecompra: Desconocible;
+  estados: { clave: string; n: number }[];
+  mediosDePago: { clave: string; n: number }[];
+  metodosDeEnvio: { clave: string; n: number }[];
+  porMes: AgrupadoVista[];
+  porRegion: AgrupadoVista[];
+  porProducto: AgrupadoVista[];
+  concentracionTop5: number | null;
+  margenBruto: Desconocible;
+  beneficio: Desconocible;
+  cac: Desconocible;
+  roas: Desconocible;
+  ingresoAtribuido: Desconocible;
+  ventasFueraDeLaFuente: Desconocible;
+  coberturaDelNegocio: string;
+}
+
+interface VentasVista {
+  observado: boolean;
+  motivo?: string;
+  estadoFuente?: string;
+  lineaBase?: LineaBaseVentas;
 }
 
 interface CatalogoVista {
@@ -129,6 +189,7 @@ export default function Negocios(): React.ReactElement {
   const [detalle, setDetalle] = useState<DetalleNegocio | null>(null);
   const [fundamentos, setFundamentos] = useState<Fundamentos | null>(null);
   const [catalogo, setCatalogo] = useState<CatalogoVista | null>(null);
+  const [ventas, setVentas] = useState<VentasVista | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
 
   useEffect(() => {
@@ -192,6 +253,14 @@ export default function Negocios(): React.ReactElement {
         setCatalogo(r.ok ? ((await r.json()) as CatalogoVista) : null);
       } catch {
         setCatalogo(null);
+      }
+    })();
+    (async () => {
+      try {
+        const r = await fetch('/api/plataforma/ventas', { cache: 'no-store', headers: h });
+        setVentas(r.ok ? ((await r.json()) as VentasVista) : null);
+      } catch {
+        setVentas(null);
       }
     })();
   }, [org]);
@@ -323,6 +392,112 @@ export default function Negocios(): React.ReactElement {
                   Medición de embudo: {fundamentos.embudo.pasos.length} pasos sin instrumentar. Cero
                   eventos observados no es cero eventos ocurridos.
                 </p>
+              </div>
+            </>
+          )}
+
+          {ventas && (
+            <>
+              <h3 className="block">Ventas observadas en WooCommerce</h3>
+              <div className="card" style={{ padding: '8px 16px', marginBottom: 14 }}>
+                {!ventas.observado || !ventas.lineaBase ? (
+                  <p className="s muted" style={{ margin: '6px 0' }}>
+                    {ventas.motivo === 'SALES_PENDING_CREDENTIALS'
+                      ? 'Ventas: requiere credenciales. No es que no haya ventas: es que SOEC todavía no puede leerlas.'
+                      : `Ventas todavía no observadas (${ventas.motivo ?? 'sin observación'}).`}
+                  </p>
+                ) : (
+                  <>
+                    <p className="s muted" style={{ margin: '6px 0' }}>
+                      Esto es lo observado <b>en la tienda WooCommerce</b>, no el total de la
+                      empresa: la cobertura de esta fuente es{' '}
+                      <b>{ventas.lineaBase.coberturaDelNegocio}</b> y las ventas por WhatsApp,
+                      transferencia o mostrador siguen siendo desconocidas.
+                    </p>
+                    <p className="s" style={{ margin: '6px 0' }}>
+                      <b>{ventas.lineaBase.pedidos}</b> pedidos ·{' '}
+                      {formatoValor(
+                        ventas.lineaBase.ingresoObservadoEnLaFuente,
+                        ventas.lineaBase.moneda,
+                      )}{' '}
+                      observados · ticket{' '}
+                      {formatoValor(ventas.lineaBase.ticketPromedio, ventas.lineaBase.moneda)} ·{' '}
+                      {formatoValor(ventas.lineaBase.articulosPorPedido, null)} artículos/pedido
+                    </p>
+                    <p className="s" style={{ margin: '6px 0' }}>
+                      Período: {ventas.lineaBase.fechaMin?.slice(0, 10) ?? '—'} a{' '}
+                      {ventas.lineaBase.fechaMax?.slice(0, 10) ?? '—'} ·{' '}
+                      <b>{ventas.lineaBase.unidadesVendidas}</b> unidades · pago confirmado en{' '}
+                      <b>{ventas.lineaBase.pedidosConEvidenciaDePago}</b> de{' '}
+                      {ventas.lineaBase.pedidos}
+                    </p>
+                    <p className="s" style={{ margin: '6px 0' }}>
+                      Clientes observados (seudónimos):{' '}
+                      <b>{ventas.lineaBase.clientesUnicosSeudonimos}</b> · recurrentes:{' '}
+                      <b>{ventas.lineaBase.clientesRecurrentes}</b>
+                      {ventas.lineaBase.concentracionTop5 !== null && (
+                        <>
+                          {' · '}los 5 productos mayores concentran{' '}
+                          <b>{Math.round(ventas.lineaBase.concentracionTop5 * 100)}%</b> del ingreso
+                        </>
+                      )}
+                    </p>
+
+                    <p className="s" style={{ margin: '10px 0 4px' }}>
+                      <b>Top productos</b>
+                    </p>
+                    <ul className="s" style={{ margin: '0 0 10px 18px' }}>
+                      {ventas.lineaBase.porProducto.slice(0, 5).map((p) => (
+                        <li key={p.clave}>
+                          producto <code>{p.clave}</code> — {p.unidades} u. en {p.pedidos} pedidos ·{' '}
+                          {p.ingreso.toLocaleString('es-CL')} {ventas.lineaBase!.moneda ?? ''}
+                        </li>
+                      ))}
+                    </ul>
+
+                    <p className="s" style={{ margin: '10px 0 4px' }}>
+                      <b>Por región</b>
+                    </p>
+                    <ul className="s" style={{ margin: '0 0 10px 18px' }}>
+                      {ventas.lineaBase.porRegion.map((r) => (
+                        <li key={r.clave}>
+                          {r.clave} — {r.pedidos} pedidos · {r.ingreso.toLocaleString('es-CL')}{' '}
+                          {ventas.lineaBase!.moneda ?? ''}
+                        </li>
+                      ))}
+                    </ul>
+
+                    <p className="s" style={{ margin: '6px 0' }}>
+                      Medios de pago:{' '}
+                      {ventas.lineaBase.mediosDePago.map((m) => `${m.clave} (${m.n})`).join(' · ')}
+                      {' — '}Envío:{' '}
+                      {ventas.lineaBase.metodosDeEnvio
+                        .map((m) => `${m.clave} (${m.n})`)
+                        .join(' · ')}
+                    </p>
+
+                    <p className="s" style={{ margin: '10px 0 4px' }}>
+                      <b>Lo que estas ventas NO permiten afirmar</b>
+                    </p>
+                    <ul className="s muted" style={{ margin: '0 0 10px 18px' }}>
+                      {(
+                        [
+                          ['Margen', ventas.lineaBase.margenBruto],
+                          ['Beneficio', ventas.lineaBase.beneficio],
+                          ['CAC', ventas.lineaBase.cac],
+                          ['ROAS', ventas.lineaBase.roas],
+                          ['Ingreso atribuido a un canal', ventas.lineaBase.ingresoAtribuido],
+                          ['Ventas fuera de WooCommerce', ventas.lineaBase.ventasFueraDeLaFuente],
+                        ] as const
+                      ).map(([etiqueta, v]) => (
+                        <li key={etiqueta}>
+                          {etiqueta}: <b>desconocido</b>
+                          {v.motivo ? ` (${v.motivo})` : ''} — no es cero
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
               </div>
             </>
           )}

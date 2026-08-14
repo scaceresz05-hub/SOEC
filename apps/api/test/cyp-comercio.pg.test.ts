@@ -262,9 +262,12 @@ describe('HONESTIDAD · lo desconocido nunca se reporta como cero', () => {
     await expect(fuentePedidos.leerPedidos(ORG_CYP, AHORA, AHORA)).rejects.toBeInstanceOf(
       FuenteDePedidosNoDisponibleError,
     );
-    // La fuente registrada declara el motivo, no un total.
+    // El contrato impide afirmar «no hay ventas» cuando la fuente no es legible: lanza en vez de
+    // devolver una lista vacía. (Desde FASE 7 la fuente de C Y P SÍ está conectada en solo lectura;
+    // lo que aquí se prueba es el invariante del puerto, no el estado actual de esa organización.)
     const ventas = buscarFuentes(ORG_CYP).find((f) => f.tipo === 'SALES');
-    expect(ventas?.estado).toBe('CREDENTIALS_REQUIRED');
+    expect(ventas?.estado).toBe('CONNECTED_READ_ONLY');
+    expect(ventas?.soloLectura).toBe(true);
   });
 
   it('UNKNOWN_MARGIN_IS_NOT_ZERO — toda la economía es desconocida, no cero', () => {
@@ -325,7 +328,8 @@ describe('DIRECTOR · fundamentos antes que inversión', () => {
     expect(f.veredicto).toBe('FOUNDATION_REQUIRED');
     const codigos = f.motivos.map((m) => m.codigo);
     expect(codigos).toContain('ANALYTICS_NOT_CONFIGURED');
-    expect(codigos).toContain('SALES_NOT_CONNECTED');
+    // Desde FASE 7 las ventas SÍ son legibles: ya no es un motivo. Los demás siguen en pie.
+    expect(codigos).not.toContain('SALES_NOT_CONNECTED');
     expect(codigos).toContain('ECONOMICS_UNKNOWN');
     expect(codigos).toContain('NATIONWIDE_SHIPPING_NOT_READY');
     // Nunca autoriza inversión publicitaria: es del tipo literal `false`.

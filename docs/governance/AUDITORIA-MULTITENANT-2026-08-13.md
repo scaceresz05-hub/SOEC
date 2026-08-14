@@ -421,6 +421,76 @@ cambiar el contrato, no los datos.
 `typecheck` 49/49 · `eslint` limpio · `next build` OK · **suite completa 241 archivos / 1666 pruebas**
 (+18 de comercio) · huella del runtime idéntica antes y después · secret-scan sin coincidencias.
 
+## 7-sexies. FASE 7 — Ventas reales de C Y P en solo lectura
+
+### Credenciales
+
+Depósito local por organización (`.secrets/<org>.env`, gitignored). `SecretStoreArchivo` exige
+**triple coincidencia** de organización antes de tocar el archivo. Referencias opacas
+`file:org-cyp/woocommerce-cyp-consumer-key|…-secret`. La credencial viaja **sólo** en
+`Authorization: Basic`, nunca en la URL — hay un invariante en el adaptador que aborta si aparece
+en la cadena de consulta.
+
+`AUTHENTICATION = PASS · READ_ORDERS = PASS · READ_PRODUCTS = PASS` (HTTP 200).
+
+### Adaptador privado — solo lectura por CÓDIGO, no por permiso
+
+`method: 'GET'` fijado; lista blanca cerrada `/system_status`, `/orders`, `/products`; ninguna
+función de escritura en el módulo. Una prueba lee el propio fuente (sin comentarios) y falla si
+aparece cualquier método mutante, `/batch`, `/cart` o un nombre como `crearPedido`. **Aunque la
+credencial fuera de escritura, este adaptador no podría mutar nada.**
+
+### Ventas observadas — coherentes con la auditoría previa
+
+| | Auditoría previa | SOEC (lectura propia) |
+|---|---|---|
+| Pedidos | 16 | **16** ✓ |
+| Rango | 2025-01-19 → 2026-08-04 | **idéntico** ✓ |
+| Ingreso observado | 570.420 CLP | **570.420 CLP** ✓ |
+| Ticket promedio | 35.651 CLP | **35.651 CLP** ✓ |
+| Artículos/pedido | ~3 | **3,44** ✓ |
+
+Sin anomalías críticas. Hallazgos añadidos: **los 16 pedidos tienen evidencia de pago CONFIRMADA**
+pese a estar todos en `processing` — exactamente el caso que la directiva anticipó y que el modelo
+trata como tres ejes independientes (estado ≠ pago ≠ entrega). Una línea de pedido referencia un
+producto ya inexistente en el catálogo (`(desconocido)`), y se declara como tal.
+
+**Concentración:** 5 clientes seudónimos generan los 16 pedidos, y **los 5 son recurrentes**; los 5
+productos mayores concentran el **76%** del ingreso. Es un patrón B2B de cartera pequeña, no un
+e-commerce de tráfico.
+
+### Privacidad
+
+Persisten: id externo, fechas, estado, moneda, totales, medio de pago, método de envío, líneas con
+`product_id`, y geografía comercial (país/región/ciudad). **No persisten**: nombre, dirección,
+email, teléfono, RUT, IP ni notas. Verificado en la base: **0 eventos de `org-cyp` contienen `@`**.
+
+La recurrencia se mide con HMAC-SHA256 usando una clave propia de la organización (generada por
+SOEC y guardada en su depósito). La organización entra además en el mensaje: la misma persona en dos
+organizaciones produce huellas **distintas**, así que ni comparando huellas se puede cruzar tenants.
+
+### Idempotencia — un defecto encontrado y corregido
+
+La primera implementación comparaba pedidos con `JSON.stringify`. PostgreSQL `jsonb` **reordena las
+claves**, de modo que todo pedido releído parecía modificado: la segunda corrida reportó «16
+actualizados» en vez de «16 sin cambios». Corregido con serialización canónica (claves ordenadas
+recursivamente). Corridas 3 y 4: **0 nuevos, 0 actualizados, 16 sin cambios**. Quedaron en la
+historia 16 eventos redundantes de la corrida 2; son append-only y la lectura toma el último, así
+que no alteran ninguna cifra.
+
+### Director
+
+Sigue en **`FOUNDATION_REQUIRED`**. `SALES_NOT_CONNECTED` desaparece; permanecen
+`ANALYTICS_NOT_CONFIGURED`, `ECONOMICS_UNKNOWN` (ahora afinado: *el ticket ya es observable, falta
+el COSTO y el MARGEN*), `NATIONWIDE_SHIPPING_NOT_READY`, `ADS_NOT_CONFIGURED` y
+`BUSINESS_PROFILE_NOT_CONFIGURED`. `puedeRecomendarInversionPublicitaria` sigue siendo del tipo
+literal `false`.
+
+### Verificación
+
+`typecheck` 49/49 · `eslint` limpio · `next build` OK · **suite 243 archivos / 1703 pruebas** (+21)
+· huella del runtime idéntica antes y después · secret-scan sin coincidencias · `.secrets` fuera de git.
+
 ## 8. Estado de la gobernanza al cierre de este documento
 
 ```
