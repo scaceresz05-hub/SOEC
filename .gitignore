@@ -53,3 +53,6 @@ docs/piloto/PRE-FLIGHT-REPORT.md
 
 # Log de la ingesta autónoma (tarea programada) — nunca versionar
 ingesta-autonoma.log
+
+# Depósito local de credenciales por organización (FASE 7). NUNCA se versiona.
+.secrets/

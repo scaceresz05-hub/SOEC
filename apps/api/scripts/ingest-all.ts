@@ -116,7 +116,9 @@ async function main(): Promise<void> {
         clientId: 'env:GOOGLE_ADS_CLIENT_ID',
         clientSecret: 'env:GOOGLE_ADS_CLIENT_SECRET',
         // Referencia OPACA declarada por la FUENTE de esta organización (nunca el valor).
-        refreshToken: fuenteAds.credentialRef ?? 'env:GOOGLE_ADS_REFRESH_TOKEN',
+        refreshToken:
+          fuenteAds.credenciales.find((c) => c.nombreLogico === 'google-ads-refresh-token')
+            ?.secretRef ?? 'env:GOOGLE_ADS_REFRESH_TOKEN',
       },
       loginCustomerId,
     });
@@ -133,7 +135,9 @@ async function main(): Promise<void> {
     if (!baseUrl) throw new Error('Falta SMILEFLOW_M2M_URL');
     const adaptadorGrowth = new SmileFlowGrowthAdapter({
       secretStore,
-      secretRef: fuenteGrowth.credentialRef ?? 'env:SMILEFLOW_GROWTH_TOKEN',
+      secretRef:
+        fuenteGrowth.credenciales.find((c) => c.nombreLogico === 'smileflow-growth-token')
+          ?.secretRef ?? 'env:SMILEFLOW_GROWTH_TOKEN',
       esquemaEgress: ESQUEMA_EGRESS_GROWTH,
       baseUrl,
     });

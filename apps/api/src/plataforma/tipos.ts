@@ -130,6 +130,17 @@ export type EstadoFuente =
 /** Estados en los que SOEC puede leer datos reales de la fuente. */
 export const ESTADOS_CON_LECTURA: readonly EstadoFuente[] = ['OBSERVED', 'CONNECTED_READ_ONLY'];
 
+/**
+ * Credencial que una fuente EXIGE, nombrada de forma lógica y referida de forma opaca.
+ *
+ * `secretRef` es SIEMPRE una referencia (`env:…`, `file:<org>/<nombre>`, `vault:…`), jamás un valor.
+ * Una fuente puede exigir VARIAS (WooCommerce necesita consumer key + consumer secret).
+ */
+export interface CredencialRef {
+  readonly nombreLogico: string;
+  readonly secretRef: string;
+}
+
 /** Una fuente de datos SIEMPRE pertenece a una organización. No existen fuentes globales. */
 export interface FuenteRegistrada {
   readonly sourceId: string;
@@ -137,7 +148,8 @@ export interface FuenteRegistrada {
   readonly provider: string;
   readonly tipo: TipoFuente;
   readonly externalAccountId: string | null;
-  readonly credentialRef: string | null;
+  /** Credenciales EXIGIDAS por la fuente. Vacío = no necesita ninguna (lectura pública). */
+  readonly credenciales: readonly CredencialRef[];
   readonly estado: EstadoFuente;
   readonly soloLectura: true;
   /** Qué falta para conectarla. Vacío sólo cuando ya está conectada o no aplica. */

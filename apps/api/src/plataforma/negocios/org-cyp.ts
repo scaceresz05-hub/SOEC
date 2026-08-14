@@ -28,6 +28,7 @@
 import { conocido, desconocido } from '@soec/comercio';
 import type {
   ConfiguracionOrganizacion,
+  CredencialRef,
   EstadoFuente,
   FuenteRegistrada,
   TipoFuente,
@@ -51,6 +52,7 @@ function fuente(
   tipo: TipoFuente,
   estado: EstadoFuente,
   faltantes: readonly string[],
+  credenciales: readonly CredencialRef[] = [],
 ): FuenteRegistrada {
   return {
     sourceId,
@@ -58,12 +60,28 @@ function fuente(
     provider,
     tipo,
     externalAccountId: null,
-    credentialRef: null,
+    credenciales,
     estado,
     soloLectura: true,
     faltantes,
   };
 }
+
+/**
+ * Nombres LÓGICOS de las credenciales de la API privada de WooCommerce de C Y P.
+ * Los valores los deposita una PERSONA en `.secrets/org-cyp.env`; SOEC sólo conoce estos nombres
+ * y sus referencias opacas `file:org-cyp/<nombre>`.
+ */
+export const CREDENCIALES_WOO_CYP: readonly CredencialRef[] = [
+  {
+    nombreLogico: 'woocommerce-cyp-consumer-key',
+    secretRef: `file:${ORG_CYP}/woocommerce-cyp-consumer-key`,
+  },
+  {
+    nombreLogico: 'woocommerce-cyp-consumer-secret',
+    secretRef: `file:${ORG_CYP}/woocommerce-cyp-consumer-secret`,
+  },
+];
 
 export const CONFIGURACION_ORG_CYP: ConfiguracionOrganizacion = {
   negocio: {
@@ -156,9 +174,16 @@ export const CONFIGURACION_ORG_CYP: ConfiguracionOrganizacion = {
       'merchant_id',
       'feed de productos (el catálogo carece de SKU y marca)',
     ]),
-    fuente('src-cyp-ventas', 'woocommerce-orders', 'SALES', 'CREDENTIALS_REQUIRED', [
-      'credenciales de lectura de la API privada de pedidos',
-    ]),
+    // Ventas: la API privada de pedidos EXIGE dos credenciales, declaradas por referencia opaca.
+    // El estado sigue siendo CREDENTIALS_REQUIRED: declarar la exigencia no es tenerlas depositadas.
+    fuente(
+      'src-cyp-ventas',
+      'woocommerce-rest-api',
+      'SALES',
+      'CREDENTIALS_REQUIRED',
+      ['depositar consumer key y consumer secret de solo lectura en el depósito local de org-cyp'],
+      CREDENCIALES_WOO_CYP,
+    ),
     fuente('src-cyp-pagos', 'pagos', 'PAYMENTS', 'CREDENTIALS_REQUIRED', [
       'acceso al proveedor de pagos para conciliar cobros',
     ]),

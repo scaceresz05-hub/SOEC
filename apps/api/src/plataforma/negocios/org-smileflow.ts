@@ -118,7 +118,9 @@ export const CONFIGURACION_ORG_SMILEFLOW: ConfiguracionOrganizacion = {
       provider: 'google-ads',
       tipo: 'ADS',
       externalAccountId: ADS_SMILEFLOW.customerId,
-      credentialRef: 'env:GOOGLE_ADS_REFRESH_TOKEN',
+      credenciales: [
+        { nombreLogico: 'google-ads-refresh-token', secretRef: 'env:GOOGLE_ADS_REFRESH_TOKEN' },
+      ],
       estado: 'CONNECTED_READ_ONLY',
       soloLectura: true,
       faltantes: [],
@@ -129,7 +131,9 @@ export const CONFIGURACION_ORG_SMILEFLOW: ConfiguracionOrganizacion = {
       provider: 'smileflow-growth',
       tipo: 'GROWTH',
       externalAccountId: null,
-      credentialRef: 'env:SMILEFLOW_GROWTH_TOKEN',
+      credenciales: [
+        { nombreLogico: 'smileflow-growth-token', secretRef: 'env:SMILEFLOW_GROWTH_TOKEN' },
+      ],
       estado: 'CONNECTED_READ_ONLY',
       soloLectura: true,
       faltantes: [],

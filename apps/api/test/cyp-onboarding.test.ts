@@ -244,14 +244,16 @@ describe('C Y P · perfil, fuentes y credenciales propias', () => {
   });
 
   it('CYP_CREDENTIALS_NOT_SMILEFLOW — no resuelve NINGUNA credencial ni cuenta de SmileFlow', () => {
-    // Ninguna fuente de C Y P declara referencia de credencial.
-    expect(buscarFuentes(ORG_CYP).every((f) => f.credentialRef === null)).toBe(true);
+    // Ninguna credencial de C Y P apunta fuera de su propio depósito: todas son `file:org-cyp/…`.
+    const refs = buscarFuentes(ORG_CYP).flatMap((f) => f.credenciales.map((c) => c.secretRef));
+    expect(refs.every((r) => r.startsWith(`file:${ORG_CYP}/`))).toBe(true);
+    expect(refs.some((r) => r.startsWith('env:'))).toBe(false); // nada del entorno compartido
     expect(buscarFuentes(ORG_CYP).every((f) => f.externalAccountId === null)).toBe(true);
     // No puede alcanzar la cuenta de Ads de nadie (no tiene perfil).
     expect(() => getRecursoGoogleAds(ORG_CYP)).toThrow(BusinessProfileNoConfiguradoError);
     // Y su fuente de Ads no lleva la credencial de SmileFlow.
     const ads = buscarFuente(ORG_CYP, 'google-ads');
-    expect(ads?.credentialRef).toBeNull();
+    expect(ads?.credenciales).toEqual([]);
     // El discovery confirmó que ni siquiera hay etiqueta de Ads en el sitio.
     expect(ads?.estado).toBe('NOT_CONFIGURED');
     // La configuración de C Y P no menciona ninguna referencia de secreto ajena.

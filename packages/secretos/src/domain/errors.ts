@@ -14,3 +14,10 @@ export class SecretoNoEncontradoError extends SoecError {}
  * responsabilidad del callback de frontera y su revisión/pruebas. El mensaje jamás contiene el valor.
  */
 export class FugaDeSecretoError extends SoecError {}
+
+/**
+ * Se intentó resolver una referencia que pertenece a OTRA organización. Es la defensa multiempresa
+ * del depósito de secretos: ninguna organización puede leer la credencial de otra, aunque conozca
+ * su nombre lógico. El mensaje nombra organizaciones y nombres lógicos — jamás valores.
+ */
+export class SecretoDeOtraOrganizacionError extends SoecError {}

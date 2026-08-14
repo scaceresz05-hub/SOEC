@@ -15,6 +15,7 @@ import type { FastifyInstance } from 'fastify';
 import { ActorId, OrganizationId, type EventStore, type RequestContext } from '@soec/contracts';
 import { CatalogoComercioService, embudoNoInstrumentado } from '@soec/comercio';
 import { contextoDe } from './superficie-auth';
+import { estadoDeposito } from './plataforma/deposito-secretos';
 import {
   getBusiness,
   buscarFuentes,
@@ -119,6 +120,38 @@ export function registerPlataformaRoutes(app: FastifyInstance, store?: EventStor
         mercado: n.mercado,
       }));
     return reply.send({ negocios, filtradoPorMembresia: false });
+  });
+
+  /**
+   * ESTADO DEL DEPÓSITO DE CREDENCIALES de la organización autenticada.
+   *
+   * Responde qué credenciales EXIGE cada fuente y cuáles ya fueron depositadas por una persona.
+   * Devuelve nombres lógicos y booleanos: **nunca** valores, longitudes, prefijos ni fragmentos.
+   */
+  app.get('/plataforma/credenciales', async (req, reply) => {
+    const { org } = ctxDe(req);
+    getBusiness(org); // 404 si no está registrada
+    const fuentes = buscarFuentes(org).filter((f) => f.credenciales.length > 0);
+    const nombresLocales = fuentes
+      .flatMap((f) => f.credenciales)
+      .filter((c) => c.secretRef.startsWith(`file:${org}/`))
+      .map((c) => c.nombreLogico);
+
+    const deposito = estadoDeposito(org, nombresLocales);
+    return reply.send({
+      organizationId: org,
+      depositoPresente: deposito.depositoPresente,
+      // Se informa DÓNDE depositar, no qué contiene.
+      ruta: deposito.ruta,
+      completo: deposito.completo,
+      credenciales: deposito.credenciales,
+      fuentesQueLasExigen: fuentes.map((f) => ({
+        sourceId: f.sourceId,
+        tipo: f.tipo,
+        estado: f.estado,
+        nombresLogicos: f.credenciales.map((c) => c.nombreLogico),
+      })),
+    });
   });
 
   /**
