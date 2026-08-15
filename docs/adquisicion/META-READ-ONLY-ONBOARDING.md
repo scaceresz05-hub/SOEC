@@ -48,9 +48,32 @@
 `REAL_CONNECTION = NO`. No se crea Meta App, no se generan tokens, no se publica, no se crea campaña,
 no se gasta, no se habilita escritura Meta. `AUTONOMOUS_REAL` permanece `false`.
 
+## 5. Onboarding read-only — estado y GATE DE AUTORIZACIÓN (rev. 2026-08-15)
+
+Investigación oficial refrescada (no de memoria): Graph/Marketing API **v25.0** (feb-2026), **v26.0** en curso (ago-sep 2026).
+
+**Permisos de LECTURA requeridos por capacidad** (nombres vigentes):
+`READ_PAGES` → `pages_show_list` + `pages_read_engagement`; `READ_INSTAGRAM_ACCOUNT`/`READ_ORGANIC_MEDIA`/`READ_ORGANIC_INSIGHTS` → `instagram_basic` (+ IG Professional vinculada a una Page); `READ_AD_ACCOUNT`/`READ_CAMPAIGNS`/`READ_ADSETS`/`READ_ADS`/`READ_AD_INSIGHTS` → `ads_read`; `READ_LEADS` → `leads_retrieval` + `pages_show_list` (+ `pages_manage_ads`).
+
+**GATE DE AUTORIZACIÓN — el onboarding real está BLOQUEADO (por diseño) hasta acción humana:**
+- `META_APP_REQUIRED = YES` — se necesita una App de Meta aprobada. Crearla exige identidad de negocio + aceptar términos de Meta → **acción humana** (Claude no crea apps, no acepta términos, no hace login OAuth, no ingresa credenciales).
+- `APP_REVIEW_REQUIRED = YES` — App Review por permiso (~20 días en 2026) para leer activos que no son propios (Advanced Access).
+- `BUSINESS_VERIFICATION_REQUIRED = YES` — para permisos avanzados; Business Manager idealmente 30-60 días, admin con 2FA, documentos legales.
+- `OAUTH_GRANT = NO` — no hay grant/token disponible; el usuario debe autorizar.
+- `META_ASSETS_KNOWN = NONE` — ni SmileFlow ni C Y P tienen activos Meta configurados hoy → todos `NOT_CONFIGURED` (no se inventan Page/IG/Ad Account/Business).
+
+Estas condiciones son exactamente las STOP CONDITIONS del bloque → **STOP antes de conectar**.
+
+**Estrategia de token (a usar cuando exista App aprobada):** para lectura de Pages/IG, **Page access token** derivado de un User long-lived; para servidor-a-servidor multi-cuenta, **System User token** (Business Manager). Nunca password, nunca cookies. Tokens SÓLO en `SecretStore` (`file:<org>/meta-*`), jamás en event store/logs/UI/commits/docs.
+
+**Preparado en este bloque (sin conexión, sin red, sin tokens):** modelo de activos Meta distintos (`apps/api/src/acquisition/meta-assets.ts`: Business/Page/Instagram/AdAccount/Pixel/App, tenant-scoped, refs opacas por activo, binding explícito, salud de conexión, modelo de token sin valor, allowlist de operaciones de LECTURA default-deny, normalizador de `action_type` que nunca suma-todo). Adversariales en `apps/api/test/acquisition-meta-assets.test.ts`.
+
+**Secuencia humana para desbloquear (próximo paso, fuera de este bloque):** (1) confirmar si cada negocio tiene activos Meta; (2) crear/designar la App de SOEC (tipo Business; productos: Facebook Login, Pages API, Instagram Graph, Marketing API, Lead Ads); (3) Business Verification; (4) App Review de los permisos de lectura; (5) el dueño autoriza vía OAuth y selecciona explícitamente los activos por empresa; (6) recién entonces SOEC implementa las llamadas Graph READ contra la App aprobada.
+
 ## Referencias
 
 - Graph API changelog / versiones — developers.facebook.com/docs/graph-api/changelog
-- Instagram Platform · Content Publishing — developers.facebook.com/docs/instagram-platform/content-publishing/
-- Marketing API Q2-2026 update (sunsets/webhooks) — kitchn.io/blog/meta-marketing-api-q2-2026-update
-- Graph API v26.0 (placements) — unalsoft.com/blog/2026-07-31-meta-graph-api-v26
+- Instagram Platform · overview / content publishing — developers.facebook.com/docs/instagram-platform/
+- Lead Ads (leads_retrieval, App Review) — developers.facebook.com/documentation/ads-commerce/marketing-api/guides/lead-ads
+- Business Verification / App Review (2026, ~20 días) — bundle.social/blog/meta-app-review-20-days
+- Marketing API Q2-2026 update — kitchn.io/blog/meta-marketing-api-q2-2026-update
