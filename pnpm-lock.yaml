@@ -38,6 +38,9 @@ importers:
       '@soec/adaptadores':
         specifier: workspace:*
         version: link:../../packages/adaptadores
+      '@soec/adquisicion':
+        specifier: workspace:*
+        version: link:../../packages/adquisicion
       '@soec/autonomia':
         specifier: workspace:*
         version: link:../../packages/autonomia
