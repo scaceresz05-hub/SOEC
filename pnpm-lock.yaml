@@ -271,6 +271,15 @@ importers:
         specifier: workspace:*
         version: link:../event-store
 
+  packages/adquisicion:
+    dependencies:
+      '@soec/autonomia':
+        specifier: workspace:*
+        version: link:../autonomia
+      '@soec/comercio':
+        specifier: workspace:*
+        version: link:../comercio
+
   packages/aprendizaje:
     dependencies:
       '@soec/contracts':

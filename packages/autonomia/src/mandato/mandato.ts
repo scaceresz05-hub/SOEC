@@ -86,6 +86,12 @@ export interface MandatoAutonomia {
   readonly organizationId: string;
   readonly businessKey: string;
   readonly externalAccountId: string;
+  /**
+   * Canal al que aplica este mandato (clave opaca, p. ej. 'META_INSTAGRAM', 'GOOGLE_SEARCH').
+   * Opcional por compatibilidad: los mandatos existentes (Google Ads) lo omiten. Permite políticas
+   * independientes por canal sin crear un mandato paralelo. La resolución por canal es fail-closed.
+   */
+  readonly canal?: string;
   readonly nivel: NivelAutonomia;
   readonly accionesPermitidas: readonly TipoAccion[];
   readonly accionesRequierenAprobacion: readonly TipoAccion[];

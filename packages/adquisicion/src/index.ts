@@ -33,4 +33,5 @@ export * from './dominio/estrategia-canal';
 export * from './dominio/planner';
 export * from './dominio/enlace-resultado';
 export * from './dominio/accion-social';
+export * from './dominio/mandato-multicanal';
 export * from './dominio/meta-adapter-contract';
