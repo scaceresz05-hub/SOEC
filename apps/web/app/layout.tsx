@@ -25,6 +25,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <nav className="mainnav" aria-label="Principal">
               <Link href="/">Mis empresas</Link>
               <Link href="/negocios">Panel del negocio</Link>
+              <Link href="/adquisicion">Marketing</Link>
               <Link href="/autonomia">Nivel de control</Link>
             </nav>
           </div>
