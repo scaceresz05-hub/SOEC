@@ -145,6 +145,7 @@ import { registerOrganizationsRoutes } from './organizations-routes';
 import { registrarVerticalesAutenticadas } from './vertical-gateway';
 import { PlataformaError } from './plataforma';
 import { registerPlataformaRoutes } from './plataforma-routes';
+import { registerAcquisitionRoutes } from './acquisition-routes';
 import { registrarProteccionCsrf } from './csrf';
 
 export interface AppDeps {
@@ -404,6 +405,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerCommercialKnowledgeRoutes(target, deps.store, clock); // Conocimiento comercial / CRM (M3, A-1)
     registerCiaRoutes(target, deps.store); // Centro de Integraciones Autónomas (CIA, preparación cerrada)
     registerPlataformaRoutes(target, deps.store); // Estado, fundamentos y catálogo del negocio
+    registerAcquisitionRoutes(target, deps.store); // Acquisition Engine (sólo lectura / shadow)
 
     target.post('/events', async (req, reply) => {
       const ctx = contextFrom(req);

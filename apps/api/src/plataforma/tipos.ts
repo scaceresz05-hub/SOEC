@@ -37,7 +37,7 @@ export type ExperienciaReal =
 
 /** Referencia a una cuenta externa. Nunca contiene el secreto: sólo su referencia opaca. */
 export interface CuentaExternaRef {
-  readonly proveedor: 'google-ads' | 'ga4' | 'merchant-center' | 'linkedin' | 'growth-api';
+  readonly proveedor: 'google-ads' | 'ga4' | 'merchant-center' | 'linkedin' | 'growth-api' | 'meta';
   /** Identificador de la cuenta EN el proveedor (customer_id, property_id, merchant_id…). */
   readonly externalAccountId: string | null;
   /** Cuenta administradora/login, si el proveedor la usa. */

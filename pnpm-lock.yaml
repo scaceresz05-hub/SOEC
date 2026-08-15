@@ -38,6 +38,9 @@ importers:
       '@soec/adaptadores':
         specifier: workspace:*
         version: link:../../packages/adaptadores
+      '@soec/adquisicion':
+        specifier: workspace:*
+        version: link:../../packages/adquisicion
       '@soec/autonomia':
         specifier: workspace:*
         version: link:../../packages/autonomia
@@ -270,6 +273,15 @@ importers:
       '@soec/event-store':
         specifier: workspace:*
         version: link:../event-store
+
+  packages/adquisicion:
+    dependencies:
+      '@soec/autonomia':
+        specifier: workspace:*
+        version: link:../autonomia
+      '@soec/comercio':
+        specifier: workspace:*
+        version: link:../comercio
 
   packages/aprendizaje:
     dependencies:
