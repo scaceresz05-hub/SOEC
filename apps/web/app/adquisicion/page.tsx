@@ -41,8 +41,24 @@ interface Estrategia {
   naturaleza: string;
 }
 interface OutcomesResp {
-  outcomes: { outcome: string; disponibilidad: string; n: number | null }[];
-  economia: { indicadores: { nombre: string; valor: number | null; motivo: string }[] };
+  outcomes: { outcome: string; status: string; value: number | null; source: string; testExcluded: number }[];
+  economia: { nombre: string; valor: number | null; disponibilidad: string; caveat: string | null }[];
+  atribucion: { estado: string; humano: string; detalle: string };
+  revenue: { value: number | null; unknown: boolean; currency: string | null } | null;
+}
+
+const ETIQUETA_ECON: Record<string, string> = {
+  VALUE: '',
+  UNKNOWN: 'desconocido',
+  NOT_APPLICABLE: 'no aplicable',
+  INSUFFICIENT_DATA: 'datos insuficientes',
+  NO_CONVERSIONS: 'sin conversiones',
+};
+
+function outcomeTexto(o: { status: string; value: number | null }): string {
+  if (o.status === 'NOT_AVAILABLE') return 'aún no medible';
+  if (o.value === null) return 'desconocido';
+  return String(o.value);
 }
 
 const ETIQUETA_CANAL: Record<string, { texto: string; tono: string }> = {
@@ -203,16 +219,37 @@ export default function AdquisicionPage() {
           <ul>
             {outcomes.outcomes.map((o) => (
               <li key={o.outcome}>
-                {o.outcome}: {o.disponibilidad === 'NOT_AVAILABLE' ? 'aún no medible' : (o.n ?? '—')}
+                {o.outcome}: <b>{outcomeTexto(o)}</b>
+                <span style={{ color: '#888' }}> · fuente: {o.source}</span>
+                {o.testExcluded > 0 && <span style={{ color: '#888' }}> · {o.testExcluded} de prueba excluidos</span>}
               </li>
             ))}
           </ul>
-          <p style={{ color: '#666' }}>
-            Economía:{' '}
-            {outcomes.economia.indicadores
-              .map((i) => `${i.nombre}=${i.valor === null ? 'desconocido' : i.valor}`)
-              .join(' · ')}
-          </p>
+          {outcomes.revenue && (
+            <p>
+              Ingresos:{' '}
+              <b>
+                {outcomes.revenue.unknown
+                  ? 'desconocido'
+                  : `${outcomes.revenue.value ?? '—'} ${outcomes.revenue.currency ?? ''}`}
+              </b>
+            </p>
+          )}
+          <h3 style={{ marginBottom: 4 }}>Atribución</h3>
+          <p style={{ color: '#666' }}>{outcomes.atribucion.humano}</p>
+          {outcomes.atribucion.detalle && (
+            <p style={{ color: '#999', fontSize: 13 }}>{outcomes.atribucion.detalle} (técnico: {outcomes.atribucion.estado})</p>
+          )}
+          <h3 style={{ marginBottom: 4 }}>Economía</h3>
+          <ul>
+            {outcomes.economia.map((i) => (
+              <li key={i.nombre}>
+                {i.nombre}:{' '}
+                <b>{i.disponibilidad === 'VALUE' ? (i.valor ?? '—') : ETIQUETA_ECON[i.disponibilidad] ?? i.disponibilidad}</b>
+                {i.caveat && i.disponibilidad === 'VALUE' && <span style={{ color: '#888' }}> (mezclado)</span>}
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 

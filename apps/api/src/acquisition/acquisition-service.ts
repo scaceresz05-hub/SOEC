@@ -7,26 +7,32 @@
  * (config), no de `if org`. La organización llega ya resuelta por el contexto autenticado.
  */
 
+import type { EventStore, RequestContext } from '@soec/contracts';
 import {
   planificarAdquisicion,
   naturalezaDeCanal,
-  esCanalPagado,
-  cpl,
-  cac,
-  roas,
-  mer,
   CANALES_ADQUISICION,
   type CanalAdquisicion,
   type EstadoCanal,
   type ObjetivoComercial,
   type ResultadoAdquisicion,
-  type IndicadorAdquisicion,
 } from '@soec/adquisicion';
-import { desconocido, type DesconocidoOValor } from '@soec/comercio';
 import { buscarNegocio, buscarProfile, buscarFuentes } from '../plataforma';
 import { buscarCuentaMeta, estadoCuentaMeta } from '../plataforma/meta-canal';
 import { razonarAdquisicionShadow, type VeredictoDirectorAdquisicion } from '../adquisicion/director-multicanal';
 import type { CuentaExternaRef, ModeloDeNegocio } from '../plataforma/tipos';
+import { leerVentasCyp, normalizarVentas } from './cyp-outcomes';
+import { leerGrowthSmileflow, leerSpendSmileflow } from './smileflow-outcomes';
+import {
+  derivarCPL,
+  derivarCPQL,
+  derivarCAC,
+  derivarROAS,
+  derivarMER,
+  VENTANA_DESCONOCIDA,
+  type IndicadorVivo,
+  type Ventana,
+} from './economics';
 
 /** Objetivo comercial por modelo de negocio (config-driven, sin ramas por identidad de org). */
 function objetivoDeModelo(modelo: ModeloDeNegocio): ObjetivoComercial {
@@ -147,31 +153,84 @@ export function estrategiaDe(org: string): VeredictoDirectorAdquisicion & { obje
   return { ...v, objetivoLabel: objetivo };
 }
 
-export interface OutcomeVista {
+export interface OutcomeVivo {
   readonly outcome: ResultadoAdquisicion;
-  readonly disponibilidad: 'AVAILABLE' | 'NOT_AVAILABLE' | 'UNKNOWN';
-  readonly n: number | null; // null = desconocido, nunca 0 inventado
+  readonly status: 'CONNECTED_WITH_DATA' | 'CONNECTED_NO_DATA' | 'NOT_AVAILABLE';
+  readonly value: number | null; // conteo real; null = desconocido, nunca 0 inventado
+  readonly source: string;
+  readonly window: Ventana;
+  readonly testExcluded: number;
 }
 
-/** Outcomes comerciales del negocio. Sin instrumentación viva, la disponibilidad es honesta. */
-export function outcomesDe(org: string): readonly OutcomeVista[] {
+export interface AtribucionVista {
+  readonly estado: 'DIRECT' | 'OBSERVED' | 'ATTRIBUTED' | 'PROBABLE' | 'UNKNOWN';
+  readonly humano: string;
+  readonly detalle: string;
+}
+
+export interface OutcomesVivos {
+  readonly outcomes: readonly OutcomeVivo[];
+  readonly economia: readonly IndicadorVivo[];
+  readonly atribucion: AtribucionVista;
+  readonly revenue: { readonly value: number | null; readonly unknown: boolean; readonly currency: string | null } | null;
+}
+
+/**
+ * Lee los outcomes/economía/atribución REALES desde el SSOT según el modelo de negocio. Sin store,
+ * o sin fuentes comerciales, devuelve NOT_AVAILABLE (jamás ceros inventados).
+ */
+export async function outcomesVivosDe(
+  store: EventStore | undefined,
+  ctx: RequestContext | null,
+  org: string,
+): Promise<OutcomesVivos> {
   const modelo = buscarNegocio(org)?.modeloDeNegocio ?? 'SERVICIOS';
-  return resultadosComercialesDeModelo(modelo).map((outcome) => ({
-    outcome,
-    disponibilidad: 'NOT_AVAILABLE' as const, // el conteo vivo se cablea en el onboarding/medición real
-    n: null,
-  }));
-}
+  if (store === undefined || ctx === null) {
+    return { outcomes: [], economia: [], atribucion: { estado: 'UNKNOWN', humano: 'Sin acceso a datos en este contexto.', detalle: '' }, revenue: null };
+  }
 
-export interface EconomiaVista {
-  readonly indicadores: readonly IndicadorAdquisicion[];
-}
+  if (modelo === 'ECOMMERCE_DISTRIBUCION') {
+    const ventas = normalizarVentas(await leerVentasCyp(store, ctx, org));
+    const outcomes: OutcomeVivo[] = [
+      { outcome: 'PURCHASE', status: ventas.status, value: ventas.purchases, source: 'woocommerce', window: ventas.ventana, testExcluded: 0 },
+    ];
+    const economia: IndicadorVivo[] = [
+      derivarROAS(null, null, ventas.ventana), // sin ingreso atribuido (atribución UNKNOWN)
+      derivarMER(ventas.revenue, null, ventas.ventana), // gasto de marketing no conectado
+      derivarCAC(null, false, ventas.ventana), // sin fuente de clientes demostrable
+    ];
+    return {
+      outcomes,
+      economia,
+      atribucion: { estado: 'UNKNOWN', humano: 'Todavía no sabemos qué canal originó estas compras.', detalle: 'WooCommerce no registra UTM/click-id; GA4 pendiente. Los pedidos históricos permanecen sin atribuir.' },
+      revenue: { value: ventas.revenue, unknown: ventas.revenueUnknown, currency: ventas.currency },
+    };
+  }
 
-/** Economía honesta: sin denominadores válidos hoy, todo queda UNKNOWN (no se fabrica CAC/ROAS). */
-export function economiaDe(_org: string): EconomiaVista {
-  const u: DesconocidoOValor = desconocido('NO_INSTRUMENTADO');
-  const entradas = { gasto: u, leads: u, leadsCalificados: u, clientes: u, ingresos: u, ingresosTotales: u };
-  return { indicadores: [cpl(entradas), cac(entradas), roas(entradas), mer(entradas)] };
+  if (modelo === 'SAAS_FUNNEL') {
+    const growth = await leerGrowthSmileflow(store, ctx);
+    const spend = await leerSpendSmileflow(store, ctx, org);
+    const ventanaLeads: Ventana = { inicio: null, fin: null, timezone: 'UTC', freshness: null };
+    const outcomes: OutcomeVivo[] = [
+      { outcome: 'LEAD', status: growth.status, value: growth.leadCreated, source: 'smileflow-growth', window: ventanaLeads, testExcluded: growth.excludedTest },
+      { outcome: 'DEMO', status: growth.status, value: growth.demoRequested, source: 'smileflow-growth', window: ventanaLeads, testExcluded: growth.excludedTest },
+      { outcome: 'CUSTOMER', status: 'NOT_AVAILABLE', value: null, source: '(sin fuente downstream)', window: VENTANA_DESCONOCIDA, testExcluded: 0 },
+    ];
+    const economia: IndicadorVivo[] = [
+      derivarCPL(spend.spend, growth.leadCreated, spend.ventana, ventanaLeads),
+      derivarCPQL(spend.spend, false, spend.ventana),
+      derivarCAC(spend.spend, false, spend.ventana),
+      derivarROAS(null, spend.spend, spend.ventana),
+    ];
+    return {
+      outcomes,
+      economia,
+      atribucion: { estado: 'UNKNOWN', humano: 'Los leads no traen señal de campaña demostrable en esta ventana.', detalle: 'utm/gclid ausentes o atribución demos→ads PENDIENTE. Los eventos TEST/DIAG quedan excluidos.' },
+      revenue: null,
+    };
+  }
+
+  return { outcomes: [], economia: [], atribucion: { estado: 'UNKNOWN', humano: 'Sin fuentes comerciales conectadas.', detalle: '' }, revenue: null };
 }
 
 export interface ResumenAdquisicion {
@@ -185,15 +244,15 @@ export interface ResumenAdquisicion {
   readonly decisionesPendientes: readonly string[];
   readonly hipotesisContenido: number;
   readonly hipotesisCampania: number;
-  readonly outcomes: readonly OutcomeVista[];
+  readonly outcomes: readonly OutcomeVivo[];
   readonly blockers: readonly string[];
 }
 
-export function resumenDe(org: string): ResumenAdquisicion {
+export async function resumenDe(store: EventStore | undefined, ctx: RequestContext | null, org: string): Promise<ResumenAdquisicion> {
   const est = estrategiaDe(org);
   const canales = canalesDe(org);
   const conectados = canales.filter((c) => c.readCapability).length;
-  const blockers = est.razones.slice();
+  const vivos = await outcomesVivosDe(store, ctx, org);
   return {
     organizationId: org,
     objetivo: est.objetivo,
@@ -205,7 +264,7 @@ export function resumenDe(org: string): ResumenAdquisicion {
     decisionesPendientes: est.veredicto === 'APPROVAL_REQUIRED' ? ['Requiere aprobación humana'] : [],
     hipotesisContenido: 0,
     hipotesisCampania: 0,
-    outcomes: outcomesDe(org),
-    blockers,
+    outcomes: vivos.outcomes,
+    blockers: est.razones.slice(),
   };
 }
