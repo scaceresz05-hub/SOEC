@@ -338,6 +338,16 @@ round-trip, mapeo de salud, gate de producción (fake ⇒ no productivo), saniti
 hasta que exista un HCP Vault real y pase: synthetic store/encrypt → persistence → resolve/decrypt →
 compare → delete/cleanup contra infraestructura real.
 
+**Smoke de runtime (one-shot, repo-only):** `pnpm -C apps/api vault:smoke` (o `pnpm vault:smoke`). Se
+ejecuta DENTRO del runtime real de SOEC, donde la credencial de Vault está inyectada de forma segura; lee la
+config sólo de `process.env` (`VAULT_ADDR`/`VAULT_NAMESPACE?`/`VAULT_TRANSIT_MOUNT`/`VAULT_TRANSIT_KEY` +
+`VAULT_TOKEN`), arma el adapter PRODUCTIVO (`TransporteHttpVault`, nunca el fake) y corre health → round-trip
+con secreto **sintético** (`randomBytes`) → cross-tenant reject → cleanup garantizado (`finally`). Emite sólo
+un bloque estéril `=== SOEC VAULT RUNTIME SMOKE ===` (enums, cero valores); exit 0 = READY, 2 = config
+ausente, 3 = adapter no productivo, 1 = fallo. `apps/api/src/acquisition/vault-smoke.ts` (núcleo testeable) +
+`vault-smoke.cli.ts` (wiring env + safety gate). Sólo si este smoke da READY se declara
+`PRODUCTION_SECRET_BACKEND = READY`. Tests: `acquisition-vault-smoke.test.ts` (9).
+
 ## Referencias
 
 - Vault Transit Secrets Engine (encrypt/decrypt/rewrap; app persiste el ciphertext) — developer.hashicorp.com/vault/docs/secrets/transit
