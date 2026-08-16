@@ -87,12 +87,37 @@ describe('Meta assets · CYP ausente y SC Topografía no vinculada', () => {
   });
 });
 
-describe('Meta assets · App vs Dataset no consolidado', () => {
-  it('APP_DATASET_ID_COLLISION_STATUS = REQUIRES_VERIFICATION (no se afirma App==Dataset)', () => {
+describe('Meta assets · App confirmada; Dataset aún sin distinguir', () => {
+  it('App 972064645294895 OBSERVED; relación con Dataset REQUIRES_VERIFICATION', () => {
     const d = descubrimientoMetaDe('org-smileflow')!;
-    expect(d.appDatasetColision).toBe('REQUIRES_VERIFICATION');
+    expect(d.appDatasetColision).toBe('APP_CONFIRMED_DATASET_UNVERIFIED');
     const app = d.activos.find((a) => a.tipo === 'META_APP');
-    expect(app?.procedencia).toBe('REQUIRES_VERIFICATION');
+    expect(app?.externalId).toBe('972064645294895');
+    expect(app?.procedencia).toBe('OBSERVED');
+  });
+});
+
+describe('Meta assets · evidencia Graph verificada (discriminación de Pages)', () => {
+  it('RESTRICTION_DOES_NOT_PROPAGATE_TO_GRAPH_READ: el nodo del negocio se lee (200) pese a la restricción', () => {
+    const d = descubrimientoMetaDe('org-smileflow')!;
+    expect(d.businessGraphReadable).toBe(true);
+    expect(d.restrictionPropagatesToGraphRead).toBe('NO');
+  });
+
+  it('OWNED_PAGES_GATE_IS_PERMISSION_NOT_RESTRICTION: falta business_management (Meta nombra el permiso)', () => {
+    const d = descubrimientoMetaDe('org-smileflow')!;
+    expect(d.businessOwnedPageReadGate).toBe('REQUIRES_business_management');
+    expect(d.businessManagementStatus).toBe('PERMISSION_MISSING');
+  });
+
+  it('GRAPH_PAGE_ID_UNKNOWN / LEGACY_UI_ID_NOT_TRUSTED_AS_GRAPH_ID', () => {
+    const d = descubrimientoMetaDe('org-smileflow')!;
+    expect(d.smileflowGraphPageId).toBeNull(); // canónico aún desconocido
+    expect(d.smileflowLegacyPageUiId).toBe('61570785690749'); // sólo id de UI
+    const page = d.activos.find((a) => a.tipo === 'FACEBOOK_PAGE');
+    expect(page?.externalId).toBeNull(); // no se usa el legacy id como Graph Page ID
+    expect(page?.externalStatus).toBe('EXISTS'); // la Page existe; su Graph ID no está confirmado
+    expect(page?.procedencia).toBe('REQUIRES_VERIFICATION');
   });
 });
 

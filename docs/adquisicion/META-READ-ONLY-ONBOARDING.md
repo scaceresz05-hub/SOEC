@@ -96,8 +96,26 @@ Regla dura: *activo existe* ╪ *SOEC conectado* — `SOEC_META_GRAPH_CONNECTION
 Capacidades **independientes** (Ads restringido NO cascada): `ORGANIC_FACEBOOK = AVAILABLE`,
 `ORGANIC_INSTAGRAM = AVAILABLE`, `META_ADS = RESTRICTED`, `LEAD_ADS = RESTRICTED`,
 `API_READ = NOT_CONNECTED`, `API_WRITE = NOT_CONNECTED`. Notas: **Instagram Profile ID (33006160107) ╪
-IGSID de Graph** (el IGSID se descubre por API; el candidato observado NO se persiste). **App vs
-Dataset** no consolidado: `APP_DATASET_ID_COLLISION_STATUS = REQUIRES_VERIFICATION`.
+IGSID de Graph** (el IGSID se descubre por API; el candidato observado NO se persiste). **Meta App
+`972064645294895` CONFIRMADA** ("SmileFlow", Development); su relación con el **Dataset** sigue sin
+distinguir (`APP_CONFIRMED_DATASET_UNVERIFIED`).
+
+**Evidencia Graph verificada (bloque de discriminación de Pages, token de prueba `pages_show_list`):**
+- `GET /934186066270538?fields=id,name` → **200 OK** ("SmileFlow Clinic"). El **nodo del Business es
+  legible por Graph pese a la restricción de Ads + verificación rechazada + bloqueo en la UI de Business
+  Settings** ⇒ `RESTRICTION_PROPAGATES_TO_GRAPH_READ = NO` (corrige la hipótesis previa: la restricción
+  vive en la capa de Ads/UI, no en la de lectura de la API).
+- `GET /{business-id}/owned_pages` → **400 OAuthException** *"Requires business_management permission"*
+  ⇒ `FAILURE_CLASS = BUSINESS_PERMISSION` (determinado, Meta nombra el permiso; **no** es restricción,
+  ownership ni app-binding). Meta pide la llave, no oculta el activo.
+- **Page ID canónico de Graph = UNKNOWN** hasta ejecutar `owned_pages` con `business_management`. El
+  `61570785690749` queda como **`UNVERIFIED_LEGACY_UI_ID`** (vino de `profile.php?id=`), NO como Graph
+  Page ID. SC Topografía (Page clásica) sí apareció por `/me/accounts` con Graph ID `100558733139736`
+  → `UNBOUND / DO_NOT_BIND`.
+- **Gate abierto (decisivo):** `business_management` no llegó al token pese a la aprobación. Falta
+  confirmar si el diálogo OAuth **ofrece** ese permiso dado el portfolio con verificación rechazada. Si
+  NO lo ofrece ⇒ la verificación rechazada bloquea permisos de nivel negocio y el rebuild pasa de
+  recomendable a **obligatorio**; si sí lo ofrece ⇒ SmileFlow es recuperable para lectura de Pages.
 
 **C Y P — `FOUNDATION_ABSENT` bajo el perfil inspeccionado** (no "C Y P no existe en Meta"): sin
 Portfolio/Page/IG/AdAccount/Pixel/App observados → todo `NOT_CONFIGURED`.
