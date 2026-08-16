@@ -291,8 +291,58 @@ ref forjada/malformada, ciphertext≠plaintext, GCM tamper detection, gate de pr
 secretos sintéticos + KMS fake; falta el adapter `KmsPort` productivo + su provisioning para poder validar
 contra el KMS real. Tests: `acquisition-meta-secret-backend.test.ts`.
 
+## 12. VAULT TRANSIT KMS ADAPTER (2026-08-16) — IMPLEMENTED, NOT PROVISIONED
+
+Decisión autorizada del runtime productivo: **HCP Vault Dedicated + Transit Secrets Engine** como KMS del
+`KmsPort`. Railway (u otro PaaS) NO se usa como almacén dinámico de tokens OAuth — sólo podrá guardar la
+config/credencial mínima para que el runtime autentique contra Vault (mecanismo a definir en provisioning).
+
+`SELECTED_BACKEND = HCP_VAULT_DEDICATED_TRANSIT`. **Transit es cryptography-as-a-service, NO un secret
+store**: cifra/descifra pero el ciphertext lo persiste la app. Por eso el adapter NO reescribe el diseño
+envelope — sólo implementa el `KmsPort` (wrap/unwrap de la data key) que ya consume `EnvelopeSecretBackend`:
+
+```
+token OAuth efímero → AES-256-GCM local con DATA KEY → ciphertext persistido tenant-scoped en SOEC (PG)
+DATA KEY → Transit encrypt (wrap) → vault:vN:… guardado como wrappedDataKey
+resolver: wrappedDataKey → Transit decrypt (unwrap) → DATA KEY → descifrado local → token → uso → descarte
+```
+
+Implementado en `apps/api/src/acquisition/meta-vault-transit.ts`:
+
+- `VAULT_TRANSIT_ADAPTER = IMPLEMENTED` (`VaultTransitKmsPort implements KmsPort, KmsRewrapCapable`);
+  `wrapDataKey`=`/v1/<mount>/encrypt/<key>`, `unwrapDataKey`=`/decrypt`, `salud`=`/v1/sys/health`.
+- `VAULT_HTTP_TRANSPORT = IMPLEMENTED` (`TransporteHttpVault`: `fetch` + `AbortController` timeout;
+  `esProductivo = true`). `FAKE_TRANSPORT = IMPLEMENTED` (`FakeTransporteVault`, fiel al contrato, AES-GCM
+  con master key en memoria SÓLO test, `esProductivo = false`).
+- `MASTER_KEY_LOCATION = Vault` (Transit nunca la exporta). `HOMEMADE_CRYPTO = NO` (APIs oficiales de Transit).
+- `META_TOKEN_SENT_TO_VAULT = NO` — sólo la data key viaja a `encrypt`/`decrypt`; test lo verifica sobre las
+  peticiones capturadas.
+- `AUTH_MODEL` = puerto `VaultAuthProvider` (hoy `VaultTokenEstaticoAuth`, token **inyectado** no hardcodeado;
+  AppRole/JWT posible sin cambiar la API). El modelo definitivo se decide en el provisioning real.
+- `CONFIG` (todo externo, nada hardcodeado): `VAULT_ADDR`, `VAULT_NAMESPACE?`, `VAULT_TRANSIT_MOUNT`,
+  `VAULT_TRANSIT_KEY`, timeout; `validarConfigVault` falla-cerrado si falta algo.
+- `FAIL_CLOSED`: timeout; jamás loggea plaintext/token/ciphertext; sin plaintext en excepciones; sanitizer
+  central en los mensajes de error; valida el prefijo `vault:vN:` antes de la red; distingue
+  `VaultNoDisponibleError` (5xx/429/timeout/red) de `VaultDescifradoError` (400 en decrypt) y de
+  `VaultAutenticacionError` (401/403) / `VaultConfiguracionError` (404/config) / `VaultRespuestaInvalidaError`
+  (body malformado). `KEY_ROTATION/REWRAP` soportado por contrato (`reenvolverDataKey` = `/rewrap/<key>`),
+  **no ejecutado** en el flujo.
+
+`TESTED_WITH_SYNTHETIC_SECRETS` (`acquisition-meta-vault-transit.test.ts`, 16): wrap/unwrap round-trip,
+end-to-end con `EnvelopeSecretBackend`, token Meta nunca enviado a Vault, forwarding de token/namespace,
+indisponible vs. descifrado vs. auth/config/malformado, rechazo pre-red de ciphertext malformado, rewrap
+round-trip, mapeo de salud, gate de producción (fake ⇒ no productivo), sanitización de errores.
+
+`REAL_VAULT_PROVISIONED = NO` · `REAL_VAULT_CREDENTIALS = NO` · `REAL_BACKEND_SMOKE = NOT_RUN` ·
+`REAL_META_TOKEN_USED = NO`. **`PRODUCTION_SECRET_BACKEND = IMPLEMENTED_NOT_VERIFIED`.** No se marca READY
+hasta que exista un HCP Vault real y pase: synthetic store/encrypt → persistence → resolve/decrypt →
+compare → delete/cleanup contra infraestructura real.
+
 ## Referencias
 
+- Vault Transit Secrets Engine (encrypt/decrypt/rewrap; app persiste el ciphertext) — developer.hashicorp.com/vault/docs/secrets/transit
+- HCP Vault Dedicated (namespaces, `X-Vault-Namespace`) — developer.hashicorp.com/hcp/docs/vault
+- Vault `/sys/health` status codes — developer.hashicorp.com/vault/api-docs/system/health
 - Graph API changelog / versiones — developers.facebook.com/docs/graph-api/changelog
 - Instagram Platform · overview / content publishing — developers.facebook.com/docs/instagram-platform/
 - Lead Ads (leads_retrieval, App Review) — developers.facebook.com/documentation/ads-commerce/marketing-api/guides/lead-ads
