@@ -196,6 +196,44 @@ conectarse: `META_GRAPH_CALLS_FROM_SOEC = 0`.
 siguen restringidas). Contratos en `apps/api/src/acquisition/meta-ads.ts`; tests en
 `apps/api/test/acquisition-meta-ads.test.ts`.
 
+## 9. PRODUCTION READ-ONLY ONBOARDING DESIGN (2026-08-16) — DESIGNED, NOT CONNECTED
+
+Diseño (contratos + máquina de estados + tests); **NO se conecta nada**: `REAL_OAUTH_EXECUTED = NO`,
+`REAL_TOKEN_CREATED = NO`, `META_GRAPH_CALLS_FROM_SOEC = 0`, `PRODUCTION_CONNECTION = NOT_CONNECTED`.
+
+```
+Organization → OAuth (state anti-CSRF) → callback → validar state (one-time, org autoritativa del state)
+  → validar scopes vs allowlist → discover assets (por ID) → HUMAN BINDING (confirmación explícita)
+  → credencial cifrada por REFERENCIA (SecretStore) → CONNECTED_READ_ONLY → sync inicial → health
+```
+
+Estados (`meta-onboarding.ts`): NOT_CONNECTED · OAUTH_PENDING · OAUTH_CALLBACK_RECEIVED · TOKEN_VALIDATING ·
+SCOPES_INCOMPLETE · ASSETS_DISCOVERED · BINDING_PENDING · CONNECTED_READ_ONLY · DEGRADED · REAUTH_REQUIRED ·
+REVOKED · DISCONNECTED. **Nunca** se salta a CONNECTED sin binding humano; el callback fail-closed no deja
+un CONNECTED falso; `connectionStatus` ╪ `healthStatus`.
+
+- **Scopes (`meta-oauth.ts`):** allowlist READ-ONLY (pages_show_list, business_management, instagram_basic,
+  pages_read_engagement, instagram_manage_insights, ads_read). PROHIBIDOS: ads_management, leads_retrieval,
+  instagram_content_publish/manage_*, pages_manage_*. Un scope inesperado/de escritura **NO** eleva
+  capacidades — SOEC gobierna por su allowlist.
+- **OAuth state:** ligado a (org, actor), one-time, expirable, nonce impredecible inyectado. La org
+  **autoritativa es la del state**, no la del callback (previene org swapping / CSRF / replay).
+- **Human binding gate:** descubrir ╪ vincular. Binding sólo por confirmación humana explícita, por **ID
+  canónico** (nunca por nombre/admin/app/único-resultado). *SC Topografía* (`100558733139736`) no puede
+  auto-vincularse a SmileFlow.
+- **Credencial por REFERENCIA:** `CredencialMetaRef` con `secretRef` opaca (la resuelve el adapter vía
+  `@soec/secretos`, nunca el dominio); **jamás** token en claro en DB/logs/audit/errores/frontend.
+- **Capability negotiation:** desde scopes efectivos + bindings confirmados + salud; **nunca** una
+  capacidad de escritura; sin conexión activa ⇒ ninguna capacidad (capability ╪ authorization).
+- **Health / reauth / disconnect:** token expirado/revocado ⇒ REAUTH_REQUIRED **sin borrar bindings**;
+  revocación es un estado, no un borrado de métricas históricas.
+- **Graph read port:** `MetaGraphReadPort` sólo discover/read; **cero** métodos de escritura. Toda
+  respuesta pasa por el sanitizador central (`meta-organic`) antes de log/persistencia.
+
+`ADS_WRITE_ADAPTER = LOCKED` · `AUTONOMOUS_REAL = false`. Contratos: `meta-onboarding.ts`, `meta-oauth.ts`;
+tests: `acquisition-meta-onboarding.test.ts`. **NEXT_GATE: autorización humana para implementar el OAuth
+real + almacenamiento de secreto productivo (KMS/SecretStore prod).**
+
 ## Referencias
 
 - Graph API changelog / versiones — developers.facebook.com/docs/graph-api/changelog
