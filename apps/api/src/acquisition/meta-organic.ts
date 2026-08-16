@@ -16,17 +16,24 @@
 export const CLAVES_SECRETAS_URL = ['access_token', 'appsecret_proof'] as const;
 
 const PATRON_SECRETO_URL = `([?&](?:${CLAVES_SECRETAS_URL.join('|')})=)[^&#\\s]*`;
+const PATRON_BEARER = `(Bearer\\s+)[A-Za-z0-9._\\-]+`;
 /** Detección (NO global: `.test()` sería stateful con la flag `g`). */
-const RE_DETECCION = new RegExp(PATRON_SECRETO_URL, 'i');
+const RE_DETECCION_URL = new RegExp(PATRON_SECRETO_URL, 'i');
+const RE_DETECCION_BEARER = new RegExp(PATRON_BEARER, 'i');
 
-/** ¿La cadena parece una URL de Graph con un secreto embebido? */
+/** ¿La cadena contiene un secreto (token en URL o `Bearer …`)? */
 export function contieneTokenEnUrl(s: unknown): boolean {
-  return typeof s === 'string' && RE_DETECCION.test(s);
+  return typeof s === 'string' && (RE_DETECCION_URL.test(s) || RE_DETECCION_BEARER.test(s));
 }
 
 /** Redacta `access_token`/`appsecret_proof` de una URL, preservando el resto de los parámetros. */
 export function redactarUrl(url: string): string {
   return url.replace(new RegExp(PATRON_SECRETO_URL, 'gi'), '$1[REDACTED]');
+}
+
+/** Redacta todos los secretos conocidos de un texto: tokens de URL + `Bearer <token>`. */
+export function redactarSecretos(s: string): string {
+  return redactarUrl(s).replace(new RegExp(PATRON_BEARER, 'gi'), '$1[REDACTED]');
 }
 
 export interface PagingCursors {

@@ -234,6 +234,31 @@ un CONNECTED falso; `connectionStatus` ╪ `healthStatus`.
 tests: `acquisition-meta-onboarding.test.ts`. **NEXT_GATE: autorización humana para implementar el OAuth
 real + almacenamiento de secreto productivo (KMS/SecretStore prod).**
 
+## 10. META READ-ONLY PRODUCTION IMPLEMENTATION (2026-08-16)
+
+Implementación de los casos de uso + puertos + fakes (`meta-oauth-flow.ts`). **NADA ejecutado contra
+Meta:** `REAL_OAUTH_EXECUTED = NO`, `REAL_TOKEN_CREATED = NO`, `META_GRAPH_CALLS_FROM_SOEC = 0`,
+`PRODUCTION_CONNECTION = NOT_CONNECTED`.
+
+- **IMPLEMENTED (con fakes en tests):** `iniciarConexionMeta` (state seguro + authorization URL con
+  allowlist read-only), `procesarCallbackMeta` (valida+consume state atómico → exchange (fake) → valida
+  scopes efectivos → `SecretWriter.almacenar` → metadata `secretRef` → discovery (fake) → BINDING_PENDING;
+  **nunca CONNECTED**; fail-closed sin token en DB/audit), `confirmarBindingMeta` (exige activo descubierto
+  + confirmación humana por ID canónico → CONNECTED_READ_ONLY + capacidades read-only), DTOs seguros,
+  redacción de `Bearer` añadida al sanitizador central.
+- **TESTED_WITH_FAKES:** matriz de seguridad (consumo atómico un-ganador, forged/expired/replay/cross-tenant,
+  scope FORBIDDEN inesperado ⇒ SCOPES_INCOMPLETE sin persistir token, SecretWriter falla ⇒ NOT_CONNECTED sin
+  token en metadata, token nunca en credencial/DTO, SC Topografía no vinculable a SmileFlow, activo no
+  descubierto rechazado, binding idempotente, Bearer/access_token redaction).
+- **NOT YET EXECUTED AGAINST META / REQUIRES HUMAN AUTHORIZATION:** OAuth real, token real, adapter HTTP a
+  Meta, discovery real, sync real. Los adapters productivos son puertos inyectados (hoy fakes).
+
+**`PRODUCTION_SECRET_BACKEND = MISSING`** — hallazgo FASE 10: `@soec/secretos` `SecretStore` es SÓLO de
+resolución (`resolver`); NO existe backend de ESCRITURA de secretos (KMS/vault) y está prohibido improvisar
+uno con clave embebida. El flujo persiste únicamente `secretRef`; el valor del token vive sólo dentro del
+`SecretWriterPort`. **Antes de cualquier conexión real hay que decidir/implementar el backend seguro de
+escritura de secretos.** Contratos: `meta-oauth-flow.ts`; tests: `acquisition-meta-oauth-flow.test.ts`.
+
 ## Referencias
 
 - Graph API changelog / versiones — developers.facebook.com/docs/graph-api/changelog
