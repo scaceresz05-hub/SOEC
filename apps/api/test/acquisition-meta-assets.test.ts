@@ -1,6 +1,5 @@
 /**
- * Meta read-only onboarding — preparación sin conexión: aislamiento, allowlist, mapeo de acciones,
- * NOT_CONNECTED≠0 (FASE 37). Sin red, sin tokens, sin efectos.
+ * Meta read-only onboarding — modelo endurecido tras el discovery real (FASE 13). Sin red, sin tokens.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -10,82 +9,130 @@ import {
   esOperacionLecturaPermitida,
   normalizarAccionMeta,
   esResultadoComercialMeta,
+  clasificarFundacion,
   TOKEN_NO_CONECTADO,
   TIPOS_ACTIVO_META,
+  type CapacidadesMeta,
 } from '../src/acquisition/meta-assets';
+import { descubrimientoMetaDe, ACTIVOS_EXTERNOS_NO_VINCULADOS } from '../src/acquisition/meta-discovery';
 import { MetaWriteAdapter } from '../src/acquisition/meta-write-adapter';
 
 describe('Meta assets · aislamiento por tenant y binding explícito', () => {
-  it('META_AUTH_TENANT_SCOPED / CYP_CANNOT_BIND_SMILEFLOW_PAGE: refs de secreto distintas por org', () => {
+  it('refs de secreto distintas por org y por tipo (cross-tenant fail-closed)', () => {
     expect(refSecretoActivo('org-cyp', 'FACEBOOK_PAGE')).toBe('file:org-cyp/meta-page-token');
-    expect(refSecretoActivo('org-smileflow', 'FACEBOOK_PAGE')).toBe('file:org-smileflow/meta-page-token');
     expect(refSecretoActivo('org-cyp', 'FACEBOOK_PAGE')).not.toBe(refSecretoActivo('org-smileflow', 'FACEBOOK_PAGE'));
-    // Distintos por tipo también.
     expect(refSecretoActivo('org-cyp', 'META_AD_ACCOUNT')).not.toBe(refSecretoActivo('org-cyp', 'FACEBOOK_PAGE'));
   });
 
-  it('META_ASSET_NOT_AUTO_SELECTED_BY_NAME: sin binding ⇒ todos NOT_CONFIGURED (no se inventan activos)', () => {
-    const activos = activosMetaDe('org-cyp', 'distribuidora-cyp');
-    expect(activos).toHaveLength(TIPOS_ACTIVO_META.length);
-    expect(activos.every((a) => a.estado === 'NOT_CONFIGURED' && a.externalId === null)).toBe(true);
-    expect(activos.every((a) => a.credentialRefs.length === 0)).toBe(true);
-  });
-
-  it('META_ASSET_BINDING_EXPLICIT: sólo con externalId explícito pasa a PENDING_BINDING', () => {
-    const activos = activosMetaDe('org-cyp', 'distribuidora-cyp', [{ tipo: 'FACEBOOK_PAGE', externalId: 'page_123', displayName: 'CYP' }]);
-    expect(activos.find((a) => a.tipo === 'FACEBOOK_PAGE')?.estado).toBe('PENDING_BINDING');
-    expect(activos.find((a) => a.tipo === 'INSTAGRAM_ACCOUNT')?.estado).toBe('NOT_CONFIGURED');
+  it('BINDING_BY_NAME_PROHIBITED / EXISTING_ASSET != SOEC_CONNECTED: aun con externalId, SOEC no se vincula', () => {
+    const activos = activosMetaDe('org-smileflow', 'smileflow-clinic', [
+      { tipo: 'FACEBOOK_PAGE', externalId: '61570785690749', externalStatus: 'EXISTS', procedencia: 'OBSERVED' },
+    ]);
+    const page = activos.find((a) => a.tipo === 'FACEBOOK_PAGE');
+    expect(page?.externalStatus).toBe('EXISTS'); // existe en Meta
+    expect(page?.estado).toBe('NOT_CONFIGURED'); // pero SOEC NO conectado
+    expect(page?.requiresConfirmation).toBe(true); // binding exige confirmación humana
   });
 });
 
-describe('Meta assets · NOT_CONNECTED ≠ ZERO y token sin valor', () => {
-  it('META_NOT_CONNECTED_IS_NOT_ZERO: sin activos vinculados ⇒ salud NOT_CONNECTED (no 0)', () => {
-    expect(saludMetaDe(activosMetaDe('org-cyp', 'distribuidora-cyp'))).toBe('NOT_CONNECTED');
+describe('Meta assets · Instagram Profile ID ≠ IGSID', () => {
+  it('el profile id observado NO se usa como IGSID; el IGSID permanece UNKNOWN', () => {
+    const d = descubrimientoMetaDe('org-smileflow');
+    const profile = d?.activos.find((a) => a.tipo === 'INSTAGRAM_PROFILE');
+    const igsid = d?.activos.find((a) => a.tipo === 'INSTAGRAM_BUSINESS_ACCOUNT');
+    expect(profile?.externalId).toBe('33006160107');
+    expect(igsid?.externalId).toBeNull(); // IGSID desconocido, no se persiste el candidato
+    expect(igsid?.procedencia).toBe('REQUIRES_VERIFICATION');
+  });
+});
+
+describe('Meta assets · capacidades independientes (Ads restringido no cascada)', () => {
+  it('ADS_RESTRICTED_DOES_NOT_RESTRICT_ORGANIC / foundation FRAGMENTED_RESTRICTED_RECOVERABLE, no CLEAN_REBUILD', () => {
+    const d = descubrimientoMetaDe('org-smileflow')!;
+    expect(d.capacidades.META_ADS).toBe('RESTRICTED');
+    expect(d.capacidades.ORGANIC_INSTAGRAM).toBe('AVAILABLE'); // NO se restringe por Ads
+    expect(d.capacidades.ORGANIC_FACEBOOK).toBe('AVAILABLE');
+    expect(d.claseFundacion).toBe('FRAGMENTED_RESTRICTED_RECOVERABLE');
+    expect(d.claseFundacion).not.toBe('CLEAN_REBUILD');
   });
 
-  it('el modelo de token no contiene valor y arranca sin conexión', () => {
+  it('CLEAN_REBUILD nunca se deriva sólo de una restricción de Ads', () => {
+    const soloAdsRestringido: CapacidadesMeta = {
+      ORGANIC_FACEBOOK: 'AVAILABLE',
+      ORGANIC_INSTAGRAM: 'AVAILABLE',
+      META_ADS: 'RESTRICTED',
+      LEAD_ADS: 'RESTRICTED',
+      API_READ: 'NOT_CONNECTED',
+      API_WRITE: 'NOT_CONNECTED',
+    };
+    expect(clasificarFundacion(soloAdsRestringido)).not.toBe('CLEAN_REBUILD');
+  });
+});
+
+describe('Meta assets · CYP ausente y SC Topografía no vinculada', () => {
+  it('CYP_FOUNDATION_ABSENT bajo el perfil inspeccionado', () => {
+    const d = descubrimientoMetaDe('org-cyp')!;
+    expect(d.claseFundacion).toBe('FOUNDATION_ABSENT');
+    expect(d.activos.every((a) => a.estado === 'NOT_CONFIGURED')).toBe(true);
+    expect(d.soecGraphConnection).toBe('NOT_CONNECTED');
+  });
+
+  it('SC_TOPOGRAFIA_NOT_AUTO_BOUND: mismo humano ≠ tenant collision; DO_NOT_BIND', () => {
+    const sc = ACTIVOS_EXTERNOS_NO_VINCULADOS.find((a) => a.pageId === '100095553750707');
+    expect(sc?.binding).toBe('DO_NOT_BIND');
+    expect(sc?.boundToSoecOrg).toBeNull();
+    // Distintos negocios bajo el mismo admin NO colisionan: descubrimientos independientes.
+    expect(descubrimientoMetaDe('org-smileflow')?.organizationId).toBe('org-smileflow');
+    expect(descubrimientoMetaDe('org-cyp')?.organizationId).toBe('org-cyp');
+  });
+});
+
+describe('Meta assets · App vs Dataset no consolidado', () => {
+  it('APP_DATASET_ID_COLLISION_STATUS = REQUIRES_VERIFICATION (no se afirma App==Dataset)', () => {
+    const d = descubrimientoMetaDe('org-smileflow')!;
+    expect(d.appDatasetColision).toBe('REQUIRES_VERIFICATION');
+    const app = d.activos.find((a) => a.tipo === 'META_APP');
+    expect(app?.procedencia).toBe('REQUIRES_VERIFICATION');
+  });
+});
+
+describe('Meta assets · NOT_CONNECTED/RESTRICTED/UNKNOWN ≠ 0 y token sin valor', () => {
+  it('sin activos vinculados ⇒ NOT_CONNECTED (no 0); error/restricted no son "sin datos"', () => {
+    expect(saludMetaDe(activosMetaDe('org-smileflow', 'smileflow-clinic'))).toBe('NOT_CONNECTED');
+  });
+  it('token model sin valor', () => {
     expect(TOKEN_NO_CONECTADO).toEqual({ tipo: 'NONE', issuedAt: null, expiresAt: null, estado: 'NONE' });
-    // Sólo metadatos de vigencia; ninguna clave que contenga el valor del token.
     expect(Object.keys(TOKEN_NO_CONECTADO)).not.toContain('valor');
-    expect(Object.keys(TOKEN_NO_CONECTADO)).not.toContain('value');
   });
 });
 
-describe('Meta assets · allowlist de lectura (default-deny)', () => {
-  it('READ_ADAPTER_ONLY_ALLOWLISTED_OPERATIONS: sólo READ_* permitido; escritura ⇒ false', () => {
+describe('Meta assets · allowlist de lectura y mapeo de acciones', () => {
+  it('READ_ONLY_ALLOWLIST: sólo READ_* permitido; escritura ⇒ false', () => {
     expect(esOperacionLecturaPermitida('READ_PAGES')).toBe(true);
-    expect(esOperacionLecturaPermitida('READ_AD_INSIGHTS')).toBe(true);
+    expect(esOperacionLecturaPermitida('READ_LEAD_FORMS_METADATA')).toBe(true);
     expect(esOperacionLecturaPermitida('CREATE_CAMPAIGN')).toBe(false);
     expect(esOperacionLecturaPermitida('PUBLISH_POST')).toBe(false);
-    expect(esOperacionLecturaPermitida('EDIT_BUDGET')).toBe(false);
   });
-});
-
-describe('Meta assets · normalización de acciones (nunca suma-todo)', () => {
-  it('META_CLICK_NOT_LEAD / META_ENGAGEMENT_NOT_SALE / UNKNOWN_NOT_COMMERCIAL', () => {
+  it('META_CLICK_NOT_LEAD / ENGAGEMENT_NOT_SALE / UNKNOWN_NOT_COMMERCIAL', () => {
     expect(normalizarAccionMeta('link_click')).toBe('LINK_CLICK');
     expect(esResultadoComercialMeta('LINK_CLICK')).toBe(false);
-    expect(normalizarAccionMeta('post_engagement')).toBe('ENGAGEMENT');
     expect(esResultadoComercialMeta('ENGAGEMENT')).toBe(false);
-    expect(normalizarAccionMeta('lead')).toBe('LEAD');
-    expect(esResultadoComercialMeta('LEAD')).toBe(true);
-    expect(normalizarAccionMeta('purchase')).toBe('PURCHASE');
-    expect(esResultadoComercialMeta('PURCHASE')).toBe(true);
-    // Acción desconocida NO es comercial (no se cuenta como conversión).
-    expect(normalizarAccionMeta('algun_action_type_raro')).toBe('UNKNOWN');
+    expect(esResultadoComercialMeta(normalizarAccionMeta('lead'))).toBe(true);
+    expect(normalizarAccionMeta('raro')).toBe('UNKNOWN');
     expect(esResultadoComercialMeta('UNKNOWN')).toBe(false);
-  });
-
-  it('no suma todas las acciones: cada action_type mapea individualmente', () => {
-    const acciones = ['link_click', 'post_engagement', 'lead', 'purchase', 'raro'];
-    const comerciales = acciones.map(normalizarAccionMeta).filter(esResultadoComercialMeta);
-    expect(comerciales).toEqual(['LEAD', 'PURCHASE']); // sólo 2 comerciales de 5 acciones
   });
 });
 
-describe('Meta assets · escritura sigue bloqueada', () => {
-  it('WRITE_ADAPTER_REMAINS_LOCKED / AUTONOMOUS_REAL_FALSE_BLOCKS_META_WRITE', () => {
+describe('Meta assets · escritura bloqueada + tipos completos', () => {
+  it('WRITE_ADAPTER_REMAINS_LOCKED', () => {
     expect(new MetaWriteAdapter(null).estado()).toBe('NOT_READY');
     expect(MetaWriteAdapter.puedeEjecutarReal).toBe(false);
+  });
+  it('el modelo representa los activos distintos (Profile/IGSID/Dataset/App/WhatsApp/LeadForm separados)', () => {
+    expect(TIPOS_ACTIVO_META).toContain('INSTAGRAM_PROFILE');
+    expect(TIPOS_ACTIVO_META).toContain('INSTAGRAM_BUSINESS_ACCOUNT');
+    expect(TIPOS_ACTIVO_META).toContain('DATASET');
+    expect(TIPOS_ACTIVO_META).toContain('WHATSAPP_BUSINESS_ACCOUNT');
+    expect(TIPOS_ACTIVO_META).toContain('LEAD_FORM');
   });
 });

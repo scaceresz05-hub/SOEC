@@ -70,6 +70,45 @@ Estas condiciones son exactamente las STOP CONDITIONS del bloque → **STOP ante
 
 **Secuencia humana para desbloquear (próximo paso, fuera de este bloque):** (1) confirmar si cada negocio tiene activos Meta; (2) crear/designar la App de SOEC (tipo Business; productos: Facebook Login, Pages API, Instagram Graph, Marketing API, Lead Ads); (3) Business Verification; (4) App Review de los permisos de lectura; (5) el dueño autoriza vía OAuth y selecciona explícitamente los activos por empresa; (6) recién entonces SOEC implementa las llamadas Graph READ contra la App aprobada.
 
+## 6. REAL ASSET DISCOVERY — CLAUDE CHROME (2026-08-15)
+
+Discovery de solo lectura ejecutado por Claude‑in‑Chrome sobre la sesión Meta del usuario (un único
+perfil admin; **nombre omitido por privacidad**). Sin PII persistida (sin email/teléfono/tokens/
+billing/leads). Clasificación: **OBSERVED** (visto con ID), **UNKNOWN**, **REQUIRES_VERIFICATION**.
+Regla dura: *activo existe* ╪ *SOEC conectado* — `SOEC_META_GRAPH_CONNECTION = NOT_CONNECTED`,
+`META_GRAPH_CALLS = 0`.
+
+**SmileFlow — `FOUNDATION_CLASS = FRAGMENTED_RESTRICTED_RECOVERABLE`** (orgánico sano, Ads restringido;
+`RELATION = FIRST_PARTY`, `ACCESS_REQUIREMENT = TO_BE_DETERMINED_PER_PERMISSION`):
+
+| ASSET_TYPE | ASSET_ID | OWNER_BUSINESS_ID | EXTERNAL_STATUS | SOEC_CONN | PROC | CONFIRM |
+|---|---|---|---|---|---|---|
+| META_BUSINESS | 934186066270538 | 934186066270538 | RESTRICTED (verif. REJECTED, ads restringido) | NOT_CONNECTED | OBSERVED | YES |
+| FACEBOOK_PAGE | 61570785690749 | 934186066270538 | EXISTS | NOT_CONNECTED | OBSERVED | YES |
+| INSTAGRAM_PROFILE | 33006160107 | 934186066270538 | EXISTS (BUSINESS, CLEAN, organic AVAILABLE) | NOT_CONNECTED | OBSERVED | YES |
+| INSTAGRAM_BUSINESS_ACCOUNT (IGSID) | UNKNOWN | — | UNKNOWN | NOT_CONNECTED | REQUIRES_VERIFICATION | YES |
+| META_AD_ACCOUNT | 1037025024374407 | fuera del portfolio | EXISTS | NOT_CONNECTED | OBSERVED | YES |
+| DATASET | 972064645294895 | — | UNKNOWN | NOT_CONNECTED | REQUIRES_VERIFICATION | YES |
+| META_APP | UNKNOWN | — | UNKNOWN | NOT_CONNECTED | REQUIRES_VERIFICATION | YES |
+| WHATSAPP_BUSINESS_ACCOUNT | (presencia) | — | EXISTS (presence VERIFIED; API NOT_VERIFIED) | NOT_CONNECTED | OBSERVED | YES |
+| LEAD_FORM | (existen) | — | EXISTS (lead campaigns + forms) | NOT_CONNECTED | OBSERVED | YES |
+
+Capacidades **independientes** (Ads restringido NO cascada): `ORGANIC_FACEBOOK = AVAILABLE`,
+`ORGANIC_INSTAGRAM = AVAILABLE`, `META_ADS = RESTRICTED`, `LEAD_ADS = RESTRICTED`,
+`API_READ = NOT_CONNECTED`, `API_WRITE = NOT_CONNECTED`. Notas: **Instagram Profile ID (33006160107) ╪
+IGSID de Graph** (el IGSID se descubre por API; el candidato observado NO se persiste). **App vs
+Dataset** no consolidado: `APP_DATASET_ID_COLLISION_STATUS = REQUIRES_VERIFICATION`.
+
+**C Y P — `FOUNDATION_ABSENT` bajo el perfil inspeccionado** (no "C Y P no existe en Meta"): sin
+Portfolio/Page/IG/AdAccount/Pixel/App observados → todo `NOT_CONFIGURED`.
+
+**Activo externo no vinculado:** *SC Topografía e Ingeniería* (PAGE_ID 100095553750707) →
+`UNBOUND / DO_NOT_BIND`. Administrado por el mismo humano, pero SOEC **no** lo auto‑vincula: prueba de
+que el binding es explícito, por ID y por tenant (nunca por nombre ni por admin compartido).
+
+Modelo en `apps/api/src/acquisition/meta-assets.ts` (+ `meta-discovery.ts`); adversariales en
+`apps/api/test/acquisition-meta-assets.test.ts`.
+
 ## Referencias
 
 - Graph API changelog / versiones — developers.facebook.com/docs/graph-api/changelog
