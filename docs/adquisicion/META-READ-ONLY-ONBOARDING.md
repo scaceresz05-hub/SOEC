@@ -168,6 +168,34 @@ las URLs de paging completas (conserva sólo cursors) **antes** de cualquier log
 (`VALUE/ZERO/NO_DATA/NOT_SUPPORTED/PERMISSION_MISSING/…`): nunca `null/missing/error → 0`. Watch time en
 **milisegundos** (no se convierte). Adversariales en `apps/api/test/acquisition-meta-organic.test.ts`.
 
+## 8. VERIFIED META ADS GRAPH CHAIN (2026-08-16)
+
+Lectura de **Ads verificada por Graph** (`ads_read` Standard; token de prueba). SOEC sigue sin
+conectarse: `META_GRAPH_CALLS_FROM_SOEC = 0`.
+
+- **VERIFIED:** App `972064645294895` (Development) · Ad Account `1037025024374407` ("Caceres SC",
+  status 1, **CLP**, **America/Santiago**, UTC-4). 3 campañas: `120246877650170097` OUTCOME_LEADS/PAUSED,
+  `120246449950670097` OUTCOME_LEADS/ACTIVE, `120242921559350097` MESSAGES/ACTIVE. Insights agregados
+  (`date_preset=maximum` → 2023-07-31 … 2026-08-16): impressions 1697 · reach 1216 · frequency 1.3956 ·
+  clicks 58 · spend 9741 CLP · cpc 167.95 CLP · cpm 5740.13 CLP · ctr 3.4178. `ads_read` Standard PASS,
+  **sin App Review / Business Verification / Advanced Access** para la prueba de desarrollo.
+- **NOT_TESTED:** ADS_WRITE · LEAD_RETRIEVAL · actions (leads/messages/conversions).
+- **NO INFERIDO (guardas):** `status/effective_status = ACTIVE` **╪** entrega (`deliveryState = NOT_OBSERVED`);
+  `objective = OUTCOME_LEADS` **╪** capacidad de retrieval de leads ni PII; **business field ausente ╪**
+  ownership personal (`businessRelationship = NO_BUSINESS_FIELD`); `maximum` **╪** "últimos 90 días"
+  (se guarda provenance); la restricción del portfolio NO impidió las **lecturas** probadas, pero **no**
+  se generaliza a entrega/writes/publishing/CAPI/lead retrieval.
+- **Dinero:** todo importe transporta moneda (`{amount, currency}`); imposible mezclar CLP con USD.
+- **Seguridad:** las respuestas de `/campaigns` y `/insights` pasan por el MISMO sanitizador central
+  (`meta-organic.ts`): `access_token`/`appsecret_proof` redactados, `paging.next/previous` descartados.
+  `RAW_GRAPH_RESPONSE_PERSISTENCE = FORBIDDEN`.
+- **Frontera:** `ADS_READ_CAPABILITY = AVAILABLE` ╪ `ORGANIZATION_CONNECTION_STATUS = NOT_CONNECTED` ╪
+  `PRODUCTION_AUTHORIZATION = NOT_GRANTED`. `ADS_WRITE_ADAPTER = LOCKED`, `AUTONOMOUS_REAL = false`.
+
+`READ_FOUNDATION = RECOVER_EXISTING_APP` · `ADS_FOUNDATION = RECOVER_EXISTING` (lectura; entrega/writes
+siguen restringidas). Contratos en `apps/api/src/acquisition/meta-ads.ts`; tests en
+`apps/api/test/acquisition-meta-ads.test.ts`.
+
 ## Referencias
 
 - Graph API changelog / versiones — developers.facebook.com/docs/graph-api/changelog

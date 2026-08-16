@@ -119,12 +119,13 @@ describe('Meta assets · evidencia Graph verificada (discriminación de Pages)',
     expect(page?.externalId).toBe('1066708446525633'); // se usa el canónico, no el de UI
   });
 
-  it('READ_FOUNDATION = RECOVER_EXISTING_APP separado de ADS (UNRESOLVED)', () => {
+  it('READ_FOUNDATION = RECOVER_EXISTING_APP; ADS_READ = PASS pero write/lead LOCKED/NOT_TESTED', () => {
     const d = descubrimientoMetaDe('org-smileflow')!;
     expect(d.readFoundation).toBe('RECOVER_EXISTING_APP');
-    expect(d.adsFoundation).toBe('UNRESOLVED'); // portfolio sigue restringido para Ads
+    expect(d.adsFoundation).toBe('RECOVER_EXISTING'); // ads_read PASS sobre la app existente
     expect(d.matrizLectura.INSTAGRAM_MEDIA_INSIGHTS).toBe('PASS');
-    expect(d.matrizLectura.ADS_READ).toBe('NOT_TESTED'); // no se infiere de organic
+    expect(d.matrizLectura.ADS_READ).toBe('PASS');
+    expect(d.matrizLectura.LEAD_ADS_READ).toBe('NOT_TESTED'); // ads read ╪ lead retrieval
     expect(d.matrizLectura.INSTAGRAM_AUDIENCE_DEMOGRAPHICS).toBe('NO_DATA'); // no FAIL
     expect(d.matrizLectura.META_WRITE).toBe('LOCKED');
     expect(d.mediaCount).toBe(11);

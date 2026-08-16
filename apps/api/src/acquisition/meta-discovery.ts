@@ -52,7 +52,7 @@ export type MatrizLecturaMeta = Readonly<Record<CapacidadLecturaMeta, EstadoCapa
 
 /** Fundación de LECTURA separada de la de Ads (el portfolio sigue restringido para publicidad). */
 export type FundacionLectura = 'RECOVER_EXISTING_APP' | 'CLEAN_REBUILD' | 'UNKNOWN';
-export type FundacionAds = 'UNRESOLVED' | 'NOT_TESTED' | 'RESTRICTED' | 'AVAILABLE' | 'UNKNOWN';
+export type FundacionAds = 'UNRESOLVED' | 'NOT_TESTED' | 'RESTRICTED' | 'AVAILABLE' | 'RECOVER_EXISTING' | 'UNKNOWN';
 
 export interface DescubrimientoMeta {
   readonly organizationId: string;
@@ -162,13 +162,13 @@ function descubrimientoSmileflow(): DescubrimientoMeta {
       INSTAGRAM_CURRENT_FOLLOWER_COUNT: 'PASS',
       INSTAGRAM_AUDIENCE_DEMOGRAPHICS: 'NO_DATA', // 200 + data:[] — no es FAIL ni "privacy threshold probado"
       FOLLOWER_GROWTH_OVER_TIME: 'UNKNOWN', // sin histórico; no se infiere
-      ADS_READ: 'NOT_TESTED',
+      ADS_READ: 'PASS', // ads_read Standard: cuenta + campañas + insights agregados leídos por Graph
       LEAD_ADS_READ: 'NOT_TESTED',
       INSTAGRAM_WRITE: 'LOCKED',
       META_WRITE: 'LOCKED',
     },
     readFoundation: 'RECOVER_EXISTING_APP', // la cadena Business→Page→IG→media→insights funciona sobre la app existente
-    adsFoundation: 'UNRESOLVED', // el portfolio sigue con restricción publicitaria; Ads NO probado
+    adsFoundation: 'RECOVER_EXISTING', // ads_read PASS sobre la app existente; el portfolio sigue restringido para ENTREGA/writes
     mediaCount: 11,
     mediaTypeDistribution: { image: 7, reels: 4 },
   };
