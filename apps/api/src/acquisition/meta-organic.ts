@@ -32,12 +32,21 @@ export function redactarUrl(url: string): string {
 }
 
 const PATRON_OAUTH_CODE = `([?&]code=)[^&#\\s]*`;
+/** AWS access key id (AKIA/ASIA + 16 base32) — por si aparece accidentalmente en un mensaje. */
+const PATRON_AWS_ACCESS_KEY_ID = `\\b(?:AKIA|ASIA)[0-9A-Z]{16}\\b`;
+/** Valores etiquetados como secret access key / session token de AWS. */
+const PATRON_AWS_SECRETO_ETIQUETADO = `((?:aws_secret_access_key|aws_session_token|x-amz-security-token)\\s*[=:]\\s*)\\S+`;
 
-/** Redacta todos los secretos conocidos de un texto: tokens de URL + `Bearer <token>` + `code=` (OAuth). */
+/**
+ * Redacta todos los secretos conocidos de un texto: tokens de URL + `Bearer <token>` + `code=` (OAuth) +
+ * credenciales AWS (access key id y secretos etiquetados). Defensa en profundidad para logs/errores.
+ */
 export function redactarSecretos(s: string): string {
   return redactarUrl(s)
     .replace(new RegExp(PATRON_BEARER, 'gi'), '$1[REDACTED]')
-    .replace(new RegExp(PATRON_OAUTH_CODE, 'gi'), '$1[REDACTED]');
+    .replace(new RegExp(PATRON_OAUTH_CODE, 'gi'), '$1[REDACTED]')
+    .replace(new RegExp(PATRON_AWS_ACCESS_KEY_ID, 'g'), '[REDACTED]')
+    .replace(new RegExp(PATRON_AWS_SECRETO_ETIQUETADO, 'gi'), '$1[REDACTED]');
 }
 
 export interface PagingCursors {

@@ -26,7 +26,25 @@ import {
 } from './meta-vault-transit';
 
 export type SaludSmoke = 'AVAILABLE' | 'UNAVAILABLE' | 'AUTH_FAILED' | 'NETWORK_ERROR' | 'MISCONFIGURED' | 'NOT_RUN';
-export type ClaseFallo = 'CONFIGURATION' | 'AUTH' | 'NETWORK_EGRESS' | 'VAULT_POLICY' | 'TRANSIT_ENGINE' | 'TRANSIT_KEY' | 'OTHER';
+/** Taxonomía compartida de fallos de smoke (cubre Vault Transit y AWS KMS). */
+export type ClaseFallo =
+  | 'CONFIGURATION'
+  | 'AUTH'
+  | 'PERMISSION'
+  | 'NETWORK_EGRESS'
+  | 'NOT_AVAILABLE'
+  | 'TIMEOUT'
+  | 'ENCRYPT_FAILED'
+  | 'DECRYPT_FAILED'
+  | 'MALFORMED_RESPONSE'
+  | 'KEY_NOT_FOUND'
+  | 'VAULT_POLICY'
+  | 'TRANSIT_ENGINE'
+  | 'TRANSIT_KEY'
+  | 'SECRET_BACKEND'
+  | 'TENANT_ISOLATION'
+  | 'CLEANUP'
+  | 'OTHER';
 export type VeredictoBackend = 'READY' | 'IMPLEMENTED_NOT_VERIFIED' | 'FAILED';
 
 export interface ResultadoSmoke {
@@ -109,6 +127,10 @@ export interface OpcionesSmoke {
   readonly nombreLogico?: string;
   /** Generador del secreto sintético (default `randomBytes`); inyectable sólo para tests deterministas. */
   readonly generarSecreto?: () => string;
+  /** Clasificador de error por backend (default: Vault Transit). AWS KMS inyecta el suyo. */
+  readonly clasificarError?: (e: unknown, r: ResultadoSmoke) => void;
+  /** Mapea salud≠AVAILABLE → clase de fallo (default: Vault). `true` = MISCONFIGURED. */
+  readonly claseFalloSalud?: (misconfigured: boolean) => ClaseFallo;
 }
 
 /**
@@ -119,6 +141,8 @@ export interface OpcionesSmoke {
  */
 export async function ejecutarSmoke(backend: EnvelopeSecretBackend, opts: OpcionesSmoke = {}): Promise<ResultadoSmoke> {
   const r = resultadoBase();
+  const clasif = opts.clasificarError ?? clasificarError;
+  const mapaSalud = opts.claseFalloSalud ?? ((misconfigured: boolean): ClaseFallo => (misconfigured ? 'TRANSIT_ENGINE' : 'NETWORK_EGRESS'));
   r.configReady = true;
   r.productionAdapter = backend.esProductivo;
 
@@ -126,7 +150,7 @@ export async function ejecutarSmoke(backend: EnvelopeSecretBackend, opts: Opcion
   r.vaultHealth = salud === 'AVAILABLE' ? 'AVAILABLE' : salud === 'MISCONFIGURED' ? 'MISCONFIGURED' : 'UNAVAILABLE';
   if (salud !== 'AVAILABLE') {
     r.productionSecretBackend = 'IMPLEMENTED_NOT_VERIFIED';
-    r.failureClass = salud === 'MISCONFIGURED' ? 'TRANSIT_ENGINE' : 'NETWORK_EGRESS';
+    r.failureClass = mapaSalud(salud === 'MISCONFIGURED');
     return r;
   }
 
@@ -145,7 +169,7 @@ export async function ejecutarSmoke(backend: EnvelopeSecretBackend, opts: Opcion
       r.auth = 'PASS';
       r.networkEgress = 'PASS';
     } catch (e) {
-      clasificarError(e, r);
+      clasif(e, r);
       r.store = 'FAIL';
       r.productionSecretBackend = 'FAILED';
       return r;
@@ -156,7 +180,7 @@ export async function ejecutarSmoke(backend: EnvelopeSecretBackend, opts: Opcion
       r.resolve = 'PASS';
       r.roundTripMatch = caja.usar((v) => igualdadSegura(v, secreto)) ? 'YES' : 'NO';
     } catch (e) {
-      clasificarError(e, r);
+      clasif(e, r);
       r.resolve = 'FAIL';
       r.productionSecretBackend = 'FAILED';
       return r;
