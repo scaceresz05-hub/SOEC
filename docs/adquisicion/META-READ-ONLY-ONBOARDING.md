@@ -127,6 +127,47 @@ que el binding es explícito, por ID y por tenant (nunca por nombre ni por admin
 Modelo en `apps/api/src/acquisition/meta-assets.ts` (+ `meta-discovery.ts`); adversariales en
 `apps/api/test/acquisition-meta-assets.test.ts`.
 
+## 7. VERIFIED ORGANIC GRAPH CHAIN (2026-08-15)
+
+Cadena de LECTURA orgánica **verificada por Graph** (token de prueba con `pages_show_list` +
+`business_management`; SOEC sigue sin conectarse — `META_GRAPH_CALLS_FROM_SOEC = 0`):
+
+```
+Business 934186066270538 (SmileFlow Clinic)
+  ↓ owned_pages (business_management)
+Facebook Page 1066708446525633 (Smileflow.clinic)   ← Graph Page ID CANÓNICO
+  ↓ linked IG business account
+Instagram Business Account (IGSID) 17841432883225770 (BUSINESS)
+  ↓ media
+11 media (IMAGE/FEED = 7 · VIDEO/REELS = 4)
+  ↓ media insights (reach/views/likes/comments/saved/shares/total_interactions; reels: watch time en ms)
+  ↓ account insights
+```
+
+**IDs canónicos (Graph):** business `934186066270538`, page `1066708446525633`, igsid `17841432883225770`.
+**IDs NO canónicos (UI, `doNotUseForGraph`):** FB `61570785690749` (`profile.php`), IG profile `33006160107`.
+
+| Capacidad | Estado |
+|---|---|
+| BUSINESS_GRAPH_READ / OWNED_PAGES / FACEBOOK_PAGE_READ | **PASS** |
+| INSTAGRAM_BASIC / MEDIA / MEDIA_INSIGHTS / ACCOUNT_PERFORMANCE / CURRENT_FOLLOWER_COUNT (80) | **PASS** |
+| INSTAGRAM_AUDIENCE_DEMOGRAPHICS | **NO_DATA** (200 + `data:[]`; NO "privacy threshold" probado) |
+| FOLLOWER_GROWTH_OVER_TIME | **UNKNOWN** (sin histórico; no se infiere) |
+| ADS_READ / LEAD_ADS_READ | **NOT_TESTED** |
+| INSTAGRAM_WRITE / META_WRITE | **LOCKED** |
+
+**`READ_FOUNDATION = RECOVER_EXISTING_APP`** (la cadena funciona sobre la app existente `972064645294895`).
+**`ADS_FOUNDATION = UNRESOLVED / NOT_TESTED`** — el portfolio sigue con **restricción publicitaria**; que
+organic funcione NO implica que Ads funcione. La restricción no desapareció.
+
+**Seguridad (hardening):** las respuestas Graph de insights traen `paging.next/previous` con
+`access_token=<SECRET>`. `apps/api/src/acquisition/meta-organic.ts` centraliza la sanitización
+(`sanitizarGraph`/`redactarUrl`/`serializarSeguro`): redacta `access_token`/`appsecret_proof`, descarta
+las URLs de paging completas (conserva sólo cursors) **antes** de cualquier log/telemetría/persistencia.
+`RAW_GRAPH_RESPONSE_PERSISTENCE = FORBIDDEN`. Semántica de métrica explícita
+(`VALUE/ZERO/NO_DATA/NOT_SUPPORTED/PERMISSION_MISSING/…`): nunca `null/missing/error → 0`. Watch time en
+**milisegundos** (no se convierte). Adversariales en `apps/api/test/acquisition-meta-organic.test.ts`.
+
 ## Referencias
 
 - Graph API changelog / versiones — developers.facebook.com/docs/graph-api/changelog

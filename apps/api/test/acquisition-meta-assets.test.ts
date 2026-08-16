@@ -35,14 +35,14 @@ describe('Meta assets · aislamiento por tenant y binding explícito', () => {
   });
 });
 
-describe('Meta assets · Instagram Profile ID ≠ IGSID', () => {
-  it('el profile id observado NO se usa como IGSID; el IGSID permanece UNKNOWN', () => {
+describe('Meta assets · Instagram Profile ID ≠ IGSID (canónicos verificados)', () => {
+  it('el profile id (UI) es DISTINTO del IGSID (Graph); ambos verificados por separado', () => {
     const d = descubrimientoMetaDe('org-smileflow');
     const profile = d?.activos.find((a) => a.tipo === 'INSTAGRAM_PROFILE');
     const igsid = d?.activos.find((a) => a.tipo === 'INSTAGRAM_BUSINESS_ACCOUNT');
-    expect(profile?.externalId).toBe('33006160107');
-    expect(igsid?.externalId).toBeNull(); // IGSID desconocido, no se persiste el candidato
-    expect(igsid?.procedencia).toBe('REQUIRES_VERIFICATION');
+    expect(profile?.externalId).toBe('33006160107'); // Profile ID (UI)
+    expect(igsid?.externalId).toBe('17841432883225770'); // IGSID canónico (Graph)
+    expect(profile?.externalId).not.toBe(igsid?.externalId); // NUNCA se confunden
   });
 });
 
@@ -104,20 +104,30 @@ describe('Meta assets · evidencia Graph verificada (discriminación de Pages)',
     expect(d.restrictionPropagatesToGraphRead).toBe('NO');
   });
 
-  it('OWNED_PAGES_GATE_IS_PERMISSION_NOT_RESTRICTION: falta business_management (Meta nombra el permiso)', () => {
+  it('OWNED_PAGES_GRANTED_WITH_business_management', () => {
     const d = descubrimientoMetaDe('org-smileflow')!;
-    expect(d.businessOwnedPageReadGate).toBe('REQUIRES_business_management');
-    expect(d.businessManagementStatus).toBe('PERMISSION_MISSING');
+    expect(d.businessOwnedPageReadGate).toBe('GRANTED');
+    expect(d.businessManagementStatus).toBe('GRANTED');
   });
 
-  it('GRAPH_PAGE_ID_UNKNOWN / LEGACY_UI_ID_NOT_TRUSTED_AS_GRAPH_ID', () => {
+  it('CANONICAL_PAGE_ID ≠ LEGACY_UI_ID: el Graph Page ID es 1066708446525633; el de UI NO se usa', () => {
     const d = descubrimientoMetaDe('org-smileflow')!;
-    expect(d.smileflowGraphPageId).toBeNull(); // canónico aún desconocido
-    expect(d.smileflowLegacyPageUiId).toBe('61570785690749'); // sólo id de UI
+    expect(d.smileflowGraphPageId).toBe('1066708446525633'); // canónico
+    expect(d.smileflowLegacyPageUiId).toBe('61570785690749'); // id de UI (histórico)
+    expect(d.smileflowGraphPageId).not.toBe(d.smileflowLegacyPageUiId);
     const page = d.activos.find((a) => a.tipo === 'FACEBOOK_PAGE');
-    expect(page?.externalId).toBeNull(); // no se usa el legacy id como Graph Page ID
-    expect(page?.externalStatus).toBe('EXISTS'); // la Page existe; su Graph ID no está confirmado
-    expect(page?.procedencia).toBe('REQUIRES_VERIFICATION');
+    expect(page?.externalId).toBe('1066708446525633'); // se usa el canónico, no el de UI
+  });
+
+  it('READ_FOUNDATION = RECOVER_EXISTING_APP separado de ADS (UNRESOLVED)', () => {
+    const d = descubrimientoMetaDe('org-smileflow')!;
+    expect(d.readFoundation).toBe('RECOVER_EXISTING_APP');
+    expect(d.adsFoundation).toBe('UNRESOLVED'); // portfolio sigue restringido para Ads
+    expect(d.matrizLectura.INSTAGRAM_MEDIA_INSIGHTS).toBe('PASS');
+    expect(d.matrizLectura.ADS_READ).toBe('NOT_TESTED'); // no se infiere de organic
+    expect(d.matrizLectura.INSTAGRAM_AUDIENCE_DEMOGRAPHICS).toBe('NO_DATA'); // no FAIL
+    expect(d.matrizLectura.META_WRITE).toBe('LOCKED');
+    expect(d.mediaCount).toBe(11);
   });
 });
 

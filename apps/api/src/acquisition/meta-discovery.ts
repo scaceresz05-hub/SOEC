@@ -29,6 +29,31 @@ export type EstadoColisionAppDataset =
   | 'APP_CONFIRMED_DATASET_UNVERIFIED'
   | 'UNKNOWN';
 
+/** Estado de una capacidad de LECTURA probada. NO_DATA/UNKNOWN/NOT_TESTED nunca son FAIL. */
+export type EstadoCapacidadLectura = 'PASS' | 'NO_DATA' | 'UNKNOWN' | 'NOT_TESTED' | 'LOCKED' | 'PERMISSION_MISSING';
+
+export type CapacidadLecturaMeta =
+  | 'BUSINESS_GRAPH_READ'
+  | 'BUSINESS_OWNED_PAGES_READ'
+  | 'FACEBOOK_PAGE_READ'
+  | 'INSTAGRAM_BASIC_READ'
+  | 'INSTAGRAM_MEDIA_READ'
+  | 'INSTAGRAM_MEDIA_INSIGHTS'
+  | 'INSTAGRAM_ACCOUNT_PERFORMANCE'
+  | 'INSTAGRAM_CURRENT_FOLLOWER_COUNT'
+  | 'INSTAGRAM_AUDIENCE_DEMOGRAPHICS'
+  | 'FOLLOWER_GROWTH_OVER_TIME'
+  | 'ADS_READ'
+  | 'LEAD_ADS_READ'
+  | 'INSTAGRAM_WRITE'
+  | 'META_WRITE';
+
+export type MatrizLecturaMeta = Readonly<Record<CapacidadLecturaMeta, EstadoCapacidadLectura>>;
+
+/** Fundación de LECTURA separada de la de Ads (el portfolio sigue restringido para publicidad). */
+export type FundacionLectura = 'RECOVER_EXISTING_APP' | 'CLEAN_REBUILD' | 'UNKNOWN';
+export type FundacionAds = 'UNRESOLVED' | 'NOT_TESTED' | 'RESTRICTED' | 'AVAILABLE' | 'UNKNOWN';
+
 export interface DescubrimientoMeta {
   readonly organizationId: string;
   /** Perfil admin único observado — nombre OMITIDO por privacidad (no se persiste PII). */
@@ -58,6 +83,12 @@ export interface DescubrimientoMeta {
   readonly smileflowGraphPageId: string | null;
   /** ID visto en la UI (`profile.php?id=`), NO confirmado como Graph Page ID. */
   readonly smileflowLegacyPageUiId: string | null;
+  // --- Capability matrix + fundación (evidencia orgánica verificada) ---
+  readonly matrizLectura: MatrizLecturaMeta;
+  readonly readFoundation: FundacionLectura;
+  readonly adsFoundation: FundacionAds;
+  readonly mediaCount: number | null;
+  readonly mediaTypeDistribution: { readonly image: number; readonly reels: number } | null;
 }
 
 const SMILEFLOW_BUSINESS_ID = '934186066270538';
@@ -84,12 +115,13 @@ const CAPACIDADES_ABSENT: CapacidadesMeta = {
 function descubrimientoSmileflow(): DescubrimientoMeta {
   const activos = activosMetaDe('org-smileflow', 'smileflow-clinic', [
     { tipo: 'META_BUSINESS', externalId: SMILEFLOW_BUSINESS_ID, ownerBusinessId: SMILEFLOW_BUSINESS_ID, displayName: 'SmileFlow Clinic', externalStatus: 'RESTRICTED', procedencia: 'OBSERVED' },
-    // La Page EXISTE, pero su Page ID de Graph es UNKNOWN: 61570785690749 es un id de UI (profile.php),
-    // no confirmado por Graph. El id canónico llega con owned_pages (requiere business_management).
-    { tipo: 'FACEBOOK_PAGE', externalId: null, ownerBusinessId: SMILEFLOW_BUSINESS_ID, displayName: 'Smileflow.clinic', externalStatus: 'EXISTS', procedencia: 'REQUIRES_VERIFICATION' },
+    // Page ID CANÓNICO de Graph (owned_pages con business_management): 1066708446525633.
+    // El 61570785690749 (profile.php) queda como legacy UI id, NO canónico (ver smileflowLegacyPageUiId).
+    { tipo: 'FACEBOOK_PAGE', externalId: '1066708446525633', ownerBusinessId: SMILEFLOW_BUSINESS_ID, displayName: 'Smileflow.clinic', externalStatus: 'EXISTS', procedencia: 'OBSERVED' },
+    // Instagram Profile ID (UI) — NO es el IGSID de Graph.
     { tipo: 'INSTAGRAM_PROFILE', externalId: '33006160107', ownerBusinessId: SMILEFLOW_BUSINESS_ID, displayName: 'smileflow.clinic', externalStatus: 'EXISTS', procedencia: 'OBSERVED' },
-    // IGSID (Graph): UNKNOWN — el candidato NO se persiste; se descubre por API con conexión autorizada.
-    { tipo: 'INSTAGRAM_BUSINESS_ACCOUNT', externalId: null, externalStatus: 'UNKNOWN', procedencia: 'REQUIRES_VERIFICATION' },
+    // IGSID CANÓNICO de Graph (verificado): 17841432883225770 (BUSINESS).
+    { tipo: 'INSTAGRAM_BUSINESS_ACCOUNT', externalId: '17841432883225770', ownerBusinessId: SMILEFLOW_BUSINESS_ID, displayName: 'smileflow.clinic', externalStatus: 'EXISTS', procedencia: 'OBSERVED' },
     // Ad Account observada FUERA del portfolio (ownerBusinessId no demostrado).
     { tipo: 'META_AD_ACCOUNT', externalId: '1037025024374407', ownerBusinessId: null, externalStatus: 'EXISTS', procedencia: 'OBSERVED' },
     // Dataset: relación con la App aún sin distinguir ⇒ REQUIRES_VERIFICATION.
@@ -115,10 +147,30 @@ function descubrimientoSmileflow(): DescubrimientoMeta {
     soecGraphConnection: 'NOT_CONNECTED',
     businessGraphReadable: true, // GET /934186066270538 → 200 OK
     restrictionPropagatesToGraphRead: 'NO', // el nodo del negocio se lee pese a la restricción de Ads/UI
-    businessOwnedPageReadGate: 'REQUIRES_business_management',
-    businessManagementStatus: 'PERMISSION_MISSING', // no llegó al token de prueba; grantabilidad PENDING
-    smileflowGraphPageId: null, // UNKNOWN hasta owned_pages con business_management
-    smileflowLegacyPageUiId: '61570785690749', // id de UI, NO confirmado como Graph Page ID
+    businessOwnedPageReadGate: 'GRANTED', // owned_pages funcionó con business_management
+    businessManagementStatus: 'GRANTED',
+    smileflowGraphPageId: '1066708446525633', // CANÓNICO (owned_pages)
+    smileflowLegacyPageUiId: '61570785690749', // id de UI, NO es el Graph Page ID
+    matrizLectura: {
+      BUSINESS_GRAPH_READ: 'PASS',
+      BUSINESS_OWNED_PAGES_READ: 'PASS',
+      FACEBOOK_PAGE_READ: 'PASS',
+      INSTAGRAM_BASIC_READ: 'PASS',
+      INSTAGRAM_MEDIA_READ: 'PASS',
+      INSTAGRAM_MEDIA_INSIGHTS: 'PASS',
+      INSTAGRAM_ACCOUNT_PERFORMANCE: 'PASS',
+      INSTAGRAM_CURRENT_FOLLOWER_COUNT: 'PASS',
+      INSTAGRAM_AUDIENCE_DEMOGRAPHICS: 'NO_DATA', // 200 + data:[] — no es FAIL ni "privacy threshold probado"
+      FOLLOWER_GROWTH_OVER_TIME: 'UNKNOWN', // sin histórico; no se infiere
+      ADS_READ: 'NOT_TESTED',
+      LEAD_ADS_READ: 'NOT_TESTED',
+      INSTAGRAM_WRITE: 'LOCKED',
+      META_WRITE: 'LOCKED',
+    },
+    readFoundation: 'RECOVER_EXISTING_APP', // la cadena Business→Page→IG→media→insights funciona sobre la app existente
+    adsFoundation: 'UNRESOLVED', // el portfolio sigue con restricción publicitaria; Ads NO probado
+    mediaCount: 11,
+    mediaTypeDistribution: { image: 7, reels: 4 },
   };
 }
 
@@ -143,6 +195,26 @@ function descubrimientoAbsent(organizationId: string, businessKey: string): Desc
     businessManagementStatus: 'UNKNOWN',
     smileflowGraphPageId: null,
     smileflowLegacyPageUiId: null,
+    matrizLectura: {
+      BUSINESS_GRAPH_READ: 'NOT_TESTED',
+      BUSINESS_OWNED_PAGES_READ: 'NOT_TESTED',
+      FACEBOOK_PAGE_READ: 'NOT_TESTED',
+      INSTAGRAM_BASIC_READ: 'NOT_TESTED',
+      INSTAGRAM_MEDIA_READ: 'NOT_TESTED',
+      INSTAGRAM_MEDIA_INSIGHTS: 'NOT_TESTED',
+      INSTAGRAM_ACCOUNT_PERFORMANCE: 'NOT_TESTED',
+      INSTAGRAM_CURRENT_FOLLOWER_COUNT: 'NOT_TESTED',
+      INSTAGRAM_AUDIENCE_DEMOGRAPHICS: 'NOT_TESTED',
+      FOLLOWER_GROWTH_OVER_TIME: 'UNKNOWN',
+      ADS_READ: 'NOT_TESTED',
+      LEAD_ADS_READ: 'NOT_TESTED',
+      INSTAGRAM_WRITE: 'LOCKED',
+      META_WRITE: 'LOCKED',
+    },
+    readFoundation: 'UNKNOWN',
+    adsFoundation: 'UNKNOWN',
+    mediaCount: null,
+    mediaTypeDistribution: null,
   };
 }
 
