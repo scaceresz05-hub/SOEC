@@ -31,9 +31,13 @@ export function redactarUrl(url: string): string {
   return url.replace(new RegExp(PATRON_SECRETO_URL, 'gi'), '$1[REDACTED]');
 }
 
-/** Redacta todos los secretos conocidos de un texto: tokens de URL + `Bearer <token>`. */
+const PATRON_OAUTH_CODE = `([?&]code=)[^&#\\s]*`;
+
+/** Redacta todos los secretos conocidos de un texto: tokens de URL + `Bearer <token>` + `code=` (OAuth). */
 export function redactarSecretos(s: string): string {
-  return redactarUrl(s).replace(new RegExp(PATRON_BEARER, 'gi'), '$1[REDACTED]');
+  return redactarUrl(s)
+    .replace(new RegExp(PATRON_BEARER, 'gi'), '$1[REDACTED]')
+    .replace(new RegExp(PATRON_OAUTH_CODE, 'gi'), '$1[REDACTED]');
 }
 
 export interface PagingCursors {

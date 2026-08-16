@@ -259,6 +259,38 @@ uno con clave embebida. El flujo persiste únicamente `secretRef`; el valor del 
 `SecretWriterPort`. **Antes de cualquier conexión real hay que decidir/implementar el backend seguro de
 escritura de secretos.** Contratos: `meta-oauth-flow.ts`; tests: `acquisition-meta-oauth-flow.test.ts`.
 
+## 11. META SECRET STORAGE PRODUCTION (2026-08-16)
+
+Auditoría del runtime (FASE 1): SOEC corre sobre **PostgreSQL** (docker-compose; sin KMS/vault cloud). Los
+adaptadores de `@soec/secretos` existentes son **resolve-only**: `env:` (lectura en deploy), `file:`
+(depósito de archivos en claro — inadecuado para escribir tokens), `en-memoria` (test). **No hay backend
+de ESCRITURA de secretos aprobado.**
+
+**SELECTED_BACKEND = Envelope encryption (AES-256-GCM) + KMS** (opción D). `WHY`: es la única opción segura
+compatible con el stack actual sin introducir un secreto en claro; el ciphertext vive en PG (permitido),
+la master key vive en un **KMS real** detrás del puerto `KmsPort` (nunca en repo/DB). Implementado en
+`apps/api/src/acquisition/meta-secret-backend.ts`:
+
+- `WRITE_SUPPORTED / READ_SUPPORTED / DELETE_SUPPORTED = YES` (`EnvelopeSecretBackend` implementa a la vez
+  `SecretWriterPort` y el `SecretStore` de `@soec/secretos` → simetría write/resolve sobre el mismo KMS+store).
+- `ROTATION_MODEL` = re-store (nueva data key por secreto) + `revocar`; reauth reemplaza la referencia.
+- `TENANT_ISOLATION` = el `secretRef` codifica la org y el resolver verifica `ctx.org === ref.org === blob.org`.
+- `ATOMIC_COMPENSATION` = el calles (`procesarCallbackMeta`) ya es fail-closed; `revocar` permite compensar
+  si la transacción de DB falla tras el store.
+- `PRODUCTION_FAKE_FORBIDDEN` = `assertBackendSeguroEnProduccion(NODE_ENV, backend)` lanza si en `production`
+  el backend no es productivo (`KmsFake.esProductivo = false`).
+- `SECRET_REF_CONTAINS_SECRET = NO` (`secretstore:<org>/<name>`); `APP_SECRET_MODEL` = mismo backend/KMS.
+- `KNOWN_LIMITATIONS`: falta el **adapter real de `KmsPort`** (AWS/GCP KMS u otro) y su provisioning (key,
+  credenciales, permisos cloud, posible billing) — eso es un gate humano/infra. El `KmsFake` es SÓLO test.
+
+**IMPLEMENTED / TESTED_WITH_SYNTHETIC_SECRETS:** write→resolve→delete round-trip, tenant isolation,
+ref forjada/malformada, ciphertext≠plaintext, GCM tamper detection, gate de producción, redacción de
+`code` OAuth. **REAL_BACKEND_SMOKE = NOT_EXECUTED** (requiere provisionar el KMS real). `REAL_META_TOKEN_USED = NO`.
+
+**`PRODUCTION_SECRET_BACKEND = IMPLEMENTED_NOT_VERIFIED`** — lógica de backend implementada y probada con
+secretos sintéticos + KMS fake; falta el adapter `KmsPort` productivo + su provisioning para poder validar
+contra el KMS real. Tests: `acquisition-meta-secret-backend.test.ts`.
+
 ## Referencias
 
 - Graph API changelog / versiones — developers.facebook.com/docs/graph-api/changelog
