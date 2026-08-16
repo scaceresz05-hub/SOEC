@@ -6,7 +6,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts",
+    "build": "node scripts/build.mjs",
+    "start": "node dist/server.js",
+    "migrate:prod": "tsx ../../packages/decision/src/pg/migrate-cli.ts",
     "seed:piloto": "tsx scripts/seed-piloto.ts",
     "vault:smoke": "tsx src/acquisition/vault-smoke.cli.ts"
   },
@@ -48,6 +50,7 @@
     "fastify": "^5.2.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.10"
+    "@types/pg": "^8.11.10",
+    "esbuild": "^0.28.1"
   }
 }
