@@ -6,15 +6,9 @@
  * NUNCA queden datos del tenant anterior en pantalla (Fase 4 del rediseño).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { cabecerasOrg, fijarOrgActiva, orgActiva } from '../lib/org-activa';
+import { fijarOrgActiva, orgActiva } from '../lib/org-activa';
+import { listarMisNegocios, type Negocio } from '../lib/mis-negocios';
 import { colorDeNegocio, iniciales } from './ui';
-
-interface Negocio {
-  organizationId: string;
-  displayName: string;
-  estado: string;
-  modeloDeNegocio: string;
-}
 
 export default function BusinessSelector(): React.ReactElement | null {
   const [lista, setLista] = useState<Negocio[]>([]);
@@ -27,12 +21,10 @@ export default function BusinessSelector(): React.ReactElement | null {
   }, []);
 
   useEffect(() => {
-    const ref0 = org ?? 'org-smileflow';
-    fetch('/api/plataforma/negocios', { cache: 'no-store', headers: cabecerasOrg(ref0) })
-      .then((r) => (r.ok ? r.json() : { negocios: [] }))
-      .then((d: { negocios?: Negocio[] }) => setLista(d.negocios ?? []))
+    listarMisNegocios()
+      .then(setLista)
       .catch(() => setLista([]));
-  }, [org]);
+  }, []);
 
   useEffect(() => {
     function fuera(e: MouseEvent): void {
@@ -96,7 +88,7 @@ export default function BusinessSelector(): React.ReactElement | null {
                     ? 'E-commerce / distribución'
                     : n.modeloDeNegocio === 'SAAS_FUNNEL'
                       ? 'Software (SaaS)'
-                      : n.modeloDeNegocio}
+                      : n.modeloDeNegocio || 'Empresa nueva'}
                 </span>
               </span>
             </button>

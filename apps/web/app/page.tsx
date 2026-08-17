@@ -10,15 +10,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { cabecerasOrg, fijarOrgActiva } from '../lib/org-activa';
+import { listarMisNegocios, type Negocio } from '../lib/mis-negocios';
 import { Badge, PageHeader, clp, colorDeNegocio, iniciales, num, type Tono } from '../components/ui';
-
-interface Negocio {
-  organizationId: string;
-  displayName: string;
-  estado: string;
-  modeloDeNegocio: string;
-  mercado: string;
-}
 
 /** Estado de incorporación en lenguaje humano (nunca un enum, nunca «cero»). */
 const ESTADO: Record<string, { texto: string; tono: Tono }> = {
@@ -88,9 +81,8 @@ export default function Home(): React.ReactElement {
   const [titulares, setTitulares] = useState<Record<string, Titular | null>>({});
 
   useEffect(() => {
-    fetch('/api/plataforma/negocios', { cache: 'no-store', headers: cabecerasOrg('org-smileflow') })
-      .then((r) => (r.ok ? r.json() : { negocios: [] }))
-      .then((d: { negocios?: Negocio[] }) => setLista(d.negocios ?? []))
+    listarMisNegocios()
+      .then(setLista)
       .catch(() => setLista([]));
   }, []);
 
@@ -134,7 +126,9 @@ export default function Home(): React.ReactElement {
                 <div style={{ minWidth: 0 }}>
                   <div className="bcname">{n.displayName}</div>
                   <div className="bckind">
-                    {tipoTexto(n.modeloDeNegocio)} · {n.mercado}
+                    {n.modeloDeNegocio
+                      ? `${tipoTexto(n.modeloDeNegocio)}${n.mercado ? ` · ${n.mercado}` : ''}`
+                      : 'Empresa nueva · aún sin fuentes'}
                   </div>
                 </div>
                 <div style={{ marginLeft: 'auto' }}>
