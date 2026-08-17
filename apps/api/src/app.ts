@@ -146,7 +146,7 @@ import { registrarVerticalesAutenticadas } from './vertical-gateway';
 import { PlataformaError } from './plataforma';
 import { registerPlataformaRoutes } from './plataforma-routes';
 import { registerAcquisitionRoutes } from './acquisition-routes';
-import { registerMetaOAuthRoutes } from './acquisition/meta-oauth-routes';
+import { registerMetaOAuthAutenticadas, registerMetaCallbackPublico } from './acquisition/meta-oauth-routes';
 import { crearComposicionMetaOAuth } from './acquisition/meta-runtime';
 import { registrarProteccionCsrf } from './csrf';
 
@@ -386,6 +386,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Registra TODA la superficie vertical/experiencia sobre un destino (app raíz o ámbito del
   // gateway). El contexto lo derivan las rutas de las cabeceras `x-organization-id/-actor-id/-scope`,
   // que el gateway autenticado sobreescribe con valores autoritativos server-side.
+  // Composición productiva del OAuth de Meta (PG + AWS KMS + HTTP), construida UNA vez y compartida por el
+  // callback público y las rutas autenticadas. Null si falta pool/config ⇒ fail-closed sin romper la API.
+  const composicionMeta = deps.pool ? crearComposicionMetaOAuth(deps.pool, process.env) : null;
+
   const registrarSuperficieVertical = (target: FastifyInstance): void => {
     registerModelRoutes(target, deps.store);
     registerEceRoutes(target, deps.store);
@@ -408,9 +412,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerCiaRoutes(target, deps.store); // Centro de Integraciones Autónomas (CIA, preparación cerrada)
     registerPlataformaRoutes(target, deps.store); // Estado, fundamentos y catálogo del negocio
     registerAcquisitionRoutes(target, deps.store); // Acquisition Engine (sólo lectura / shadow)
-    // OAuth READ-ONLY de Meta: composición productiva (PG + AWS KMS + HTTP) si hay pool + config; si no,
-    // fail-closed (status NOT_CONFIGURED, resto 503) sin romper la API general.
-    registerMetaOAuthRoutes(target, { composicion: deps.pool ? crearComposicionMetaOAuth(deps.pool, process.env) : null });
+    // OAuth READ-ONLY de Meta — rutas AUTENTICADAS (start/connection/assets/binding). El CALLBACK va aparte,
+    // PÚBLICO (fuera del gateway), porque el redirect de Meta llega sin sesión y se autentica por el state.
+    registerMetaOAuthAutenticadas(target, { composicion: composicionMeta });
 
     target.post('/events', async (req, reply) => {
       const ctx = contextFrom(req);
@@ -452,6 +456,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       ...(deps.rateLimit ? { rateLimit: deps.rateLimit } : {}),
     });
     registerOrganizationsRoutes(app, identity, !secure); // devToken de invitación solo fuera de prod
+
+    // Callback OAuth de Meta: PÚBLICO (fuera del gateway vertical) porque el redirect del navegador de Meta
+    // llega sin sesión ni Authorization. La autoridad viene del `state` persistido (org+actor, one-time, TTL,
+    // consumo atómico); no acepta org/actor externos, no expone token y jamás deja CONNECTED (binding humano
+    // posterior y autenticado). Fail-closed si no hay composición.
+    registerMetaCallbackPublico(app, { composicion: composicionMeta });
 
     // CUTOVER (Macrobloque 1, incremento final): en condiciones normales (sin demo legacy), la
     // superficie vertical se registra DENTRO del gateway autenticado ⇒ sin sesión 401, sin

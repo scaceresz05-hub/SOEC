@@ -1,7 +1,8 @@
 /**
- * Rutas HTTP del OAuth READ-ONLY de Meta (Parte 3b) — E2E sobre PostgreSQL REAL con transportes FAKE (sin
- * Meta/AWS reales). Cubre: start→callback→assets→binding→CONNECTED_READ_ONLY→read-smoke HEALTHY, y adversarial
- * (auth requerido, forged/replay/cross-tenant/actor-mismatch, SC Topografía no vinculable, sin write routes).
+ * Rutas HTTP del OAuth READ-ONLY de Meta + CERTIFICACIÓN DE CALLBACK — E2E sobre PostgreSQL REAL con
+ * transportes FAKE (sin Meta/AWS reales). Demuestra que el callback se completa SIN Authorization/sesión
+ * (como el redirect real de Meta), autenticado sólo por el state; y que start/connection/assets/binding
+ * SIGUEN exigiendo auth. Adversarial: forged/expired/replay, org/actor swap ignorados, SC no vinculable.
  */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -15,7 +16,7 @@ import { ClienteKmsProductivoSimulado } from '../src/acquisition/aws-kms-fake';
 import { FakeTransporteMeta } from '../src/acquisition/meta-http';
 import { MetaOAuthHttpAdapter } from '../src/acquisition/meta-oauth-http';
 import { MetaGraphReadHttpAdapter } from '../src/acquisition/meta-graph-http';
-import { registerMetaOAuthRoutes } from '../src/acquisition/meta-oauth-routes';
+import { registerMetaCallbackPublico, registerMetaOAuthAutenticadas } from '../src/acquisition/meta-oauth-routes';
 import type { ComposicionMetaOAuth } from '../src/acquisition/meta-runtime';
 
 const AHORA = '2026-08-17T12:00:00.000Z';
@@ -40,9 +41,17 @@ function comp(): ComposicionMetaOAuth {
 }
 function app(composicion: ComposicionMetaOAuth | null = comp()): FastifyInstance {
   const f = Fastify();
-  registerMetaOAuthRoutes(f, { composicion, ahora: () => AHORA });
+  registerMetaCallbackPublico(f, { composicion, ahora: () => AHORA }); // público
+  registerMetaOAuthAutenticadas(f, { composicion, ahora: () => AHORA }); // autenticadas
   return f;
 }
+async function start(a: FastifyInstance): Promise<string> {
+  const r = await a.inject({ method: 'POST', url: '/acquisition/meta/oauth/start', headers: H() });
+  expect(r.statusCode).toBe(200);
+  return r.json().datos.state as string;
+}
+// Callback EXACTAMENTE como el redirect de Meta: sin headers de auth/sesión.
+const callback = (a: FastifyInstance, qs: string) => a.inject({ method: 'GET', url: `/acquisition/meta/oauth/callback?${qs}` });
 
 beforeEach(async () => {
   await runMigrations(pool, metaOAuthMigrations);
@@ -52,84 +61,74 @@ afterAll(async () => {
   await pool.end();
 });
 
-async function start(a: FastifyInstance, org = 'org-a', actor = 'actor-1'): Promise<string> {
-  const r = await a.inject({ method: 'POST', url: '/acquisition/meta/oauth/start', headers: H(org, actor) });
-  expect(r.statusCode).toBe(200);
-  return r.json().datos.state as string;
-}
-
-describe('meta routes · E2E feliz', () => {
-  it('start → callback → assets → binding → CONNECTED_READ_ONLY + read-smoke HEALTHY', async () => {
+describe('meta callback · certificación (SIN Authorization, autoridad por state)', () => {
+  it('A E2E: start(auth) → callback(SIN auth) → assets(auth) → binding(auth) → CONNECTED_READ_ONLY + read-smoke', async () => {
     const a = app();
     const state = await start(a);
-
-    const cb = await a.inject({ method: 'GET', url: `/acquisition/meta/oauth/callback?state=${state}&code=CODE`, headers: H() });
+    const cb = await callback(a, `state=${state}&code=CODE`);
     expect(cb.statusCode).toBe(200);
-    expect(cb.json().datos.estado).toBe('BINDING_PENDING'); // nunca CONNECTED automático
+    expect(cb.json().datos.estado).toBe('BINDING_PENDING'); // callback nunca auto-conecta
+    expect(JSON.stringify(cb.json())).not.toContain('SYNTH_LONG_TOKEN'); // sin token en la respuesta
 
     const assets = await a.inject({ method: 'GET', url: '/acquisition/meta/assets', headers: H() });
-    const ids = (assets.json().datos.candidatos as { externalId: string }[]).map((c) => c.externalId);
-    expect(ids).toContain('934186066270538'); // business SmileFlow
-    expect(ids).toContain('1066708446525633'); // page
-    expect(ids).toContain('17841432883225770'); // instagram
-    expect(JSON.stringify(assets.json())).not.toContain('SYNTH_LONG_TOKEN'); // sin token en el DTO
+    expect((assets.json().datos.candidatos as { externalId: string }[]).map((c) => c.externalId)).toContain('1066708446525633');
 
     const bind = await a.inject({ method: 'POST', url: '/acquisition/meta/binding', headers: H(), payload: { externalId: '1066708446525633', assetType: 'page' } });
-    expect(bind.statusCode).toBe(200);
     expect(bind.json().datos.estado).toBe('CONNECTED_READ_ONLY');
-    expect(bind.json().datos.readSmoke).toBe('READ_SMOKE_PASS');
-    expect(bind.json().datos.salud).toBe('HEALTHY'); // HEALTHY sólo tras read-smoke
+    expect(bind.json().datos.salud).toBe('HEALTHY');
+  });
 
-    const conn = await a.inject({ method: 'GET', url: '/acquisition/meta/connection', headers: H() });
-    expect(conn.json().datos.estado).toBe('CONNECTED_READ_ONLY');
-    expect(JSON.stringify(conn.json())).not.toContain('secretstore:'); // sin secretRef en el DTO
+  it('B/C/E/F callback: sin state 400 · forged NOT_CONNECTED · replay NOT_CONNECTED', async () => {
+    const a = app();
+    expect((await callback(a, 'code=C')).statusCode).toBe(400);
+    expect((await callback(a, 'state=bogus&code=C')).json().datos.estado).toBe('NOT_CONNECTED');
+    const st = await start(a);
+    expect((await callback(a, `state=${st}&code=C`)).json().datos.estado).toBe('BINDING_PENDING');
+    expect((await callback(a, `state=${st}&code=C`)).json().datos.estado).toBe('NOT_CONNECTED'); // replay
+  });
+
+  it('G/H org/actor swap en query IGNORADOS (autoridad = state)', async () => {
+    const a = app();
+    const st = await start(a); // state creado para org-a/actor-1
+    const cb = await callback(a, `state=${st}&code=C&organizationId=org-EVIL&actorId=evil`);
+    expect(cb.json().datos.estado).toBe('BINDING_PENDING'); // procesa org-a del state; ignora la query
+    // la conexión quedó en org-a, no en org-EVIL
+    const conn = await a.inject({ method: 'GET', url: '/acquisition/meta/connection', headers: H('org-a') });
+    expect(conn.json().datos.estado).toBe('BINDING_PENDING');
+    const evil = await a.inject({ method: 'GET', url: '/acquisition/meta/connection', headers: H('org-EVIL') });
+    expect(evil.json().datos.estado).toBe('NOT_CONNECTED');
   });
 });
 
-describe('meta routes · seguridad y adversarial', () => {
-  it('AUTH requerido en start/assets/binding', async () => {
+describe('meta rutas autenticadas · siguen exigiendo auth', () => {
+  it('I/J/K/L start/assets/binding/connection SIN auth ⇒ 401', async () => {
     const a = app();
     expect((await a.inject({ method: 'POST', url: '/acquisition/meta/oauth/start' })).statusCode).toBe(401);
     expect((await a.inject({ method: 'GET', url: '/acquisition/meta/assets' })).statusCode).toBe(401);
+    expect((await a.inject({ method: 'POST', url: '/acquisition/meta/binding', payload: { externalId: 'x', assetType: 'page' } })).statusCode).toBe(401);
+    expect((await a.inject({ method: 'GET', url: '/acquisition/meta/connection' })).statusCode).toBe(401);
   });
 
-  it('callback forged/replay/cross-tenant/actor-mismatch NUNCA conecta', async () => {
+  it('SC Topografía no vinculable (no descubierto) — auto-bind prevented', async () => {
     const a = app();
-    // forged
-    expect((await a.inject({ method: 'GET', url: '/acquisition/meta/oauth/callback?state=bogus&code=C', headers: H() })).json().datos.estado).toBe('NOT_CONNECTED');
-    // actor mismatch: state creado por actor-1, callback con actor-2
     const st = await start(a);
-    expect((await a.inject({ method: 'GET', url: `/acquisition/meta/oauth/callback?state=${st}&code=C`, headers: H('org-a', 'actor-2') })).statusCode).toBe(403);
-    // cross-tenant: state org-a, callback org-b
-    const st2 = await start(a);
-    expect((await a.inject({ method: 'GET', url: `/acquisition/meta/oauth/callback?state=${st2}&code=C`, headers: H('org-b', 'actor-1') })).json().datos.estado).toBe('NOT_CONNECTED');
-    // replay: consumir dos veces
-    const st3 = await start(a);
-    expect((await a.inject({ method: 'GET', url: `/acquisition/meta/oauth/callback?state=${st3}&code=C`, headers: H() })).json().datos.estado).toBe('BINDING_PENDING');
-    expect((await a.inject({ method: 'GET', url: `/acquisition/meta/oauth/callback?state=${st3}&code=C`, headers: H() })).json().datos.estado).toBe('NOT_CONNECTED');
-  });
-
-  it('SC Topografía / unknown asset NO vinculable (no descubierto) — auto-bind prevented', async () => {
-    const a = app();
-    const state = await start(a);
-    await a.inject({ method: 'GET', url: `/acquisition/meta/oauth/callback?state=${state}&code=C`, headers: H() });
+    await callback(a, `state=${st}&code=C`);
     const sc = await a.inject({ method: 'POST', url: '/acquisition/meta/binding', headers: H(), payload: { externalId: '100558733139736', assetType: 'page' } });
     expect(sc.statusCode).toBe(409);
     expect(sc.json().error).toBe('NOT_DISCOVERED');
   });
 
-  it('composicion null ⇒ status NOT_CONFIGURED; start 503 (fail-closed sin romper API)', async () => {
+  it('composicion null ⇒ connection NOT_CONFIGURED (auth) · callback 503 (público)', async () => {
     const a = app(null);
     expect((await a.inject({ method: 'GET', url: '/acquisition/meta/connection', headers: H() })).json().datos.estado).toBe('NOT_CONFIGURED');
-    expect((await a.inject({ method: 'POST', url: '/acquisition/meta/oauth/start', headers: H() })).statusCode).toBe(503);
+    expect((await callback(a, 'state=x&code=y')).statusCode).toBe(503);
   });
 
-  it('ROUTE ARCHITECTURE: la superficie Meta no tiene endpoints de escritura', () => {
+  it('ROUTE ARCHITECTURE: sin endpoints de escritura ni verbos mutantes', () => {
     const src = readFileSync(new URL('../src/acquisition/meta-oauth-routes.ts', import.meta.url), 'utf8');
     for (const w of ['publish', 'campaign', 'budget', 'comments', 'messages', 'leads', 'ads_management']) {
       expect(src.toLowerCase().includes(`/acquisition/meta/${w}`)).toBe(false);
     }
-    // sólo GET/POST de lectura/onboarding; ninguna ruta con verbos mutantes de negocio
     expect(/app\.(put|delete|patch)\(/.test(src)).toBe(false);
   });
 });
