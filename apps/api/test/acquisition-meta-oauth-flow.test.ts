@@ -8,7 +8,7 @@ import {
   InMemoryConnectionRepo,
   SecretWriterFake,
   MetaOAuthFake,
-  PRODUCTION_SECRET_BACKEND,
+  metaSecretWriterStatus,
   construirAuthorizationUrl,
   iniciarConexionMeta,
   procesarCallbackMeta,
@@ -51,8 +51,9 @@ describe('OAuth flow · authorization URL + backend', () => {
     expect(url).not.toMatch(/ads_management|leads_retrieval|manage_posts|content_publish/);
     expect(url).not.toMatch(/access_token|Bearer/i);
   });
-  it('PRODUCTION_SECRET_BACKEND = MISSING (no KMS de escritura en el repo)', () => {
-    expect(PRODUCTION_SECRET_BACKEND).toBe('MISSING');
+  it('META_SECRET_WRITER_STATUS: fake ⇒ NOT_WIRED (no confundir con KMS READY)', () => {
+    expect(metaSecretWriterStatus(new SecretWriterFake())).toBe('NOT_WIRED');
+    expect(metaSecretWriterStatus({ esProductivo: true })).toBe('WIRED');
     expect(new SecretWriterFake().esProductivo).toBe(false);
   });
 });
