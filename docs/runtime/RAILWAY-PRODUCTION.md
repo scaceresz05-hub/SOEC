@@ -59,9 +59,24 @@ El Postgres local de SOEC vive en `:5544` (aislado del `:5433` de SSR Control) �
 
 ## Estrategia de config-as-code
 
-`RAILWAY_CONFIG_STRATEGY = per-service (documentado aquí)`. No se agrega un `railway.json`/`railway.toml` en la raíz:
-en un monorepo con dos servicios que comparten raíz, un único archivo raíz sería ambiguo/engañoso. Cada servicio
-configura su **build/start/healthcheck** en Railway según esta tabla.
+`RAILWAY_CONFIG_STRATEGY = config VERSIONADA por servicio`. **No** se usa un `railway.toml`/`railway.json` en la
+raíz: en un monorepo con dos servicios que comparten root directory, un único archivo raíz sería ambiguo (ambos
+servicios leerían el mismo build/start). En su lugar, cada servicio tiene su **propio archivo versionado** en la
+raíz del repo, y apunta a él con su **Config Path** (Railway → servicio → Settings → "Railway Config File"):
+
+| Servicio   | Archivo versionado   | Config Path a fijar en el servicio |
+|------------|----------------------|------------------------------------|
+| `soec-web` | `railway.web.toml`   | `railway.web.toml`                 |
+| `soec-api` | `railway.api.toml`   | `railway.api.toml`                 |
+
+Cada archivo declara `builder = "RAILPACK"`, `build.buildCommand` y `deploy.startCommand` (y `deploy.healthcheckPath`
+en la API). El **Config Path es un ajuste de servicio** (dashboard): el CLI de Railway no lo fija (`railway up` no
+acepta `--config`; no hay comando de config path). Fijarlo una sola vez por servicio.
+
+**Antipatrón corregido (2026-08-17):** antes la config se creaba a mano como `railway.toml` y se borraba antes de
+`railway up`; el snapshot subido quedaba sin config y Railpack abortaba en `prepare` con **"No start command
+detected"** (los 8 deploys de `aacc693` quedaron FAILED). Versionar la config por servicio hace el deploy
+reproducible y elimina ese paso manual.
 
 ## Migraciones
 
