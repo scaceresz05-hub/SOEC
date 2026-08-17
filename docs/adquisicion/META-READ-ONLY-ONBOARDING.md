@@ -392,3 +392,29 @@ el registrado en la Meta App.
 del repo; callback público protegido por state) + orquestación del read-smoke inicial + tests de rutas E2E.
 Sin eso, los adapters existen y están probados pero no hay superficie HTTP montada. `REAL_META_OAUTH = NO`,
 `META_GRAPH_CALLS_FROM_SOEC = 0`, `AUTONOMOUS_REAL = FALSE`.
+
+## 14. META OAUTH HTTP ROUTES (2026-08-17, Parte 3b) — READY, NOT CONFIGURED
+
+Superficie HTTP montada en `app.ts` (dentro del gateway autenticado, prefijo `/api`), tenant-scoped por
+`contextoDe`. Fail-closed: sin config Meta+KMS, `connection` = `NOT_CONFIGURED` y el resto responde 503; la API
+general sigue sirviendo `/health`.
+
+| Método | Ruta (servida) | Auth | Función |
+|---|---|---|---|
+| POST | `/api/acquisition/meta/oauth/start` | sí | crea state persistente (org+actor autoritativos, one-time) → authorization URL read-only |
+| GET | `/api/acquisition/meta/oauth/callback` | sí (sesión del navegador) + state | valida/consume state atómico → exchange → scopes → SecretWriter(AWS KMS) → discovery → `BINDING_PENDING` (JAMÁS CONNECTED) |
+| GET | `/api/acquisition/meta/connection` | sí | estado + salud + bindings canónicos (sin token/secretRef) |
+| GET | `/api/acquisition/meta/assets` | sí | activos descubiertos (IDs canónicos, display seguro; sin raw/token) |
+| POST | `/api/acquisition/meta/binding` | sí | confirmación humana por ID → `CONNECTED_READ_ONLY` + read-smoke |
+
+**Lifecycle:** `NOT_CONNECTED → OAUTH_PENDING → BINDING_PENDING → (humano confirma por ID) → CONNECTED_READ_ONLY`;
+`HEALTHY` sólo tras el read-smoke read-only. Auto-bind PROHIBIDO; binding por nombre imposible; SC Topografía
+(`100558733139736`) no vinculable a SmileFlow (no descubierto ⇒ `NOT_DISCOVERED`). Cero endpoints de escritura.
+
+**REDIRECT_URI_EXACT** (a registrar en Meta Developers y en `META_OAUTH_REDIRECT_URI`, sin wildcard, HTTPS):
+`https://soec-api-production.up.railway.app/api/acquisition/meta/oauth/callback`
+
+**Estados:** `KMS_BACKEND_STATUS = READY` · `META_SECRET_WRITER_STATUS = WIRED` · `META_PERSISTENCE_STATUS = READY`
+· `META_OAUTH_HTTP_STATUS = IMPLEMENTED_NOT_CONFIGURED`. Variables: `META_APP_ID`, `META_APP_SECRET` (secreto),
+`META_OAUTH_REDIRECT_URI`, `META_GRAPH_API_VERSION` (opcional) + las de KMS/DB ya presentes. `REAL_META_OAUTH = NO`,
+`META_GRAPH_CALLS_FROM_SOEC = 0`, `META_WRITES = LOCKED`, `AUTONOMOUS_REAL = FALSE`.

@@ -34,6 +34,7 @@ export interface ComposicionMetaOAuth {
   /** El adapter de Graph se crea por-conexión con el token resuelto (boundary-only). */
   readonly crearGraphRead: (accessToken: string) => MetaGraphReadHttpAdapter;
   readonly graphVersion: string;
+  readonly redirectUri: string;
 }
 
 export function crearComposicionMetaOAuth(pool: Pool, env: Env): ComposicionMetaOAuth | null {
@@ -52,6 +53,7 @@ export function crearComposicionMetaOAuth(pool: Pool, env: Env): ComposicionMeta
     oauth,
     crearGraphRead: (accessToken: string) => new MetaGraphReadHttpAdapter({ graphVersion: cfgMeta.graphVersion, appSecret: cfgMeta.appSecret }, transporte, accessToken),
     graphVersion: cfgMeta.graphVersion,
+    redirectUri: cfgMeta.redirectUri,
   };
 }
 
