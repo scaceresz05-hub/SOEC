@@ -1,5 +1,6 @@
 import { makePool, PgEventStore, runMigrations } from '@soec/event-store/pg';
 import { identityMigrations } from '@soec/identity/pg';
+import { metaOAuthMigrations } from './acquisition/meta-oauth-pg';
 import { ejecutarBootstrap } from '@soec/identity';
 import { DeterministicIntelligenceProvider } from '@soec/intelligence';
 import { buildApp } from './app';
@@ -50,6 +51,7 @@ const pool = makePool();
 
 async function main(): Promise<void> {
   await runMigrations(pool, identityMigrations); // asegura el esquema de identidad
+  await runMigrations(pool, metaOAuthMigrations); // esquema de persistencia OAuth Meta (Parte 2)
   const boot = await ejecutarBootstrap(pool);
   if (boot.ejecutado) console.log(JSON.stringify({ bootstrap: boot }));
 
