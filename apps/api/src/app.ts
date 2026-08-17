@@ -146,6 +146,8 @@ import { registrarVerticalesAutenticadas } from './vertical-gateway';
 import { PlataformaError } from './plataforma';
 import { registerPlataformaRoutes } from './plataforma-routes';
 import { registerAcquisitionRoutes } from './acquisition-routes';
+import { registerMetaOAuthRoutes } from './acquisition/meta-oauth-routes';
+import { crearComposicionMetaOAuth } from './acquisition/meta-runtime';
 import { registrarProteccionCsrf } from './csrf';
 
 export interface AppDeps {
@@ -406,6 +408,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerCiaRoutes(target, deps.store); // Centro de Integraciones Autónomas (CIA, preparación cerrada)
     registerPlataformaRoutes(target, deps.store); // Estado, fundamentos y catálogo del negocio
     registerAcquisitionRoutes(target, deps.store); // Acquisition Engine (sólo lectura / shadow)
+    // OAuth READ-ONLY de Meta: composición productiva (PG + AWS KMS + HTTP) si hay pool + config; si no,
+    // fail-closed (status NOT_CONFIGURED, resto 503) sin romper la API general.
+    registerMetaOAuthRoutes(target, { composicion: deps.pool ? crearComposicionMetaOAuth(deps.pool, process.env) : null });
 
     target.post('/events', async (req, reply) => {
       const ctx = contextFrom(req);
