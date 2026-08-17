@@ -5,10 +5,10 @@
  * llamada Graph (`META_GRAPH_CALLS_FROM_SOEC = 0`). Los adaptadores productivos (HTTP a Meta, backend
  * real de secretos) son PUERTOS inyectados; en tests se usan FAKES.
  *
- * FASE 10 — HALLAZGO: `@soec/secretos` `SecretStore` es SÓLO de resolución (no escribe valores). NO existe
- * un backend productivo de ESCRITURA de secretos (KMS/vault) en el repo, e improvisar uno con clave
- * embebida está prohibido ⇒ `PRODUCTION_SECRET_BACKEND = MISSING`. El flujo persiste únicamente una
- * REFERENCIA opaca (`secretRef`); el valor del token nunca sale del boundary del `SecretWriterPort`.
+ * El writer productivo de secretos es `EnvelopeSecretBackend` (envelope AES-256-GCM + AWS KMS), que YA
+ * satisface `SecretWriterPort`. El estado de cableado se reporta con `metaSecretWriterStatus` (WIRED/NOT_WIRED),
+ * separado del `KmsBackendStatus` (READY del kms:smoke). El flujo persiste únicamente una REFERENCIA opaca
+ * (`secretRef`); el valor del token nunca sale del boundary del `SecretWriterPort`.
  */
 
 import { crearEstadoOAuth, validarEstadoOAuth, validarScopes, SCOPES_REQUERIDOS, type EstadoOAuth, type ScopeMeta, type CandidatoActivo } from './meta-oauth';
@@ -70,8 +70,19 @@ export interface SecretWriterPort {
   revocar(secretRef: string): Promise<void>;
 }
 
-/** Backend productivo de ESCRITURA de secretos: NO existe en el repo (ver FASE 10). */
-export const PRODUCTION_SECRET_BACKEND = 'MISSING' as const;
+/**
+ * Estados EXPLÍCITAMENTE separados para evitar la colisión conceptual detectada:
+ *  - `KmsBackendStatus`: madurez del backend de cifrado (AWS KMS). READY = kms:smoke real pasó.
+ *  - `MetaSecretWriterStatus`: si el flujo OAuth tiene CABLEADO un writer productivo de secretos.
+ * Un KMS READY NO implica un writer OAuth cableado; son cosas distintas.
+ */
+export type KmsBackendStatus = 'READY' | 'IMPLEMENTED_NOT_VERIFIED' | 'MISSING';
+export type MetaSecretWriterStatus = 'WIRED' | 'NOT_WIRED';
+
+/** El writer está WIRED sólo si se inyectó uno PRODUCTIVO (esProductivo=true). */
+export function metaSecretWriterStatus(writer: Pick<SecretWriterPort, 'esProductivo'> | null | undefined): MetaSecretWriterStatus {
+  return writer && writer.esProductivo ? 'WIRED' : 'NOT_WIRED';
+}
 
 /** Writer FAKE (in-memory) para tests: nunca conserva el valor; devuelve una referencia opaca. */
 export class SecretWriterFake implements SecretWriterPort {
