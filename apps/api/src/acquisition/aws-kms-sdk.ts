@@ -39,15 +39,27 @@ function httpStatus(e: unknown): number | undefined {
   return meta?.httpStatusCode;
 }
 
-/** Traduce el error del SDK a un error tipado, sin exponer detalles crudos. */
-function traducir(e: unknown, op: Op): AwsKmsError {
+/** Nombres de error del SDK que indican credencial/firma inválida (auth), no permiso IAM. */
+const ERRORES_AUTH = new Set<string>([
+  'UnrecognizedClientException',
+  'InvalidSignatureException',
+  'IncompleteSignatureException', // firma incompleta: típicamente credencial mal formada (p. ej. espacio/newline)
+  'SignatureDoesNotMatch',
+  'MissingAuthenticationTokenException',
+  'AuthorizationHeaderMalformed',
+  'ExpiredTokenException',
+  'CredentialsProviderError',
+  'InvalidClientTokenId',
+]);
+
+/** Traduce el error del SDK a un error tipado, sin exponer detalles crudos. Exportado para tests. */
+export function traducirErrorSdk(e: unknown, op: Op): AwsKmsError {
   const n = nombreError(e);
   const status = httpStatus(e);
   if (n === 'AbortError' || n === 'TimeoutError') return new AwsKmsTimeoutError(`AWS KMS timeout en ${op}`);
   if (n === 'AccessDeniedException') return new AwsKmsPermisoError(`AWS KMS acceso denegado en ${op} (falta permiso IAM)`);
   if (n === 'NotFoundException') return new AwsKmsKeyNoEncontradaError(`AWS KMS key no encontrada en ${op}`);
-  if (n === 'UnrecognizedClientException' || n === 'InvalidSignatureException' || n === 'ExpiredTokenException' || n === 'IncompleteSignature' || n === 'CredentialsProviderError' || n === 'InvalidClientTokenId')
-    return new AwsKmsAutenticacionError(`AWS KMS autenticación fallida en ${op}`);
+  if (ERRORES_AUTH.has(n)) return new AwsKmsAutenticacionError(`AWS KMS autenticación fallida en ${op}`);
   if (n === 'InvalidCiphertextException' || n === 'IncorrectKeyException') return new AwsKmsDescifradoError(`AWS KMS descifrado rechazado en ${op}`);
   if (n === 'ThrottlingException' || n === 'KMSInternalException' || n === 'KeyUnavailableException' || n === 'DependencyTimeoutException' || n === 'KMSInvalidStateException' || n === 'DisabledException')
     return new AwsKmsNoDisponibleError(`AWS KMS no disponible en ${op} (${n})`);
@@ -86,7 +98,7 @@ export class ClienteKmsSdk implements ClienteKms, ClienteKmsReEncrypt {
       return { ciphertextBlob: blob, keyId: out.KeyId ?? e.keyId };
     } catch (err) {
       if (err instanceof AwsKmsError) throw err;
-      throw traducir(err, 'encrypt');
+      throw traducirErrorSdk(err, 'encrypt');
     }
   }
 
@@ -102,7 +114,7 @@ export class ClienteKmsSdk implements ClienteKms, ClienteKmsReEncrypt {
       return { plaintext: pt, keyId: out.KeyId ?? e.keyId };
     } catch (err) {
       if (err instanceof AwsKmsError) throw err;
-      throw traducir(err, 'decrypt');
+      throw traducirErrorSdk(err, 'decrypt');
     }
   }
 
@@ -114,7 +126,7 @@ export class ClienteKmsSdk implements ClienteKms, ClienteKmsReEncrypt {
       return { keyId: md.KeyId, enabled: md.Enabled === true && md.KeyState === 'Enabled' };
     } catch (err) {
       if (err instanceof AwsKmsError) throw err;
-      throw traducir(err, 'describeKey');
+      throw traducirErrorSdk(err, 'describeKey');
     }
   }
 
@@ -134,7 +146,7 @@ export class ClienteKmsSdk implements ClienteKms, ClienteKmsReEncrypt {
       return { ciphertextBlob: blob, keyId: out.KeyId ?? e.keyIdDestino };
     } catch (err) {
       if (err instanceof AwsKmsError) throw err;
-      throw traducir(err, 'reEncrypt');
+      throw traducirErrorSdk(err, 'reEncrypt');
     }
   }
 }

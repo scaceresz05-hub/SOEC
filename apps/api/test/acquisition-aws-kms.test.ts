@@ -28,6 +28,7 @@ import {
   type SaludKey,
 } from '../src/acquisition/aws-kms';
 import { ClienteKmsProductivoSimulado, FakeClienteKms } from '../src/acquisition/aws-kms-fake';
+import { traducirErrorSdk } from '../src/acquisition/aws-kms-sdk';
 import { ejecutarSmoke, exitCodeDe } from '../src/acquisition/vault-smoke';
 import { formatearSalidaKms, mainSmokeKms } from '../src/acquisition/kms-smoke.cli';
 
@@ -201,6 +202,16 @@ describe('aws-kms · CLI fail-closed y no-Meta', () => {
     expect(res.exitCode).toBe(2);
     expect(res.resultado.failureClass).toBe('CONFIGURATION');
   });
+  it('SDK_ERROR_MAP: firma incompleta ⇒ AUTH; AccessDenied ⇒ PERMISSION; NotFound ⇒ KEY_NOT_FOUND', () => {
+    // Regresión del defecto detectado por el smoke real: IncompleteSignatureException (HTTP 400) mal
+    // clasificado como no-disponible; ahora es AUTH (credencial/firma inválida).
+    expect(traducirErrorSdk({ name: 'IncompleteSignatureException', $metadata: { httpStatusCode: 400 } }, 'describeKey')).toBeInstanceOf(AwsKmsAutenticacionError);
+    expect(traducirErrorSdk({ name: 'SignatureDoesNotMatch' }, 'encrypt')).toBeInstanceOf(AwsKmsAutenticacionError);
+    expect(traducirErrorSdk({ name: 'AccessDeniedException', $metadata: { httpStatusCode: 400 } }, 'decrypt')).toBeInstanceOf(AwsKmsPermisoError);
+    expect(traducirErrorSdk({ name: 'NotFoundException' }, 'describeKey')).toBeInstanceOf(AwsKmsKeyNoEncontradaError);
+    expect(traducirErrorSdk({ name: 'TimeoutError' }, 'describeKey')).toBeInstanceOf(AwsKmsTimeoutError);
+  });
+
   it('U NO_META: los fuentes AWS KMS no referencian Graph/OAuth/App de Meta', () => {
     const fuentes = ['../src/acquisition/aws-kms.ts', '../src/acquisition/aws-kms-sdk.ts', '../src/acquisition/aws-kms-fake.ts', '../src/acquisition/kms-smoke.cli.ts'].map((rel) => readFileSync(new URL(rel, import.meta.url), 'utf8'));
     const prohibidos = ['graph.facebook.com', 'dialog/oauth', 'exchangeAuthorizationCode', 'client_id', 'appsecret_proof', 'MetaOAuth', 'access_token='];
