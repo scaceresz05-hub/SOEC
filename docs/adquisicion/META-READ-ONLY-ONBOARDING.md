@@ -358,3 +358,37 @@ ausente, 3 = adapter no productivo, 1 = fallo. `apps/api/src/acquisition/vault-s
 - Lead Ads (leads_retrieval, App Review) — developers.facebook.com/documentation/ads-commerce/marketing-api/guides/lead-ads
 - Business Verification / App Review (2026, ~20 días) — bundle.social/blog/meta-app-review-20-days
 - Marketing API Q2-2026 update — kitchn.io/blog/meta-marketing-api-q2-2026-update
+
+## 13. META PRODUCTION OAUTH WIRING (2026-08-17) — IMPLEMENTED, NOT CONFIGURED
+
+Wiring productivo del OAuth read-only de Meta, en 3 partes (todas en `main`):
+
+- **Parte 1 (PR #19):** naming separado `KmsBackendStatus` vs `MetaSecretWriterStatus`; contrato de config Meta
+  (`meta-config.ts`); `SecretWriter` productivo = `EnvelopeSecretBackend` + `AwsKmsPort` (el token → `secretRef`,
+  nunca plaintext, nunca a KMS — sólo la data key).
+- **Parte 2 (PR #20):** persistencia PostgreSQL (`meta-oauth-pg.ts`): `PgOAuthStateStore`/`PgCredentialRepo`/
+  `PgConnectionRepo`/`PgCiphertextStore` + migración `meta_*` (cableada al boot). Consumo de state ATÓMICO
+  (one-winner), tenant isolation, sin token/code/app-secret/data-key en claro.
+- **Parte 3 (este bloque):** adapters HTTP reales — `MetaOAuthHttpAdapter` (`meta-oauth-http.ts`: code→token
+  largo→debug_token) y `MetaGraphReadHttpAdapter` (`meta-graph-http.ts`: 9 reads, `appsecret_proof`, todo por el
+  sanitizer; **cero métodos write**). Transporte `meta-http.ts` (fetch+timeout, errores tipados/sanitizados,
+  fake fiel). Composición productiva `meta-runtime.ts` (`crearComposicionMetaOAuth(pool, env)`), fail-closed.
+
+**Estados actuales:**
+`KMS_BACKEND_STATUS = READY` · `META_SECRET_WRITER_STATUS = WIRED` · `META_PERSISTENCE_STATUS = READY` ·
+`META_OAUTH_HTTP_STATUS = IMPLEMENTED_NOT_CONFIGURED`.
+
+**Variables de runtime necesarias (SECRET = por el mecanismo seguro; sin valores aquí):**
+`META_APP_ID` (público) · `META_APP_SECRET` (secreto — nunca frontend/log/persist) · `META_OAUTH_REDIRECT_URI`
+(https) · `META_GRAPH_API_VERSION` (opcional, default v26.0). Ya presentes de antes: `AWS_REGION`,
+`SOEC_KMS_KEY_ID`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`.
+
+**Redirect URI a configurar en Meta Developers (exacta):** debe apuntar al callback público del `soec-api`
+desplegado, p. ej. `https://soec-api-production.up.railway.app/api/adquisicion/meta/oauth/callback` — la ruta
+HTTP se finaliza en el paso de rutas (Parte 3b); el valor de `META_OAUTH_REDIRECT_URI` debe coincidir exacto con
+el registrado en la Meta App.
+
+**Pendiente (Parte 3b) para cerrar el runtime:** rutas HTTP `start/callback/status/assets/binding` (auth+tenant
+del repo; callback público protegido por state) + orquestación del read-smoke inicial + tests de rutas E2E.
+Sin eso, los adapters existen y están probados pero no hay superficie HTTP montada. `REAL_META_OAUTH = NO`,
+`META_GRAPH_CALLS_FROM_SOEC = 0`, `AUTONOMOUS_REAL = FALSE`.
