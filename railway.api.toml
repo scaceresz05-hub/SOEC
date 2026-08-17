@@ -1,0 +1,16 @@
+# Config-as-code de Railway — servicio **soec-api** (Fastify, compilado con esbuild) del proyecto SOEC.
+#
+# Config específica por servicio (ver railway.web.toml para el porqué de NO usar un railway.toml raíz).
+# El servicio soec-api apunta su "Railway Config File" (Config Path) a este archivo: railway.api.toml.
+#
+# NOTA: crear este archivo NO cambia el deploy actual de soec-api. Sólo surte efecto cuando el
+# Config Path del servicio soec-api se fije a railway.api.toml en el dashboard. En este bloque
+# soec-api NO se despliega ni se toca.
+[build]
+builder = "RAILPACK"
+buildCommand = "corepack pnpm@9.15.4 install --frozen-lockfile && corepack pnpm@9.15.4 -C apps/api build"
+
+[deploy]
+# soec-api es COMPILADO: `pnpm -C apps/api start` = `node dist/server.js` (no tsx en producción).
+startCommand = "corepack pnpm@9.15.4 -C apps/api start"
+healthcheckPath = "/health"

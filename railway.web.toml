@@ -1,0 +1,21 @@
+# Config-as-code de Railway — servicio **soec-web** (Next.js) del proyecto SOEC.
+#
+# Por qué este archivo existe (y no un railway.toml raíz):
+#   SOEC es un monorepo pnpm donde soec-web y soec-api comparten la raíz del repo como
+#   root directory. Un único railway.toml raíz sería ambiguo: ambos servicios leerían el
+#   mismo build/start. La configuración de deploy debe vivir VERSIONADA y ser específica por
+#   servicio. Cada servicio apunta su "Railway Config File" (Config Path) a su propio archivo:
+#     soec-web  → railway.web.toml   (este archivo)
+#     soec-api  → railway.api.toml
+#
+# Antes, la config se creaba a mano y se borraba antes de `railway up`; el snapshot subido
+# quedaba sin railway.toml y Railpack abortaba con "No start command detected". Versionarla
+# hace el deploy reproducible.
+[build]
+builder = "RAILPACK"
+buildCommand = "corepack pnpm@9.15.4 install --frozen-lockfile && corepack pnpm@9.15.4 -C apps/web build"
+
+[deploy]
+# next start respeta process.env.PORT (Railway lo inyecta). Sin puerto fijo, sin healthcheck path
+# (Next no expone /health); Railway usa su verificación por defecto sobre el puerto.
+startCommand = "corepack pnpm@9.15.4 -C apps/web start"
