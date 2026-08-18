@@ -25,6 +25,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <nav className="mainnav" aria-label="Principal">
               <Link href="/">Mis empresas</Link>
               <Link href="/director">Mi director</Link>
+              <Link href="/campanas">Campañas</Link>
               <Link href="/meta">Conexión Meta</Link>
             </nav>
           </div>
