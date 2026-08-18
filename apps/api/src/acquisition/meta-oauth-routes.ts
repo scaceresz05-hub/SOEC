@@ -18,6 +18,7 @@ import { crearEstadoOAuth, dedupCandidatos, SCOPES_REQUERIDOS, type CandidatoAct
 import { procesarCallbackMeta, confirmarBindingMeta, aConexionDTO, aCandidatoDTO } from './meta-oauth-flow';
 import type { TipoBindingMeta } from './meta-onboarding';
 import { MetaAutenticacionError, MetaPermisoError } from './meta-http';
+import { ejecutarSync } from './meta-sync';
 
 export interface DepsMetaRoutes {
   readonly composicion: ComposicionMetaOAuth | null;
@@ -268,5 +269,34 @@ export function registerMetaOAuthAutenticadas(app: FastifyInstance, deps: DepsMe
     // Persiste SÓLO candidatos; conserva estado/bindings/salud/credencialRef exactamente como estaban.
     await comp.connRepo.guardar({ conexion: reg.conexion, candidatos });
     return reply.send({ ok: true, datos: { estado: reg.conexion.estado, candidatos: candidatos.map(aCandidatoDTO) } });
+  });
+
+  /**
+   * SYNC READ-ONLY on-demand (autenticado, tenant-scoped): reusa la credencial existente y sincroniza
+   * snapshots NORMALIZADOS por capacidad + estado de observabilidad. Sin OAuth/binding/scope/escritura.
+   * Fail-closed: sin conexión / sin bindings / sin credencial ⇒ 409. No expone token ni raw Graph. NO
+   * modifica la conexión OAuth: la observabilidad de sync vive en su propio estado.
+   */
+  app.post('/acquisition/meta/sync', async (req, reply) => {
+    const a = authed(req, reply);
+    if (!a) return;
+    if (comp === null) return reply.code(503).send({ ok: false, error: 'META_NOT_CONFIGURED' });
+    const connectionId = `meta-${a.org}`;
+    const reg = await comp.connRepo.obtener(a.org, connectionId);
+    if (reg === null) return reply.code(409).send({ ok: false, error: 'NOT_CONNECTED' });
+    if (reg.conexion.bindings.length === 0) return reply.code(409).send({ ok: false, error: 'SIN_BINDINGS' });
+    const cred = await comp.credRepo.obtener(a.org, connectionId);
+    if (cred === null) return reply.code(409).send({ ok: false, error: 'NO_CREDENTIAL' });
+    let estado;
+    try {
+      const resuelto = await comp.secretWriter.resolver(a.ctx, cred.secretRef);
+      estado = await resuelto.usar((token) => ejecutarSync({ graph: comp.crearGraphRead(token), repo: comp.syncRepo, ahora }, a.org, connectionId, reg.conexion.bindings));
+    } catch {
+      return reply.code(502).send({ ok: false, error: 'SYNC_FAILED' });
+    }
+    return reply.send({
+      ok: true,
+      datos: { lastSyncAt: estado.lastSyncAt, lastSuccessfulSyncAt: estado.lastSuccessfulSyncAt, lastErrorClass: estado.lastErrorClass, saludConexion: estado.saludConexion, capacidades: estado.capacidades },
+    });
   });
 }
