@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { makeTestPool, ejecutarDestructivoDePrueba } from '@soec/event-store/test-db';
 import { runMigrations } from '@soec/event-store/pg';
 import { metaOAuthMigrations, crearRepositoriosMetaPg } from '../src/acquisition/meta-oauth-pg';
-import { metaSyncMigrations, crearMetaSyncRepo } from '../src/acquisition/meta-sync-pg';
+import { metaSyncMigrations, crearMetaSyncRepo, crearMetaScheduleRepo } from '../src/acquisition/meta-sync-pg';
 import { EnvelopeSecretBackend } from '../src/acquisition/meta-secret-backend';
 import { AwsKmsPort } from '../src/acquisition/aws-kms';
 import { ClienteKmsProductivoSimulado } from '../src/acquisition/aws-kms-fake';
@@ -37,6 +37,7 @@ function comp(): ComposicionMetaOAuth {
     oauth: new MetaOAuthHttpAdapter(CFG, transporte),
     crearGraphRead: (t) => new MetaGraphReadHttpAdapter({ graphVersion: CFG.graphVersion, appSecret: CFG.appSecret }, transporte, t),
     syncRepo: crearMetaSyncRepo(pool),
+    scheduleRepo: crearMetaScheduleRepo(pool),
     graphVersion: CFG.graphVersion,
     redirectUri: CFG.redirectUri,
   };
@@ -58,7 +59,7 @@ const callback = (a: FastifyInstance, qs: string) => a.inject({ method: 'GET', u
 beforeEach(async () => {
   await runMigrations(pool, metaOAuthMigrations);
   await runMigrations(pool, metaSyncMigrations);
-  await ejecutarDestructivoDePrueba(pool, 'truncate table meta_oauth_state, meta_credential, meta_connection, meta_ciphertext, meta_sync_snapshot, meta_sync_state');
+  await ejecutarDestructivoDePrueba(pool, 'truncate table meta_oauth_state, meta_credential, meta_connection, meta_ciphertext, meta_sync_snapshot, meta_sync_state, meta_sync_schedule');
 });
 afterAll(async () => {
   await pool.end();
@@ -371,5 +372,46 @@ describe('meta director read-model (endpoint on-demand)', () => {
     for (const prohibido of ['synth_long_token', 'access_token', 'secretref', 'ciphertext', 'graph.facebook.com', 'file:', 'paging']) {
       expect(s.includes(prohibido)).toBe(false);
     }
+  });
+});
+
+describe('meta scheduler endpoints (config + observabilidad)', () => {
+  async function conectado(a: FastifyInstance): Promise<void> {
+    const st = await start(a);
+    await callback(a, `state=${st}&code=C`);
+    for (const b of [
+      { externalId: '934186066270538', assetType: 'business' },
+      { externalId: '1066708446525633', assetType: 'page' },
+      { externalId: '17841432883225770', assetType: 'instagram' },
+      { externalId: '1037025024374407', assetType: 'adAccount' },
+    ]) {
+      expect((await a.inject({ method: 'POST', url: '/acquisition/meta/binding', headers: H(), payload: b })).statusCode).toBe(200);
+    }
+  }
+
+  it('config ON/OFF exige business.manage; estado expone observabilidad tras sync', async () => {
+    const a = app();
+    await conectado(a);
+    // config sin permiso ⇒ 403; con permiso ⇒ 200.
+    expect((await a.inject({ method: 'POST', url: '/acquisition/meta/sync/config', headers: H(), payload: { enabled: false } })).statusCode).toBe(403);
+    const cfg = await a.inject({ method: 'POST', url: '/acquisition/meta/sync/config', headers: { ...H(), 'x-permissions': 'analytics.read,business.manage' }, payload: { enabled: false } });
+    expect(cfg.json().datos.syncEnabled).toBe(false);
+    // sync + estado.
+    await a.inject({ method: 'POST', url: '/acquisition/meta/sync', headers: H() });
+    const est = (await a.inject({ method: 'GET', url: '/acquisition/meta/sync/estado', headers: H() })).json().datos;
+    expect(est.syncEnabled).toBe(false);
+    expect(est.health).toBe('HEALTHY');
+    expect(est.lastErrorClass).toBe('NONE');
+    expect(Array.isArray(est.freshness)).toBe(true);
+    expect(est.freshness).toHaveLength(8);
+    // sin secretos.
+    const s = JSON.stringify(est).toLowerCase();
+    for (const p of ['synth_long_token', 'access_token', 'secretref', 'file:', 'graph.facebook.com']) expect(s.includes(p)).toBe(false);
+  });
+
+  it('estado sin auth ⇒ 401; sin conexión ⇒ 409', async () => {
+    const a = app();
+    expect((await a.inject({ method: 'GET', url: '/acquisition/meta/sync/estado' })).statusCode).toBe(401);
+    expect((await a.inject({ method: 'GET', url: '/acquisition/meta/sync/estado', headers: H() })).json().error).toBe('NOT_CONNECTED');
   });
 });

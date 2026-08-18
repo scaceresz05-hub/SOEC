@@ -330,4 +330,49 @@ export function registerMetaOAuthAutenticadas(app: FastifyInstance, deps: DepsMe
     const vista = await construirVistaDirector(comp.syncRepo, a.org, connectionId, reg.conexion.bindings, ahora());
     return reply.send({ ok: true, datos: vista });
   });
+
+  /**
+   * ON/OFF del scheduler automático por organización (autenticado). Exige `business.manage`. READ-ONLY:
+   * sólo cambia si la conexión se sincroniza automáticamente; nunca toca token/bindings/escritura.
+   */
+  app.post('/acquisition/meta/sync/config', async (req, reply) => {
+    const a = authed(req, reply);
+    if (!a) return;
+    if (comp === null) return reply.code(503).send({ ok: false, error: 'META_NOT_CONFIGURED' });
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    const enabled = (req.body as { enabled?: unknown } | undefined)?.enabled;
+    if (typeof enabled !== 'boolean') return reply.code(400).send({ ok: false, error: 'FALTA_ENABLED' });
+    await comp.scheduleRepo.configurar(a.org, `meta-${a.org}`, enabled);
+    return reply.send({ ok: true, datos: { syncEnabled: enabled } });
+  });
+
+  /**
+   * OBSERVABILIDAD del scheduler/sync por organización (autenticado, read-only). Expone lastAttemptAt,
+   * lastSuccessfulSyncAt, nextEligibleSyncAt, errorClass, consecutiveFailures, capabilitiesAffected,
+   * syncEnabled + freshness por capacidad. Nunca token/secret/raw.
+   */
+  app.get('/acquisition/meta/sync/estado', async (req, reply) => {
+    const a = authed(req, reply);
+    if (!a) return;
+    if (comp === null) return reply.code(503).send({ ok: false, error: 'META_NOT_CONFIGURED' });
+    const connectionId = `meta-${a.org}`;
+    const reg = await comp.connRepo.obtener(a.org, connectionId);
+    if (reg === null) return reply.code(409).send({ ok: false, error: 'NOT_CONNECTED' });
+    const schedule = await comp.scheduleRepo.obtener(a.org, connectionId);
+    const vista = await construirVistaDirector(comp.syncRepo, a.org, connectionId, reg.conexion.bindings, ahora());
+    return reply.send({
+      ok: true,
+      datos: {
+        syncEnabled: schedule?.syncEnabled ?? true,
+        lastAttemptAt: schedule?.lastAttemptAt ?? null,
+        lastSuccessfulSyncAt: schedule?.lastSuccessfulSyncAt ?? vista.lastSuccessfulSyncAt,
+        nextEligibleSyncAt: schedule?.nextEligibleSyncAt ?? null,
+        lastErrorClass: schedule?.lastErrorClass ?? 'NONE',
+        consecutiveFailures: schedule?.consecutiveFailures ?? 0,
+        capabilitiesAffected: schedule?.capabilitiesAffected ?? [],
+        health: vista.health,
+        freshness: vista.capacidades.map((c) => ({ capability: c.capability, freshness: c.freshness, capturedAt: c.capturedAt })),
+      },
+    });
+  });
 }

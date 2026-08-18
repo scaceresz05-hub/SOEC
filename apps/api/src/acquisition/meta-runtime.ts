@@ -9,7 +9,7 @@ import { AwsKmsPort, type ConfigAwsKms } from './aws-kms';
 import { ClienteKmsSdk } from './aws-kms-sdk';
 import { EnvelopeSecretBackend } from './meta-secret-backend';
 import { crearRepositoriosMetaPg, type PgOAuthStateStore, type PgCredentialRepo, type PgConnectionRepo } from './meta-oauth-pg';
-import { crearMetaSyncRepo, type PgMetaSyncRepo } from './meta-sync-pg';
+import { crearMetaSyncRepo, crearMetaScheduleRepo, type PgMetaSyncRepo, type PgMetaScheduleRepo } from './meta-sync-pg';
 import { configMetaOAuthDesdeEnv } from './meta-config';
 import { TransporteHttpMeta } from './meta-http';
 import { MetaOAuthHttpAdapter } from './meta-oauth-http';
@@ -35,6 +35,7 @@ export interface ComposicionMetaOAuth {
   /** El adapter de Graph se crea por-conexión con el token resuelto (boundary-only). */
   readonly crearGraphRead: (accessToken: string) => MetaGraphReadHttpAdapter;
   readonly syncRepo: PgMetaSyncRepo;
+  readonly scheduleRepo: PgMetaScheduleRepo;
   readonly graphVersion: string;
   readonly redirectUri: string;
 }
@@ -55,6 +56,7 @@ export function crearComposicionMetaOAuth(pool: Pool, env: Env): ComposicionMeta
     oauth,
     crearGraphRead: (accessToken: string) => new MetaGraphReadHttpAdapter({ graphVersion: cfgMeta.graphVersion, appSecret: cfgMeta.appSecret }, transporte, accessToken),
     syncRepo: crearMetaSyncRepo(pool),
+    scheduleRepo: crearMetaScheduleRepo(pool),
     graphVersion: cfgMeta.graphVersion,
     redirectUri: cfgMeta.redirectUri,
   };

@@ -2,6 +2,8 @@ import { makePool, PgEventStore, runMigrations } from '@soec/event-store/pg';
 import { identityMigrations } from '@soec/identity/pg';
 import { metaOAuthMigrations } from './acquisition/meta-oauth-pg';
 import { metaSyncMigrations } from './acquisition/meta-sync-pg';
+import { crearComposicionMetaOAuth } from './acquisition/meta-runtime';
+import { iniciarMetaScheduler, INTERVALO_SCHEDULER_MS } from './acquisition/meta-scheduler';
 import { ejecutarBootstrap } from '@soec/identity';
 import { DeterministicIntelligenceProvider } from '@soec/intelligence';
 import { buildApp } from './app';
@@ -70,6 +72,18 @@ async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? 3000);
   const addr = await app.listen({ port, host: '0.0.0.0' });
   console.log(JSON.stringify({ listening: addr, authRequired, legacyDemoAccess, produccion: esProduccion, allowedOrigins }));
+
+  // Scheduler autónomo READ-ONLY de sync Meta (freshness-aware, tenant-aware). Habilitado por defecto;
+  // apagable con SOEC_META_SCHEDULER_ENABLED=false. Sólo arranca si Meta está configurado (composición != null).
+  if (process.env.SOEC_META_SCHEDULER_ENABLED !== 'false') {
+    const compSched = crearComposicionMetaOAuth(pool, process.env);
+    if (compSched !== null) {
+      iniciarMetaScheduler({ comp: compSched, scheduleRepo: compSched.scheduleRepo, ahora: () => new Date().toISOString() });
+      console.log(JSON.stringify({ metaScheduler: 'started', intervaloMs: INTERVALO_SCHEDULER_MS }));
+    } else {
+      console.log(JSON.stringify({ metaScheduler: 'idle_no_meta_config' }));
+    }
+  }
 }
 
 main().catch(async (err: unknown) => {
