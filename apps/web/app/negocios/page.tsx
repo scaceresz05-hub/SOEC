@@ -163,8 +163,9 @@ export default function Panel(): React.ReactElement {
             <div className="bhname">{negocio.displayName}</div>
             <div className="bhkind">{esEcom ? 'E-commerce / distribución' : 'Software dental (SaaS)'} · {negocio.mercado}</div>
           </div>
-          <div className="bhright">
+          <div className="bhright" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {ver && <><span className="small muted">Estado SOEC:</span> <Badge tono={ver.tono}>{ver.texto}</Badge></>}
+            <button className="btn" disabled={cargando} onClick={() => org && cargar(org)}>{cargando ? 'Actualizando…' : 'Actualizar'}</button>
           </div>
         </div>
       ) : (

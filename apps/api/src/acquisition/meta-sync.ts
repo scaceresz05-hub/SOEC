@@ -33,16 +33,20 @@ export type EstadoCapacidad = 'OK' | 'SKIPPED_FRESH' | 'AUTH_FAILED' | 'SCOPE_MI
 export type Freshness = 'FRESH' | 'STALE' | 'NEVER_SYNCED' | 'DEGRADED' | 'REAUTH_REQUIRED';
 export type ClaseErrorSync = 'NONE' | 'AUTH' | 'SCOPE' | 'DEGRADED';
 
-/** TTL de freshness por capacidad (ms). Identidad cambia poco; insights caducan antes. */
+/**
+ * TTL de freshness por capacidad (ms). Datos operativos (campañas/insights/publicaciones) apuntan a una
+ * frescura máxima de ~30–60 min para no depender de snapshots viejos; la identidad (que cambia poco) mantiene
+ * TTL largos para no abusar de Graph. El scheduler aplica backoff exponencial ante errores (ver meta-scheduler).
+ */
 export const TTL_POR_CAPACIDAD: Readonly<Record<CapacidadSync, number>> = {
   BUSINESS_IDENTITY: 24 * 3600_000,
   PAGE_IDENTITY: 24 * 3600_000,
   INSTAGRAM_IDENTITY: 24 * 3600_000,
-  ADS_ACCOUNT: 24 * 3600_000,
-  INSTAGRAM_MEDIA: 6 * 3600_000,
-  ADS_CAMPAIGNS: 6 * 3600_000,
-  INSTAGRAM_INSIGHTS: 3 * 3600_000,
-  ADS_INSIGHTS: 3 * 3600_000,
+  ADS_ACCOUNT: 12 * 3600_000,
+  INSTAGRAM_MEDIA: 60 * 60_000, // publicaciones nuevas visibles en ~1 h
+  ADS_CAMPAIGNS: 45 * 60_000, // estado/entrega de campañas fresco a ~45 min
+  INSTAGRAM_INSIGHTS: 45 * 60_000,
+  ADS_INSIGHTS: 45 * 60_000, // métricas de anuncios frescas a ~45 min
 };
 
 /** Etiqueta de período de la ventana consultada para insights (debe coincidir con el date_preset del read port). */
