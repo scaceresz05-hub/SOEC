@@ -97,6 +97,19 @@ export interface ShadowRun {
   resumen: string;
 }
 
+export interface WriteStatus {
+  modo: string;
+  real: boolean;
+  motivo: string;
+  autonomousReal: boolean;
+  configReady: boolean;
+  scopesRequeridos: string[];
+  scopesConcedidos: string[];
+  metaWriteCalls: number;
+  realMoneySpent: number;
+}
+
+export const writeStatus = (org: string) => get(org, 'write/status').then((r) => j<WriteStatus>(r));
 export const mandatoActual = (org: string) => get(org, 'action/mandate').then((r) => j<Mandato | null>(r));
 export const crearMandato = (org: string, b: unknown) => post(org, 'action/mandate', b).then((r) => j<Mandato>(r));
 export const gobernarMandato = (org: string, id: string, b: unknown) => post(org, `action/mandate/${id}/gobernar`, b).then((r) => j<Mandato>(r));

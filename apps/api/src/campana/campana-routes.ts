@@ -14,7 +14,8 @@ import { restanteMinor } from '../accion/mandato';
 import type { DepsActionPlane } from '../accion/action-plane';
 import { construirCampaignPlan } from './campaign-plan';
 import { ejecutarCampana } from './campaign-execution';
-import { MetaWriteDryRunAdapter } from './meta-write-port';
+import { seleccionarMetaWritePort } from './meta-write-factory';
+import { SCOPES_ESCRITURA_REQUERIDOS } from './write-capability';
 import type { ObjetivoCampana, PerfilNegocio, Placement } from './content-engine';
 import { correrCicloAutonomo } from '../autonomia/autonomous-loop';
 import type { ObservacionAnuncio } from '../autonomia/performance';
@@ -56,8 +57,20 @@ export function registerCampanaRoutes(app: FastifyInstance, pool: Pool | undefin
   const shadowRepo = new PgShadowRunRepo(pool, () => randomUUID());
   const autonomousReal = process.env.SOEC_AUTONOMOUS_REAL === 'true'; // por defecto false ⇒ dry-run/shadow
   const globalKillSwitch = process.env.SOEC_KILL_SWITCH === 'true';
+  const configReady = process.env.META_WRITE_CONFIG_READY === 'true';
+  const grantedScopes = (process.env.META_GRANTED_SCOPES ?? 'ads_read').split(',').map((s) => s.trim()).filter(Boolean);
   const ahora = () => new Date().toISOString();
   const deps = (): DepsActionPlane => ({ ledger: ledgerRepo, ahora, autonomousReal, globalKillSwitch, nuevoId: () => randomUUID() });
+  // Selección de port FAIL-CLOSED: en modo seguro SIEMPRE dry-run. El write path real está implementado pero
+  // no configurado (sin transporte/reconciliación aquí) ⇒ la factory jamás devuelve real en esta superficie.
+  const seleccion = () => seleccionarMetaWritePort({ autonomousReal, configReady, grantedScopes });
+
+  // Estado del write path (para la UI y el veredicto). Nunca expone token/secreto.
+  app.get('/acquisition/write/status', async (req, reply) => {
+    const a = ctx(req, reply); if (!a) return;
+    const sel = seleccion();
+    return reply.send({ ok: true, datos: { modo: sel.modo, real: sel.modo === 'REAL', motivo: sel.motivo, autonomousReal, configReady, scopesRequeridos: SCOPES_ESCRITURA_REQUERIDOS, scopesConcedidos: grantedScopes, metaWriteCalls: 0, realMoneySpent: 0 } });
+  });
 
   // Construir un plan de campaña (puro, sin persistir). Requiere mandato vigente para conocer restante/moneda/activo.
   app.post('/acquisition/campaign/plan', async (req, reply) => {
@@ -90,7 +103,7 @@ export function registerCampanaRoutes(app: FastifyInstance, pool: Pool | undefin
     });
     const planId = String(b['planId'] ?? `plan-${m.id}-${ahora()}`);
     const d = deps();
-    const r = await ejecutarCampana(d, new MetaWriteDryRunAdapter(), m, plan, planId);
+    const r = await ejecutarCampana(d, seleccion().port, m, plan, planId);
     if (r.gastoComprometidoMinor > 0) { const act = await mandatoRepo.obtener(a.org, m.id); if (act) await mandatoRepo.guardar(act); }
     return reply.send({ ok: true, datos: { plan, ejecucion: r } });
   });
@@ -109,7 +122,7 @@ export function registerCampanaRoutes(app: FastifyInstance, pool: Pool | undefin
           return { adRef: String(x['adRef'] ?? ''), impresiones: Number(x['impresiones'] ?? 0), clics: Number(x['clics'] ?? 0), gastoMinor: Number(x['gastoMinor'] ?? 0), resultados: Number(x['resultados'] ?? 0), ventanaHoras: Number(x['ventanaHoras'] ?? 24) };
         })
       : [];
-    const run = await correrCicloAutonomo(deps(), new MetaWriteDryRunAdapter(), { mandato: m, adAccountId: adAccount, observaciones: obs });
+    const run = await correrCicloAutonomo(deps(), seleccion().port, { mandato: m, adAccountId: adAccount, observaciones: obs });
     await shadowRepo.guardar(run);
     return reply.send({ ok: true, datos: run });
   });

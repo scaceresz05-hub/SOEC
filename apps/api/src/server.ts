@@ -4,6 +4,7 @@ import { metaOAuthMigrations } from './acquisition/meta-oauth-pg';
 import { metaSyncMigrations } from './acquisition/meta-sync-pg';
 import { accionMigrations } from './accion/accion-pg';
 import { autonomiaMigrations } from './autonomia/autonomia-pg';
+import { metaWriteMigrations } from './campana/meta-write-pg';
 import { crearComposicionMetaOAuth } from './acquisition/meta-runtime';
 import { iniciarMetaScheduler, INTERVALO_SCHEDULER_MS } from './acquisition/meta-scheduler';
 import { ejecutarBootstrap } from '@soec/identity';
@@ -60,6 +61,7 @@ async function main(): Promise<void> {
   await runMigrations(pool, metaSyncMigrations); // esquema de sync read-only + observabilidad Meta
   await runMigrations(pool, accionMigrations); // Safe Action Plane (V2-A): mandatos + action ledger
   await runMigrations(pool, autonomiaMigrations); // V2-C: shadow runs (autonomía en sombra)
+  await runMigrations(pool, metaWriteMigrations); // V2 pre-real: reconciliación del write path (dormante)
   const boot = await ejecutarBootstrap(pool);
   if (boot.ejecutado) console.log(JSON.stringify({ bootstrap: boot }));
 

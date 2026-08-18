@@ -64,6 +64,8 @@ export async function publicarOrganico(
     assetId: s.assetId,
     idempotencyKey: accion.idempotencyKey,
     payload: { headline: s.pieza.headline, primaryText: s.pieza.primaryText, historia: s.historia === true },
+    mandateId: mandato.id,
+    guardApproved: true,
   });
   const metaWriteCallsReales = port.esReal && escritura.ok ? 1 : 0;
   const estado = r.veredicto.modo === 'REAL' && escritura.ok ? 'EJECUTADA' : 'SIMULADA';
