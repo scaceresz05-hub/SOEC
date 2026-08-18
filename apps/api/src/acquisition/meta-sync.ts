@@ -1,19 +1,22 @@
 /**
- * apps/api · SYNC READ-ONLY + OBSERVABILIDAD de Meta.
+ * apps/api · SYNC READ-ONLY + OBSERVABILIDAD + POLÍTICA DE FRESHNESS de Meta.
  *
  * Reutiliza credencial + bindings + `MetaGraphReadPort` + la clasificación sanitaria del read-smoke para
- * sincronizar snapshots NORMALIZADOS por capacidad. Reglas duras:
+ * sincronizar snapshots NORMALIZADOS por capacidad, respetando una política de freshness por capacidad.
+ * Reglas duras:
  *   · SÓLO lectura (GET); NUNCA escritura Meta, ni gestión de anuncios (write), ni lectura de leads/PII.
  *   · Se persiste SÓLO un resumen normalizado (conteos / métricas numéricas / identidad whitelisted):
  *     jamás el raw Graph, ni URLs de paging, ni token.
- *   · Idempotente: upsert por (org, capability, externalId, period) ⇒ mismo asset+período no duplica.
+ *   · Idempotente: upsert por (org, capability, externalId, period).
+ *   · Freshness: si un snapshot sigue FRESH y no hay `force`, NO se llama a Graph para esa capacidad. Si
+ *     TODAS están FRESH, ni siquiera se resuelve el token (cero llamadas Graph).
  *   · Health fail-closed: auth ⇒ AUTH/TOKEN_EXPIRED; permiso ⇒ SCOPE/SCOPE_MISSING; otros ⇒ DEGRADED.
- *     Una respuesta vacía/no-data NO es fallo (no se convierte «missing» en 0 ni en error de auth).
- * NO modifica la conexión OAuth (estado/bindings/credencial): la observabilidad vive en su propio estado.
+ *     Una respuesta vacía/no-data NO es fallo (no se convierte «missing» en 0). Un fallo parcial PRESERVA
+ *     el último snapshot bueno (no se sobrescribe con nada).
+ * NO modifica la conexión OAuth (estado/bindings/credencial): la observabilidad de sync vive aparte.
  */
 
-import type { MetaGraphReadPort } from './meta-onboarding';
-import type { BindingMeta } from './meta-onboarding';
+import type { MetaGraphReadPort, BindingMeta } from './meta-onboarding';
 import { MetaAutenticacionError, MetaPermisoError } from './meta-http';
 
 export type CapacidadSync =
@@ -26,10 +29,22 @@ export type CapacidadSync =
   | 'ADS_CAMPAIGNS'
   | 'ADS_INSIGHTS';
 
-export type EstadoCapacidad = 'OK' | 'AUTH_FAILED' | 'SCOPE_MISSING' | 'DEGRADED' | 'SKIPPED';
+export type EstadoCapacidad = 'OK' | 'SKIPPED_FRESH' | 'AUTH_FAILED' | 'SCOPE_MISSING' | 'DEGRADED';
+export type Freshness = 'FRESH' | 'STALE' | 'NEVER_SYNCED' | 'DEGRADED' | 'REAUTH_REQUIRED';
 export type ClaseErrorSync = 'NONE' | 'AUTH' | 'SCOPE' | 'DEGRADED';
 
-/** Resumen NORMALIZADO de una lectura: conteos, métricas numéricas, identidad whitelisted. Nunca raw/PII. */
+/** TTL de freshness por capacidad (ms). Identidad cambia poco; insights caducan antes. */
+export const TTL_POR_CAPACIDAD: Readonly<Record<CapacidadSync, number>> = {
+  BUSINESS_IDENTITY: 24 * 3600_000,
+  PAGE_IDENTITY: 24 * 3600_000,
+  INSTAGRAM_IDENTITY: 24 * 3600_000,
+  ADS_ACCOUNT: 24 * 3600_000,
+  INSTAGRAM_MEDIA: 6 * 3600_000,
+  ADS_CAMPAIGNS: 6 * 3600_000,
+  INSTAGRAM_INSIGHTS: 3 * 3600_000,
+  ADS_INSIGHTS: 3 * 3600_000,
+};
+
 export interface ResumenNormalizado {
   readonly kind: CapacidadSync;
   readonly count?: number;
@@ -42,8 +57,8 @@ export interface SnapshotSync {
   readonly connectionId: string;
   readonly capability: CapacidadSync;
   readonly externalId: string;
-  readonly period: string; // 'CURRENT' para identidad/estado rolling
-  readonly observedAt: string; // timestamp del snapshot (freshness)
+  readonly period: string;
+  readonly observedAt: string;
   readonly source: 'meta';
   readonly resumen: ResumenNormalizado;
 }
@@ -51,6 +66,7 @@ export interface SnapshotSync {
 export interface EstadoCapacidadSync {
   readonly capability: CapacidadSync;
   readonly estado: EstadoCapacidad;
+  readonly freshness: Freshness;
   readonly observedAt: string | null;
 }
 
@@ -60,7 +76,7 @@ export interface EstadoSync {
   readonly lastSyncAt: string;
   readonly lastSuccessfulSyncAt: string | null;
   readonly lastErrorClass: ClaseErrorSync;
-  readonly saludConexion: string; // HEALTHY / TOKEN_EXPIRED / SCOPE_MISSING / DEGRADED
+  readonly saludConexion: string;
   readonly capacidades: readonly EstadoCapacidadSync[];
 }
 
@@ -71,13 +87,51 @@ export interface MetaSyncRepo {
   listarSnapshots(organizationId: string, connectionId: string): Promise<readonly SnapshotSync[]>;
 }
 
+// --- Capacidades aplicables por binding ----------------------------------------------------------
+
+export interface CapacidadAplicable {
+  readonly capability: CapacidadSync;
+  readonly externalId: string;
+}
+
+/** Capacidades sincronizables según los bindings confirmados (identity + derivadas por asset). */
+export function capacidadesAplicables(bindings: readonly BindingMeta[]): readonly CapacidadAplicable[] {
+  const bind = (t: string): string | null => bindings.find((b) => b.assetType === t && b.confirmadoPorHumano)?.externalId ?? null;
+  const out: CapacidadAplicable[] = [];
+  const biz = bind('business');
+  const page = bind('page');
+  const igsid = bind('instagram');
+  const adId = bind('adAccount');
+  if (biz !== null) out.push({ capability: 'BUSINESS_IDENTITY', externalId: biz });
+  if (page !== null) out.push({ capability: 'PAGE_IDENTITY', externalId: page });
+  if (igsid !== null) {
+    out.push({ capability: 'INSTAGRAM_IDENTITY', externalId: igsid });
+    out.push({ capability: 'INSTAGRAM_MEDIA', externalId: igsid });
+    out.push({ capability: 'INSTAGRAM_INSIGHTS', externalId: igsid });
+  }
+  if (adId !== null) {
+    out.push({ capability: 'ADS_ACCOUNT', externalId: adId });
+    out.push({ capability: 'ADS_CAMPAIGNS', externalId: adId });
+    out.push({ capability: 'ADS_INSIGHTS', externalId: adId });
+  }
+  return out;
+}
+
+/** Clasifica freshness: salud previa (auth/scope/degraded) manda; luego edad del snapshot vs TTL. */
+export function clasificarFreshness(snapshot: SnapshotSync | undefined, estadoPrevio: EstadoCapacidad | undefined, ttlMs: number, ahoraMs: number): Freshness {
+  if (estadoPrevio === 'AUTH_FAILED') return 'REAUTH_REQUIRED';
+  if (estadoPrevio === 'SCOPE_MISSING' || estadoPrevio === 'DEGRADED') return 'DEGRADED';
+  if (snapshot === undefined) return 'NEVER_SYNCED';
+  const edad = ahoraMs - Date.parse(snapshot.observedAt);
+  return edad < ttlMs ? 'FRESH' : 'STALE';
+}
+
 // --- Normalizadores whitelist (nunca raw/paging/token/PII) ---------------------------------------
 
 function contarData(json: unknown): number {
   const d = (json as { data?: unknown } | null)?.data;
   return Array.isArray(d) ? d.length : 0;
 }
-
 function identidadWhitelist(json: unknown, campos: readonly string[]): Record<string, string> {
   const o = (json ?? {}) as Record<string, unknown>;
   const out: Record<string, string> = {};
@@ -88,8 +142,6 @@ function identidadWhitelist(json: unknown, campos: readonly string[]): Record<st
   }
   return out;
 }
-
-/** Extrae métricas numéricas de insights (formato name/values o fila account-level). Sólo números. */
 function metricasInsights(json: unknown, camposFila: readonly string[]): Record<string, number> {
   const d = (json as { data?: unknown } | null)?.data;
   const out: Record<string, number> = {};
@@ -113,66 +165,106 @@ function metricasInsights(json: unknown, camposFila: readonly string[]): Record<
   return out;
 }
 
-// --- Orquestador ---------------------------------------------------------------------------------
+function leerCapacidad(g: MetaGraphReadPort, cap: CapacidadSync, id: string): Promise<unknown> {
+  switch (cap) {
+    case 'BUSINESS_IDENTITY': return g.discoverBusinesses();
+    case 'PAGE_IDENTITY': return g.discoverPages();
+    case 'INSTAGRAM_IDENTITY': return g.readInstagramProfile(id);
+    case 'INSTAGRAM_MEDIA': return g.readInstagramMedia(id);
+    case 'INSTAGRAM_INSIGHTS': return g.readInstagramAccountInsights(id);
+    case 'ADS_ACCOUNT': return g.readAdAccount(id);
+    case 'ADS_CAMPAIGNS': return g.readCampaigns(id);
+    case 'ADS_INSIGHTS': return g.readAdsInsights(id);
+  }
+}
+function normalizarCapacidad(cap: CapacidadSync, json: unknown): ResumenNormalizado {
+  switch (cap) {
+    case 'BUSINESS_IDENTITY':
+    case 'PAGE_IDENTITY': return { kind: cap, count: Array.isArray(json) ? (json as unknown[]).length : 0 };
+    case 'INSTAGRAM_IDENTITY': return { kind: cap, identity: identidadWhitelist(json, ['id', 'username']) };
+    case 'INSTAGRAM_MEDIA': return { kind: cap, count: contarData(json) };
+    case 'INSTAGRAM_INSIGHTS': return { kind: cap, metrics: metricasInsights(json, ['reach', 'follower_count']) };
+    case 'ADS_ACCOUNT': return { kind: cap, identity: identidadWhitelist(json, ['id', 'account_id', 'currency', 'account_status']) };
+    case 'ADS_CAMPAIGNS': return { kind: cap, count: contarData(json) };
+    case 'ADS_INSIGHTS': return { kind: cap, metrics: metricasInsights(json, ['impressions', 'clicks', 'spend', 'reach']) };
+  }
+}
+
+// --- Orquestador con política de freshness -------------------------------------------------------
 
 export interface DepsSync {
-  readonly graph: MetaGraphReadPort; // adapter con el token ya ligado (boundary-only)
+  /** Resuelve el token y crea el adapter Graph SÓLO cuando se invoca (permite no tocar el token si todo FRESH). */
+  readonly resolverGraph: <T>(uso: (g: MetaGraphReadPort) => Promise<T>) => Promise<T>;
   readonly repo: MetaSyncRepo;
   readonly ahora: () => string;
+  /** Override de TTL para tests (ms por capacidad). */
+  readonly ttl?: Partial<Record<CapacidadSync, number>>;
+}
+
+export interface OpcionesSync {
+  readonly force?: boolean;
 }
 
 /**
- * Sincroniza (read-only) cada capacidad con binding confirmado, normaliza y persiste snapshots idempotentes,
- * y registra el estado de observabilidad. Nunca lanza por un check individual: clasifica y continúa.
+ * Sincroniza respetando freshness. `force` re-lee todo. Sin `force`, sólo lee capacidades STALE /
+ * NEVER_SYNCED / DEGRADED / REAUTH_REQUIRED; las FRESH se saltan (sin llamada Graph). Fail parcial preserva
+ * el último snapshot bueno. No lanza por un check: clasifica y continúa.
  */
-export async function ejecutarSync(deps: DepsSync, organizationId: string, connectionId: string, bindings: readonly BindingMeta[]): Promise<EstadoSync> {
+export async function ejecutarSync(deps: DepsSync, organizationId: string, connectionId: string, bindings: readonly BindingMeta[], opciones: OpcionesSync = {}): Promise<EstadoSync> {
   const ahora = deps.ahora();
-  const bind = (t: string): string | null => bindings.find((b) => b.assetType === t && b.confirmadoPorHumano)?.externalId ?? null;
-  const capacidades: EstadoCapacidadSync[] = [];
+  const ahoraMs = Date.parse(ahora);
+  const force = opciones.force === true;
+  const ttl = (c: CapacidadSync): number => deps.ttl?.[c] ?? TTL_POR_CAPACIDAD[c];
+
+  const snapsPrev = new Map((await deps.repo.listarSnapshots(organizationId, connectionId)).map((s) => [`${s.capability}:${s.externalId}`, s]));
+  const estadoPrev = await deps.repo.obtenerEstado(organizationId, connectionId);
+  const capPrev = new Map((estadoPrev?.capacidades ?? []).map((c) => [c.capability, c.estado]));
+
+  const plan = capacidadesAplicables(bindings).map((a) => {
+    const snap = snapsPrev.get(`${a.capability}:${a.externalId}`);
+    const freshness = clasificarFreshness(snap, capPrev.get(a.capability), ttl(a.capability), ahoraMs);
+    return { ...a, snap, freshness, needSync: force || freshness !== 'FRESH' };
+  });
+  const aSincronizar = plan.filter((p) => p.needSync);
+
   let auth = false, scope = false, degraded = false;
+  const resultados = new Map<CapacidadSync, EstadoCapacidadSync>();
 
-  const correr = async (capability: CapacidadSync, externalId: string, period: string, leer: () => Promise<unknown>, normalizar: (j: unknown) => ResumenNormalizado): Promise<void> => {
-    try {
-      const json = await leer();
-      const resumen = normalizar(json); // no-data ⇒ resumen con count 0 / metrics vacío (lectura válida)
-      await deps.repo.upsertSnapshot({ organizationId, connectionId, capability, externalId, period, observedAt: ahora, source: 'meta', resumen });
-      capacidades.push({ capability, estado: 'OK', observedAt: ahora });
-    } catch (e) {
-      let estado: EstadoCapacidad = 'DEGRADED';
-      if (e instanceof MetaAutenticacionError) { auth = true; estado = 'AUTH_FAILED'; }
-      else if (e instanceof MetaPermisoError) { scope = true; estado = 'SCOPE_MISSING'; }
-      else degraded = true;
-      capacidades.push({ capability, estado, observedAt: null });
-    }
-  };
-
-  const biz = bind('business');
-  const page = bind('page');
-  const igsid = bind('instagram');
-  const adId = bind('adAccount');
-
-  if (biz !== null) await correr('BUSINESS_IDENTITY', biz, 'CURRENT', () => deps.graph.discoverBusinesses(), (j) => ({ kind: 'BUSINESS_IDENTITY', count: Array.isArray(j) ? (j as unknown[]).length : 0 }));
-  if (page !== null) await correr('PAGE_IDENTITY', page, 'CURRENT', () => deps.graph.discoverPages(), (j) => ({ kind: 'PAGE_IDENTITY', count: Array.isArray(j) ? (j as unknown[]).length : 0 }));
-  if (igsid !== null) {
-    await correr('INSTAGRAM_IDENTITY', igsid, 'CURRENT', () => deps.graph.readInstagramProfile(igsid), (j) => ({ kind: 'INSTAGRAM_IDENTITY', identity: identidadWhitelist(j, ['id', 'username']) }));
-    await correr('INSTAGRAM_MEDIA', igsid, 'CURRENT', () => deps.graph.readInstagramMedia(igsid), (j) => ({ kind: 'INSTAGRAM_MEDIA', count: contarData(j) }));
-    await correr('INSTAGRAM_INSIGHTS', igsid, 'CURRENT', () => deps.graph.readInstagramAccountInsights(igsid), (j) => ({ kind: 'INSTAGRAM_INSIGHTS', metrics: metricasInsights(j, ['reach', 'follower_count']) }));
+  if (aSincronizar.length > 0) {
+    await deps.resolverGraph(async (g) => {
+      for (const p of aSincronizar) {
+        try {
+          const json = await leerCapacidad(g, p.capability, p.externalId);
+          const resumen = normalizarCapacidad(p.capability, json);
+          await deps.repo.upsertSnapshot({ organizationId, connectionId, capability: p.capability, externalId: p.externalId, period: 'CURRENT', observedAt: ahora, source: 'meta', resumen });
+          resultados.set(p.capability, { capability: p.capability, estado: 'OK', freshness: 'FRESH', observedAt: ahora });
+        } catch (e) {
+          // Fail parcial: NO se sobrescribe el snapshot previo (se preserva el último bueno).
+          let estado: EstadoCapacidad = 'DEGRADED';
+          let fr: Freshness = 'DEGRADED';
+          if (e instanceof MetaAutenticacionError) { auth = true; estado = 'AUTH_FAILED'; fr = 'REAUTH_REQUIRED'; }
+          else if (e instanceof MetaPermisoError) { scope = true; estado = 'SCOPE_MISSING'; fr = 'DEGRADED'; }
+          else degraded = true;
+          resultados.set(p.capability, { capability: p.capability, estado, freshness: fr, observedAt: p.snap?.observedAt ?? null });
+        }
+      }
+      return 'ok';
+    });
   }
-  if (adId !== null) {
-    await correr('ADS_ACCOUNT', adId, 'CURRENT', () => deps.graph.readAdAccount(adId), (j) => ({ kind: 'ADS_ACCOUNT', identity: identidadWhitelist(j, ['id', 'account_id', 'currency', 'account_status']) }));
-    await correr('ADS_CAMPAIGNS', adId, 'CURRENT', () => deps.graph.readCampaigns(adId), (j) => ({ kind: 'ADS_CAMPAIGNS', count: contarData(j) }));
-    await correr('ADS_INSIGHTS', adId, 'CURRENT', () => deps.graph.readAdsInsights(adId), (j) => ({ kind: 'ADS_INSIGHTS', metrics: metricasInsights(j, ['impressions', 'clicks', 'spend', 'reach']) }));
-  }
+
+  // Capacidades FRESH saltadas (sin Graph): conservan su snapshot.
+  const capacidades: EstadoCapacidadSync[] = plan.map((p) =>
+    resultados.get(p.capability) ?? { capability: p.capability, estado: 'SKIPPED_FRESH', freshness: 'FRESH', observedAt: p.snap?.observedAt ?? null },
+  );
 
   const lastErrorClass: ClaseErrorSync = auth ? 'AUTH' : scope ? 'SCOPE' : degraded ? 'DEGRADED' : 'NONE';
   const saludConexion = auth ? 'TOKEN_EXPIRED' : scope ? 'SCOPE_MISSING' : degraded ? 'DEGRADED' : 'HEALTHY';
-  const prev = await deps.repo.obtenerEstado(organizationId, connectionId);
-  const exitoTotal = lastErrorClass === 'NONE' && capacidades.length > 0;
+  const huboSyncReal = aSincronizar.length > 0 && lastErrorClass === 'NONE';
   const estado: EstadoSync = {
     organizationId,
     connectionId,
     lastSyncAt: ahora,
-    lastSuccessfulSyncAt: exitoTotal ? ahora : (prev?.lastSuccessfulSyncAt ?? null),
+    lastSuccessfulSyncAt: huboSyncReal ? ahora : (estadoPrev?.lastSuccessfulSyncAt ?? null),
     lastErrorClass,
     saludConexion,
     capacidades,

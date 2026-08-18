@@ -322,4 +322,54 @@ describe('meta sync read-only (endpoint on-demand)', () => {
     const conn = (await a.inject({ method: 'GET', url: '/acquisition/meta/connection', headers: H() })).json().datos;
     expect(conn.estado).toBe('CONNECTED_READ_ONLY');
   });
+
+  it('force=true exige business.manage: sin permiso ⇒ 403; con permiso ⇒ 200', async () => {
+    const a = app();
+    await conectado(a);
+    // Sin x-permissions ⇒ 403.
+    const sinPerm = await a.inject({ method: 'POST', url: '/acquisition/meta/sync', headers: H(), payload: { force: true } });
+    expect(sinPerm.statusCode).toBe(403);
+    expect(sinPerm.json().error).toBe('FORCE_NO_AUTORIZADO');
+    // Con business.manage ⇒ 200 (re-lee).
+    const conPerm = await a.inject({ method: 'POST', url: '/acquisition/meta/sync', headers: { ...H(), 'x-permissions': 'analytics.read,business.manage' }, payload: { force: true } });
+    expect(conPerm.statusCode).toBe(200);
+    expect(conPerm.json().datos.saludConexion).toBe('HEALTHY');
+  });
+});
+
+describe('meta director read-model (endpoint on-demand)', () => {
+  async function conectado(a: FastifyInstance): Promise<void> {
+    const st = await start(a);
+    await callback(a, `state=${st}&code=C`);
+    for (const b of [
+      { externalId: '934186066270538', assetType: 'business' },
+      { externalId: '1066708446525633', assetType: 'page' },
+      { externalId: '17841432883225770', assetType: 'instagram' },
+      { externalId: '1037025024374407', assetType: 'adAccount' },
+    ]) {
+      expect((await a.inject({ method: 'POST', url: '/acquisition/meta/binding', headers: H(), payload: b })).statusCode).toBe(200);
+    }
+  }
+
+  it('sin auth ⇒ 401 · sin conexión ⇒ 409', async () => {
+    const a = app();
+    expect((await a.inject({ method: 'GET', url: '/acquisition/meta/director' })).statusCode).toBe(401);
+    expect((await a.inject({ method: 'GET', url: '/acquisition/meta/director', headers: H() })).json().error).toBe('NOT_CONNECTED');
+  });
+
+  it('tras sync: Director ve 8 capacidades normalizadas con freshness; sin secretos/raw', async () => {
+    const a = app();
+    await conectado(a);
+    await a.inject({ method: 'POST', url: '/acquisition/meta/sync', headers: H() });
+    const r = await a.inject({ method: 'GET', url: '/acquisition/meta/director', headers: H() });
+    expect(r.statusCode).toBe(200);
+    const v = r.json().datos as { health: string; lastSuccessfulSyncAt: string | null; capacidades: { capability: string; freshness: string; source: string; capturedAt: string | null; resumen: unknown }[] };
+    expect(v.health).toBe('HEALTHY');
+    expect(v.capacidades).toHaveLength(8);
+    expect(v.capacidades.every((c) => c.freshness === 'FRESH' && c.source === 'meta' && c.capturedAt !== null && c.resumen !== null)).toBe(true);
+    const s = JSON.stringify(r.json()).toLowerCase();
+    for (const prohibido of ['synth_long_token', 'access_token', 'secretref', 'ciphertext', 'graph.facebook.com', 'file:', 'paging']) {
+      expect(s.includes(prohibido)).toBe(false);
+    }
+  });
 });
