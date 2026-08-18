@@ -109,6 +109,10 @@ export class MetaGraphReadHttpAdapter implements MetaGraphReadPort {
     return out;
   }
 
+  readInstagramProfile(igsid: string): Promise<unknown> {
+    // Identidad básica del IG vinculado (instagram_basic). Distinta de la lectura de /media.
+    return this.get(enc(igsid), { fields: 'id,username' });
+  }
   readInstagramMedia(igsid: string): Promise<unknown> {
     return this.get(`${enc(igsid)}/media`, { fields: 'id,media_type,media_product_type,timestamp,permalink' });
   }

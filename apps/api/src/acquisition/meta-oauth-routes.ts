@@ -46,33 +46,90 @@ async function descubrirAssets(g: ReturnType<ComposicionMetaOAuth['crearGraphRea
   return dedupCandidatos([...b, ...p, ...i, ...a]);
 }
 
-/** Read-smoke read-only tras el binding: plausibilidad + clasificación de salud. No persiste raw Graph. */
-async function readSmoke(comp: ComposicionMetaOAuth, ctx: RequestContext, org: string, connectionId: string): Promise<{ pass: boolean; salud: string }> {
+/** Los 8 checks de lectura del read-smoke completo (uno por capacidad de lectura post-binding). */
+export type CheckReadSmoke =
+  | 'BUSINESS_READ'
+  | 'PAGE_READ'
+  | 'INSTAGRAM_BASIC_READ'
+  | 'INSTAGRAM_MEDIA_READ'
+  | 'INSTAGRAM_INSIGHTS_READ'
+  | 'ADS_ACCOUNT_READ'
+  | 'ADS_CAMPAIGNS_READ'
+  | 'ADS_INSIGHTS_READ';
+export type ResultadoCheck = 'PASS' | 'FAIL' | 'SKIP';
+const CHECKS_READ_SMOKE: readonly CheckReadSmoke[] = ['BUSINESS_READ', 'PAGE_READ', 'INSTAGRAM_BASIC_READ', 'INSTAGRAM_MEDIA_READ', 'INSTAGRAM_INSIGHTS_READ', 'ADS_ACCOUNT_READ', 'ADS_CAMPAIGNS_READ', 'ADS_INSIGHTS_READ'];
+
+export interface ResultadoReadSmoke {
+  readonly checks: Record<CheckReadSmoke, ResultadoCheck>;
+  readonly pass: boolean;
+  readonly salud: string;
+  readonly estado: string;
+  readonly totalPass: number;
+  readonly totalRun: number;
+}
+
+/**
+ * READ-SMOKE COMPLETO read-only tras el binding: ejecuta REALMENTE cada capacidad de lectura por binding
+ * confirmado y registra PASS/FAIL/SKIP por check. Sólo lectura (GET), un check por llamada Graph; nunca
+ * persiste raw Graph ni el token. Health fail-closed: auth ⇒ TOKEN_EXPIRED/REAUTH_REQUIRED; permiso ⇒
+ * SCOPE_MISSING/DEGRADED; otros ⇒ DEGRADED. Una respuesta vacía/no-data NO es fallo (la llamada fue
+ * autorizada y saneada): no se convierte «missing» en 0 ni en error de auth.
+ */
+export async function ejecutarReadSmoke(comp: ComposicionMetaOAuth, ctx: RequestContext, org: string, connectionId: string): Promise<ResultadoReadSmoke> {
+  const checks = Object.fromEntries(CHECKS_READ_SMOKE.map((c) => [c, 'SKIP'])) as Record<CheckReadSmoke, ResultadoCheck>;
   const reg = await comp.connRepo.obtener(org, connectionId);
   const cred = await comp.credRepo.obtener(org, connectionId);
-  if (reg === null || cred === null) return { pass: false, salud: 'UNKNOWN' };
-  const resuelto = await comp.secretWriter.resolver(ctx, cred.secretRef);
+  if (reg === null || cred === null) return { checks, pass: false, salud: 'UNKNOWN', estado: 'NOT_CONNECTED', totalPass: 0, totalRun: 0 };
+
+  const bind = (t: string): string | null => reg.conexion.bindings.find((b) => b.assetType === t && b.confirmadoPorHumano)?.externalId ?? null;
+  const hasBusiness = bind('business') !== null;
+  const hasPage = bind('page') !== null;
+  const igsid = bind('instagram');
+  const adId = bind('adAccount');
+
+  let auth = false, scope = false, degraded = false;
+  const correr = async (name: CheckReadSmoke, fn: () => Promise<unknown>): Promise<void> => {
+    try {
+      await fn(); // no-data/empty ⇒ éxito autorizado (no se convierte en fallo)
+      checks[name] = 'PASS';
+    } catch (e) {
+      checks[name] = 'FAIL';
+      if (e instanceof MetaAutenticacionError) auth = true;
+      else if (e instanceof MetaPermisoError) scope = true;
+      else degraded = true;
+    }
+  };
+
   try {
+    const resuelto = await comp.secretWriter.resolver(ctx, cred.secretRef);
     await resuelto.usar(async (token) => {
       const g = comp.crearGraphRead(token);
-      for (const b of reg.conexion.bindings) {
-        if (b.assetType === 'page' || b.assetType === 'business') await g.discoverPages();
-        else if (b.assetType === 'instagram') await g.readInstagramMedia(b.externalId);
-        else if (b.assetType === 'adAccount') {
-          await g.readAdAccount(b.externalId);
-          await g.readCampaigns(b.externalId);
-        }
+      if (hasBusiness) await correr('BUSINESS_READ', () => g.discoverBusinesses());
+      if (hasPage) await correr('PAGE_READ', () => g.discoverPages());
+      if (igsid !== null) {
+        await correr('INSTAGRAM_BASIC_READ', () => g.readInstagramProfile(igsid));
+        await correr('INSTAGRAM_MEDIA_READ', () => g.readInstagramMedia(igsid));
+        await correr('INSTAGRAM_INSIGHTS_READ', () => g.readInstagramAccountInsights(igsid));
+      }
+      if (adId !== null) {
+        await correr('ADS_ACCOUNT_READ', () => g.readAdAccount(adId));
+        await correr('ADS_CAMPAIGNS_READ', () => g.readCampaigns(adId));
+        await correr('ADS_INSIGHTS_READ', () => g.readAdsInsights(adId));
       }
       return 'ok';
     });
-    await comp.connRepo.guardar({ conexion: { ...reg.conexion, salud: 'HEALTHY' }, candidatos: reg.candidatos });
-    return { pass: true, salud: 'HEALTHY' };
-  } catch (e) {
-    const salud = e instanceof MetaAutenticacionError ? 'TOKEN_EXPIRED' : e instanceof MetaPermisoError ? 'SCOPE_MISSING' : 'DEGRADED';
-    const estado = e instanceof MetaAutenticacionError ? 'REAUTH_REQUIRED' : 'DEGRADED';
-    await comp.connRepo.guardar({ conexion: { ...reg.conexion, estado, salud }, candidatos: reg.candidatos });
-    return { pass: false, salud };
+  } catch {
+    // Fallo al resolver la credencial (token no disponible): fail-closed, sin ejecutar checks.
+    degraded = true;
   }
+
+  const salud = auth ? 'TOKEN_EXPIRED' : scope ? 'SCOPE_MISSING' : degraded ? 'DEGRADED' : 'HEALTHY';
+  const estado = auth ? 'REAUTH_REQUIRED' : scope || degraded ? 'DEGRADED' : 'CONNECTED_READ_ONLY';
+  const ejecutados = CHECKS_READ_SMOKE.filter((c) => checks[c] !== 'SKIP');
+  const totalPass = ejecutados.filter((c) => checks[c] === 'PASS').length;
+  const pass = ejecutados.length > 0 && totalPass === ejecutados.length;
+  await comp.connRepo.guardar({ conexion: { ...reg.conexion, estado: estado as typeof reg.conexion.estado, salud: salud as typeof reg.conexion.salud }, candidatos: reg.candidatos });
+  return { checks, pass, salud, estado, totalPass, totalRun: ejecutados.length };
 }
 
 /**
@@ -158,8 +215,25 @@ export function registerMetaOAuthAutenticadas(app: FastifyInstance, deps: DepsMe
       { organizationId: a.org, assetType: body.assetType, externalId: body.externalId, actorId: a.actor },
     );
     if (conf.rechazo !== 'NONE') return reply.code(409).send({ ok: false, error: conf.rechazo });
-    const smoke = await readSmoke(comp, a.ctx, a.org, connectionId);
-    return reply.send({ ok: true, datos: { estado: conf.estado, readSmoke: smoke.pass ? 'READ_SMOKE_PASS' : 'READ_SMOKE_FAIL', salud: smoke.salud } });
+    const smoke = await ejecutarReadSmoke(comp, a.ctx, a.org, connectionId);
+    return reply.send({ ok: true, datos: { estado: conf.estado, readSmoke: smoke.pass ? 'READ_SMOKE_PASS' : 'READ_SMOKE_FAIL', salud: smoke.salud, resumen: `PASS_${smoke.totalPass}_OF_${smoke.totalRun}`, checks: smoke.checks } });
+  });
+
+  /**
+   * READ-SMOKE COMPLETO on-demand sobre la conexión EXISTENTE (autenticado, tenant-scoped). Reusa la
+   * credencial ya almacenada (sin OAuth/binding/scope nuevos) y ejecuta la matriz 8/8 read-only. Fail-closed:
+   * sin conexión / sin bindings ⇒ 409. NO vincula, NO escribe, NUNCA expone token/raw Graph.
+   */
+  app.post('/acquisition/meta/read-smoke', async (req, reply) => {
+    const a = authed(req, reply);
+    if (!a) return;
+    if (comp === null) return reply.code(503).send({ ok: false, error: 'META_NOT_CONFIGURED' });
+    const connectionId = `meta-${a.org}`;
+    const reg = await comp.connRepo.obtener(a.org, connectionId);
+    if (reg === null) return reply.code(409).send({ ok: false, error: 'NOT_CONNECTED' });
+    if (reg.conexion.bindings.length === 0) return reply.code(409).send({ ok: false, error: 'SIN_BINDINGS' });
+    const smoke = await ejecutarReadSmoke(comp, a.ctx, a.org, connectionId);
+    return reply.send({ ok: true, datos: { estado: smoke.estado, salud: smoke.salud, pass: smoke.pass, resumen: `PASS_${smoke.totalPass}_OF_${smoke.totalRun}`, checks: smoke.checks } });
   });
 
   /**

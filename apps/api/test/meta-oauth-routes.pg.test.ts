@@ -214,3 +214,51 @@ describe('meta re-discovery read-only (reusa credencial, sin OAuth nuevo)', () =
     expect(post!.conexion.bindings).toHaveLength(0);
   });
 });
+
+describe('meta read-smoke completo (endpoint on-demand)', () => {
+  const readSmoke = (a: FastifyInstance, org = 'org-a') => a.inject({ method: 'POST', url: '/acquisition/meta/read-smoke', headers: H(org) });
+
+  async function conectado(a: FastifyInstance): Promise<void> {
+    const st = await start(a);
+    await callback(a, `state=${st}&code=C`);
+    for (const b of [
+      { externalId: '934186066270538', assetType: 'business' },
+      { externalId: '1066708446525633', assetType: 'page' },
+      { externalId: '17841432883225770', assetType: 'instagram' },
+      { externalId: '1037025024374407', assetType: 'adAccount' },
+    ]) {
+      const r = await a.inject({ method: 'POST', url: '/acquisition/meta/binding', headers: H(), payload: b });
+      expect(r.statusCode).toBe(200);
+    }
+  }
+
+  it('sin auth ⇒ 401 · sin conexión/cross-tenant ⇒ 409 · composicion null ⇒ 503', async () => {
+    const a = app();
+    expect((await a.inject({ method: 'POST', url: '/acquisition/meta/read-smoke' })).statusCode).toBe(401);
+    expect((await readSmoke(a, 'org-a')).json().error).toBe('NOT_CONNECTED');
+    expect((await readSmoke(app(null))).statusCode).toBe(503);
+  });
+
+  it('tras callback pero SIN bindings ⇒ 409 SIN_BINDINGS', async () => {
+    const a = app();
+    const st = await start(a);
+    await callback(a, `state=${st}&code=C`);
+    expect((await readSmoke(a)).json().error).toBe('SIN_BINDINGS');
+  });
+
+  it('conexión CONNECTED_READ_ONLY con 4 bindings ⇒ 8/8 PASS, HEALTHY, sin token', async () => {
+    const a = app();
+    await conectado(a);
+    const r = await readSmoke(a);
+    expect(r.statusCode).toBe(200);
+    const d = r.json().datos as { estado: string; salud: string; pass: boolean; resumen: string; checks: Record<string, string> };
+    expect(d.pass).toBe(true);
+    expect(d.resumen).toBe('PASS_8_OF_8');
+    expect(d.salud).toBe('HEALTHY');
+    expect(d.estado).toBe('CONNECTED_READ_ONLY');
+    for (const c of ['BUSINESS_READ', 'PAGE_READ', 'INSTAGRAM_BASIC_READ', 'INSTAGRAM_MEDIA_READ', 'INSTAGRAM_INSIGHTS_READ', 'ADS_ACCOUNT_READ', 'ADS_CAMPAIGNS_READ', 'ADS_INSIGHTS_READ']) {
+      expect(d.checks[c]).toBe('PASS');
+    }
+    expect(JSON.stringify(r.json())).not.toContain('SYNTH_LONG_TOKEN');
+  });
+});
