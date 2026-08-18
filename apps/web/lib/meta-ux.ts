@@ -39,6 +39,20 @@ export function saludHumana(salud: string): { texto: string; tono: Tono } {
   }
 }
 
+export type EstadoDato = 'FRESH' | 'STALE' | 'NO_DATA' | 'ERROR';
+
+/** Estado explícito de un bloque de datos a partir de su freshness. NO_DATA/ERROR nunca se muestran como cifras. */
+export function estadoDato(freshness: string | null): { estado: EstadoDato; texto: string; tono: Tono } {
+  switch (freshness) {
+    case 'FRESH': return { estado: 'FRESH', texto: 'Actualizado', tono: 'ok' };
+    case 'STALE': return { estado: 'STALE', texto: 'Datos desactualizados', tono: 'warn' };
+    case 'NEVER_SYNCED': return { estado: 'NO_DATA', texto: 'Sin datos aún', tono: 'mut' };
+    case 'DEGRADED': return { estado: 'ERROR', texto: 'Con problemas', tono: 'warn' };
+    case 'REAUTH_REQUIRED': return { estado: 'ERROR', texto: 'Requiere reconexión', tono: 'risk' };
+    default: return { estado: 'NO_DATA', texto: 'Sin datos', tono: 'mut' };
+  }
+}
+
 export function freshnessHumano(f: string): { texto: string; tono: Tono } {
   switch (f) {
     case 'FRESH':

@@ -94,6 +94,13 @@ export default function DirectorPage(): React.ReactElement {
 
       <DirectorCard estado={<Badge tono={salud.tono}>{salud.texto}</Badge>} dice={inteligencia.overview} extra={<span className="small muted">Fuente: <b>Meta</b> · Última actualización: {hace(v.lastSuccessfulSyncAt)}{est?.syncEnabled ? ` · próxima ${en(est.nextEligibleSyncAt)}` : est ? ' · actualización automática pausada' : ''} · anuncios: últimos 7 días</span>} />
 
+      {(est?.freshness ?? []).some((f) => f.freshness === 'STALE') && (
+        <Callout tono="warn" ico="⏳">
+          Datos desactualizados · última actualización {hace(v.lastSuccessfulSyncAt)}.
+          <button className="btn" style={{ marginLeft: 8 }} disabled={sincronizando} onClick={() => { if (org) { setSincronizando(true); sincronizar(org as string).then(() => cargar(org as string)).finally(() => setSincronizando(false)); } }}>{sincronizando ? 'Actualizando…' : 'Actualizar ahora'}</button>
+        </Callout>
+      )}
+
       {/* Requiere tu atención */}
       <div className="card" style={{ marginTop: 12 }}>
         <h3 style={{ margin: '0 0 8px' }}>Requiere tu atención</h3>

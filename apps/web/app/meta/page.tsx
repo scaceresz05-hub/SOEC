@@ -10,7 +10,7 @@ import { useRouter } from 'next/navigation';
 import { orgActiva } from '../../lib/org-activa';
 import { yo } from '../../lib/auth-client';
 import { activos, conexion, iniciarOAuth, sincronizar, vincular, estadoSync, configurarSync, readSmoke, redescubrir, type Candidato, type Conexion, type EstadoSync, type ResultadoReadSmoke } from '../../lib/meta-client';
-import { estadoHumano, tipoActivoHumano, saludHumana, freshnessHumano, capacidadHumana, hace, en } from '../../lib/meta-ux';
+import { estadoHumano, tipoActivoHumano, saludHumana, capacidadHumana, estadoDato, hace, en } from '../../lib/meta-ux';
 import { Badge, Callout, EmptyState, Metric, PageHeader, TechDetails } from '../../components/ui';
 
 export default function MetaPage(): React.ReactElement {
@@ -167,7 +167,7 @@ export default function MetaPage(): React.ReactElement {
           )}
           <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
             <button className="btn primary" onClick={() => router.push('/director')}>Ver mi director</button>
-            <button className="btn" onClick={() => org && sincronizar(org).then(() => cargar(org)).catch((e) => setError((e as Error).message))}>Actualizar ahora</button>
+            <button className="btn" disabled={accion === 'refrescar'} onClick={() => { if (!org || accion === 'refrescar') return; setAccion('refrescar'); setError(null); sincronizar(org).then(() => cargar(org)).catch((e) => setError((e as Error).message)).finally(() => setAccion(null)); }}>{accion === 'refrescar' ? 'Actualizando…' : 'Actualizar ahora'}</button>
           </div>
         </div>
       )}
@@ -219,6 +219,11 @@ function PanelDatos({ org }: { org: string }): React.ReactElement {
     setOcupado('rediscover'); setErr(null);
     try { await redescubrir(org); await cargar(); } catch (e) { setErr((e as Error).message); } finally { setOcupado(null); }
   };
+  const refrescar = async () => {
+    setOcupado('refrescar'); setErr(null);
+    try { await sincronizar(org); await cargar(); } catch (e) { setErr((e as Error).message); } finally { setOcupado(null); }
+  };
+  const hayStale = (est?.freshness ?? []).some((f) => f.freshness === 'STALE');
 
   return (
     <div className="card" style={{ marginTop: 16 }}>
@@ -226,6 +231,9 @@ function PanelDatos({ org }: { org: string }): React.ReactElement {
         <h2 style={{ margin: 0 }}>Estado de tus datos</h2>
         <Badge tono={salud.tono}>{salud.texto}</Badge>
       </div>
+      {hayStale && (
+        <Callout tono="warn" ico="⏳">Datos desactualizados · última actualización {hace(est?.lastSuccessfulSyncAt ?? null)}. <button className="btn" style={{ marginLeft: 8 }} disabled={ocupado === 'refrescar'} onClick={refrescar}>{ocupado === 'refrescar' ? 'Actualizando…' : 'Actualizar ahora'}</button></Callout>
+      )}
       <div className="grid g-3" style={{ gap: 12, marginTop: 12 }}>
         <Metric label="Última actualización" value={hace(est?.lastSuccessfulSyncAt ?? null)} ico="🕓" />
         <Metric label="Próxima actualización" value={est?.syncEnabled ? en(est?.nextEligibleSyncAt ?? null) : 'pausada'} ico="⏭" />
@@ -237,6 +245,7 @@ function PanelDatos({ org }: { org: string }): React.ReactElement {
       )}
       {err && <Callout tono="warn" ico="⚠">{err}</Callout>}
       <div className="row-wrap" style={{ gap: 8, marginTop: 12 }}>
+        <button className="btn primary" disabled={ocupado === 'refrescar'} onClick={refrescar}>{ocupado === 'refrescar' ? 'Actualizando…' : 'Actualizar ahora'}</button>
         <button className="btn" disabled={ocupado === 'sync' || !est} onClick={toggleSync}>{est?.syncEnabled ? 'Pausar actualización automática' : 'Activar actualización automática'}</button>
         <button className="btn" disabled={ocupado === 'smoke'} onClick={verificar}>{ocupado === 'smoke' ? 'Verificando…' : 'Verificar conexión'}</button>
         <button className="btn" disabled={ocupado === 'rediscover'} onClick={redetectar}>{ocupado === 'rediscover' ? 'Detectando…' : 'Volver a detectar activos'}</button>
@@ -257,7 +266,7 @@ function PanelDatos({ org }: { org: string }): React.ReactElement {
       )}
       {est && est.freshness.length > 0 && (
         <TechDetails titulo="Detalle por tipo de dato">
-          <ul>{est.freshness.map((f, i) => <li key={i}>{capacidadHumana(f.capability)}: {freshnessHumano(f.freshness).texto} {f.capturedAt ? `(${hace(f.capturedAt)})` : ''}</li>)}</ul>
+          <ul>{est.freshness.map((f, i) => { const e = estadoDato(f.freshness); return <li key={i}>{capacidadHumana(f.capability)}: <b>{e.texto}</b> {f.capturedAt ? `· ${hace(f.capturedAt)}` : '· sin lectura'} <span className="mut">[{e.estado}]</span></li>; })}</ul>
         </TechDetails>
       )}
     </div>

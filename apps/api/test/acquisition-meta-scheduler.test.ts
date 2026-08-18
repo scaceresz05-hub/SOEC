@@ -60,7 +60,7 @@ describe('scheduler · backoff + proximoElegible', () => {
     const caps: EstadoCapacidadSync[] = [{ capability: 'INSTAGRAM_INSIGHTS', estado: 'OK', freshness: 'FRESH', observedAt: null }];
     expect(proximoElegible(caps, T0)).toBe(T0);
     const caps2: EstadoCapacidadSync[] = [{ capability: 'INSTAGRAM_INSIGHTS', estado: 'OK', freshness: 'FRESH', observedAt: T0 }];
-    expect(Date.parse(proximoElegible(caps2, T0))).toBe(Date.parse(T0) + 3 * 3600_000); // TTL insights 3h
+    expect(Date.parse(proximoElegible(caps2, T0))).toBe(Date.parse(T0) + 45 * 60_000); // TTL insights 45 min (frescura operativa)
   });
 });
 
