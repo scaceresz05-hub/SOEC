@@ -161,4 +161,38 @@ export function registerMetaOAuthAutenticadas(app: FastifyInstance, deps: DepsMe
     const smoke = await readSmoke(comp, a.ctx, a.org, connectionId);
     return reply.send({ ok: true, datos: { estado: conf.estado, readSmoke: smoke.pass ? 'READ_SMOKE_PASS' : 'READ_SMOKE_FAIL', salud: smoke.salud } });
   });
+
+  /**
+   * RE-DISCOVERY READ-ONLY: reutiliza la credencial YA almacenada (sin OAuth nuevo) para re-enumerar los
+   * activos accesibles por el token y refrescar SOLO la colección de candidatos. NO toca credencial,
+   * ciphertext, credencialRef, bindings ni el estado de la conexión; NUNCA vincula ni pasa a CONNECTED.
+   * El token se resuelve dentro del boundary del SecretStore y se descarta; jamás en la respuesta/logs.
+   * Fail-closed en cada precondición (sin conexión / estado incompatible / sin credencial / Graph falla).
+   */
+  app.post('/acquisition/meta/assets/rediscover', async (req, reply) => {
+    const a = authed(req, reply);
+    if (!a) return;
+    if (comp === null) return reply.code(503).send({ ok: false, error: 'META_NOT_CONFIGURED' });
+    const connectionId = `meta-${a.org}`;
+    const reg = await comp.connRepo.obtener(a.org, connectionId);
+    if (reg === null) return reply.code(409).send({ ok: false, error: 'NOT_CONNECTED' });
+    // Sólo estados con credencial vigente: BINDING_PENDING o CONNECTED_READ_ONLY.
+    if (reg.conexion.estado !== 'BINDING_PENDING' && reg.conexion.estado !== 'CONNECTED_READ_ONLY') {
+      return reply.code(409).send({ ok: false, error: 'ESTADO_INCOMPATIBLE' });
+    }
+    const cred = await comp.credRepo.obtener(a.org, connectionId);
+    if (cred === null) return reply.code(409).send({ ok: false, error: 'NO_CREDENTIAL' });
+    let candidatos: readonly CandidatoActivo[];
+    try {
+      const resuelto = await comp.secretWriter.resolver(a.ctx, cred.secretRef);
+      candidatos = await resuelto.usar((token) => descubrirAssets(comp.crearGraphRead(token)));
+    } catch (e) {
+      // Fail-closed: NO muta conexión ni credencial. Clasifica el fallo para el cliente (sin token).
+      const err = e instanceof MetaAutenticacionError ? 'REAUTH_REQUIRED' : e instanceof MetaPermisoError ? 'SCOPE_MISSING' : 'DISCOVERY_FAILED';
+      return reply.code(502).send({ ok: false, error: err });
+    }
+    // Persiste SÓLO candidatos; conserva estado/bindings/salud/credencialRef exactamente como estaban.
+    await comp.connRepo.guardar({ conexion: reg.conexion, candidatos });
+    return reply.send({ ok: true, datos: { estado: reg.conexion.estado, candidatos: candidatos.map(aCandidatoDTO) } });
+  });
 }
