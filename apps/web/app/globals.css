@@ -301,3 +301,13 @@ code{font-family:var(--mono);font-size:.88em;background:var(--sunken);padding:1p
   .did{grid-template-columns:auto 1fr}.did time{grid-column:2}
   .topbar .inner{padding:10px 16px;gap:12px}.dash,.wrap{padding-left:16px;padding-right:16px}
 }
+
+/* Superficies legales/públicas (App Review) */
+.legal{max-width:760px;line-height:1.6}
+.legal h1{margin:8px 0 4px}
+.legal h2{margin:22px 0 6px;font-size:18px}
+.legal ul,.legal ol{padding-left:22px}
+.legal li{margin:4px 0}
+.legal a{text-decoration:underline}
+.pie-legal{display:flex;flex-wrap:wrap;gap:14px;margin:8px 0}
+.pie-legal a{text-decoration:underline;opacity:.9}

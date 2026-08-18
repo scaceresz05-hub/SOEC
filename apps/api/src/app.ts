@@ -149,6 +149,7 @@ import { registerAcquisitionRoutes } from './acquisition-routes';
 import { registerMetaOAuthAutenticadas, registerMetaCallbackPublico } from './acquisition/meta-oauth-routes';
 import { registerAccionRoutes } from './accion/accion-routes';
 import { registerCampanaRoutes } from './campana/campana-routes';
+import { registerMetaDataDeletionPublico } from './acquisition/meta-data-deletion';
 import { crearComposicionMetaOAuth } from './acquisition/meta-runtime';
 import { registrarProteccionCsrf } from './csrf';
 
@@ -466,6 +467,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // consumo atómico); no acepta org/actor externos, no expone token y jamás deja CONNECTED (binding humano
     // posterior y autenticado). Fail-closed si no hay composición.
     registerMetaCallbackPublico(app, { composicion: composicionMeta, webBaseUrl: (deps.allowedOrigins ?? [])[0] });
+
+    // Data Deletion Callback de Meta: PÚBLICO (llega sin sesión, autenticado por firma del app secret).
+    // Requisito de App Review. Registra la solicitud y devuelve { url, confirmation_code }.
+    registerMetaDataDeletionPublico(app, { pool: deps.pool, appSecret: process.env.META_APP_SECRET, webBaseUrl: (deps.allowedOrigins ?? [])[0] });
 
     // CUTOVER (Macrobloque 1, incremento final): en condiciones normales (sin demo legacy), la
     // superficie vertical se registra DENTRO del gateway autenticado ⇒ sin sesión 401, sin
