@@ -43,6 +43,9 @@ interface Panel {
   };
   growthFunnel?: { comercial?: Record<string, number>; diagnostico?: Record<string, number> };
   searchTerms?: { termino: string; impresiones: number; clics: number }[];
+  // Estado del último refresh REAL a Google Ads (visibilidad del intento/fallo, p.ej. OAuth caducado).
+  adsRefresh?: { queriedAt: string; ok: boolean; estado: string; ventana: { desde: string; hasta: string }; error: string | null; dataThrough: string | null } | null;
+  googleAdsConfigured?: boolean;
 }
 /** Fuente publicitaria de este panel SaaS: Google Ads (solo lectura). Etiqueta única de origen. */
 const FUENTE_ADS = 'Google Ads';
@@ -75,17 +78,27 @@ function haceRel(iso: string | null): string {
   const dd = Math.floor(h / 24);
   return `hace ${dd} día${dd === 1 ? '' : 's'}`;
 }
-/** Línea de trazabilidad del bloque Google Ads: fuente + período real (all-time) + capturedAt/STALE. */
-function LineaAds({ ads }: { ads: NonNullable<Panel['ads']> }): React.ReactElement {
+/** Línea de trazabilidad del bloque Google Ads: fuente + período real (all-time) + capturedAt/STALE + intento. */
+function LineaAds({ ads, refresh }: { ads: NonNullable<Panel['ads']>; refresh?: Panel['adsRefresh'] }): React.ReactElement {
   const rango = ads.period?.from ? `desde ${soloFecha(ads.period.from)}` : 'acumulado histórico';
   const al = ads.period?.to ?? ads.capturedAt;
   return (
-    <p className="s" style={{ margin: '4px 0 0', color: ads.stale ? 'var(--warn)' : undefined }}>
-      {FUENTE_ADS} · {rango} al {soloFecha(al)}
-      {ads.stale
-        ? <> · <b>Último dato conocido: {fechaAbs(ads.capturedAt)}</b> · desactualizado</>
-        : <> · Actualizado {fechaAbs(ads.capturedAt)}{haceRel(ads.capturedAt) ? ` (${haceRel(ads.capturedAt)})` : ''}</>}
-    </p>
+    <div style={{ margin: '4px 0 0' }}>
+      <p className="s" style={{ margin: 0, color: ads.stale ? 'var(--warn)' : undefined }}>
+        {FUENTE_ADS} · {rango} al {soloFecha(al)}
+        {ads.stale
+          ? <> · <b>Último dato conocido: {fechaAbs(ads.capturedAt)}</b> · desactualizado</>
+          : <> · Actualizado {fechaAbs(ads.capturedAt)}{haceRel(ads.capturedAt) ? ` (${haceRel(ads.capturedAt)})` : ''}</>}
+      </p>
+      {refresh && (
+        <p className="s" style={{ margin: '2px 0 0', color: refresh.ok ? undefined : 'var(--warn)' }}>
+          Consultado a {FUENTE_ADS}: {fechaAbs(refresh.queriedAt)}
+          {refresh.ok
+            ? <> · datos hasta {soloFecha(refresh.dataThrough)}</>
+            : <> · <b>no se pudo actualizar</b>{refresh.error ? ` (${refresh.error})` : ''}</>}
+        </p>
+      )}
+    </div>
   );
 }
 interface Director { veredicto?: string }
@@ -136,6 +149,8 @@ export default function Panel(): React.ReactElement {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [bandeja, setBandeja] = useState<Bandeja | null>(null);
   const [cargando, setCargando] = useState(false);
+  const [refrescando, setRefrescando] = useState(false);
+  const [avisoRefresh, setAvisoRefresh] = useState<string | null>(null);
 
   useEffect(() => { setOrg(orgActiva()); }, []);
 
@@ -160,6 +175,24 @@ export default function Panel(): React.ReactElement {
     }
     setCargando(false);
   }, []);
+
+  // "Actualizar": dispara un refresh REAL de Google Ads (read-only) y luego re-lee el panel. Hace visible el
+  // resultado del intento (éxito, "sin novedades", o fallo de autorización). NO fabrica frescura.
+  const actualizar = useCallback(async (o: string) => {
+    setRefrescando(true); setAvisoRefresh(null);
+    try {
+      const r = await fetch('/api/medicion/refresh-ads', { method: 'POST', headers: { 'content-type': 'application/json', ...cabecerasOrg(o) }, body: '{}' });
+      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; estado?: string; error?: string | null; nuevos?: number };
+      if (j.estado === 'NOT_CONFIGURED') setAvisoRefresh('Google Ads no está conectado para este negocio.');
+      else if (j.ok) setAvisoRefresh(`Consultado a Google Ads recién${j.nuevos ? ` · ${j.nuevos} dato(s) nuevo(s)` : ' · sin novedades'}.`);
+      else setAvisoRefresh(`Consultamos a Google Ads recién, pero no se pudo actualizar: ${j.error ?? 'error de Google Ads'}. Se muestra el último dato conocido.`);
+    } catch {
+      setAvisoRefresh('No se pudo contactar el servicio para actualizar.');
+    } finally {
+      setRefrescando(false);
+      await cargar(o); // re-lee el panel (nuevo snapshot si lo hubo, o el mismo con el intento registrado)
+    }
+  }, [cargar]);
 
   useEffect(() => { if (org) void cargar(org); }, [org, cargar]);
 
@@ -206,7 +239,7 @@ export default function Panel(): React.ReactElement {
           </div>
           <div className="bhright" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {ver && <><span className="small muted">Estado SOEC:</span> <Badge tono={ver.tono}>{ver.texto}</Badge></>}
-            <button className="btn" disabled={cargando} onClick={() => org && cargar(org)}>{cargando ? 'Actualizando…' : 'Actualizar'}</button>
+            <button className="btn" disabled={cargando || refrescando} onClick={() => org && actualizar(org)}>{refrescando ? 'Actualizando…' : 'Actualizar'}</button>
           </div>
         </div>
       ) : (
@@ -223,6 +256,8 @@ export default function Panel(): React.ReactElement {
       </div>
 
       {cargando && !negocio && <div className="card"><p className="muted">Cargando el panel de este negocio…</p></div>}
+
+      {avisoRefresh && <Callout tono={avisoRefresh.includes('no se pudo') || avisoRefresh.includes('no está conectado') ? 'warn' : 'ok'} ico={avisoRefresh.includes('no se pudo') || avisoRefresh.includes('no está conectado') ? '⚠' : '✓'}>{avisoRefresh}</Callout>}
 
       {/* ══════════════ INICIO ══════════════ */}
       {tab === 'inicio' && (
@@ -252,7 +287,7 @@ export default function Panel(): React.ReactElement {
                     <Metric ico="🖱" label="Clics" value={num(panel.ads!.clicks)} sub={panel.ads!.ctr !== null ? `${(panel.ads!.ctr * 100).toFixed(1)}% de quienes lo vieron` : FUENTE_ADS} />
                     <Metric ico="💸" label="Inversión" value={clp(panel.ads!.cost)} sub={panel.ads!.cpc !== null ? `${clp(panel.ads!.cpc)} por clic` : FUENTE_ADS} />
                   </div>
-                  <LineaAds ads={panel.ads!} />
+                  <LineaAds ads={panel.ads!} refresh={panel.adsRefresh} />
                 </>
               )}
               <div className="grid g-4" style={{ marginTop: 12 }}>
@@ -389,7 +424,7 @@ export default function Panel(): React.ReactElement {
               <Metric ico="💸" label="Inversión" value={clp(panel.ads!.cost)} sub={FUENTE_ADS} />
               <Metric ico="🏷" label="Costo por clic" value={clp(panel.ads!.cpc)} />
             </div>
-            <LineaAds ads={panel.ads!} />
+            <LineaAds ads={panel.ads!} refresh={panel.adsRefresh} />
             </>
             )}
             <div className="section">Búsquedas que te muestran</div>

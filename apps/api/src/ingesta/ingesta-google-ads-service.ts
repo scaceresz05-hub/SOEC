@@ -65,6 +65,28 @@ export function ultimoSnapshotAds(events: readonly { type: string; payload: unkn
   return ultimo;
 }
 
+/**
+ * Estado del ÚLTIMO intento de refresh a Google Ads (observabilidad, LAST-WINS). Hace visible que el botón
+ * consultó realmente al proveedor y si la consulta tuvo éxito o falló (p.ej. OAuth caducado). NUNCA secretos.
+ */
+export const EVENTO_REFRESH_STATE = 'ads.refresh-state';
+export function adsRefreshStateStreamId(org: string): string {
+  return `ingesta-refresh-state:google-ads:${org}`;
+}
+export interface AdsRefreshState {
+  readonly queriedAt: string; // instante en que SOEC contactó a Google Ads (fetch time real)
+  readonly ok: boolean; // ¿la consulta trajo datos y persistió sin fallos?
+  readonly estado: string; // GLOBAL_OK | PARTIAL | FALLO (del ResumenIngestaAds)
+  readonly ventana: { desde: string; hasta: string };
+  readonly error: string | null; // clase/mensaje del fallo (sin secretos), null si ok
+  readonly dataThrough: string | null; // última fecha con cobertura real cuando es derivable (ventana.hasta si ok)
+}
+export function ultimoRefreshState(events: readonly { type: string; payload: unknown }[]): AdsRefreshState | null {
+  let ultimo: AdsRefreshState | null = null;
+  for (const e of events) if (e.type === EVENTO_REFRESH_STATE) ultimo = e.payload as AdsRefreshState;
+  return ultimo;
+}
+
 export class IngestaGoogleAds {
   constructor(private readonly deps: DependenciasIngestaGoogleAds) {}
 
