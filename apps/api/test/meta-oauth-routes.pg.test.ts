@@ -155,3 +155,62 @@ describe('meta rutas autenticadas · siguen exigiendo auth', () => {
     expect(/app\.(put|delete|patch)\(/.test(src)).toBe(false);
   });
 });
+
+describe('meta re-discovery read-only (reusa credencial, sin OAuth nuevo)', () => {
+  const rediscover = (a: FastifyInstance, org = 'org-a') => a.inject({ method: 'POST', url: '/acquisition/meta/assets/rediscover', headers: H(org) });
+
+  it('A requiere auth ⇒ 401', async () => {
+    expect((await app().inject({ method: 'POST', url: '/acquisition/meta/assets/rediscover' })).statusCode).toBe(401);
+  });
+
+  it('D/Q sin conexión (o cross-tenant) ⇒ 409 NOT_CONNECTED', async () => {
+    const a = app();
+    // org-a nunca hizo callback ⇒ sin conexión.
+    expect((await rediscover(a, 'org-a')).json().error).toBe('NOT_CONNECTED');
+    // callback para org-a; org-b sigue aislado ⇒ 409.
+    const st = await start(a);
+    await callback(a, `state=${st}&code=C`);
+    expect((await rediscover(a, 'org-b')).json().error).toBe('NOT_CONNECTED');
+  });
+
+  it('composicion null ⇒ 503 META_NOT_CONFIGURED', async () => {
+    expect((await rediscover(app(null))).statusCode).toBe(503);
+  });
+
+  it('H/I/J/K/L/M/N materializa el ad_account accessible-only reusando la credencial; conexión intacta', async () => {
+    const a = app();
+    const st = await start(a);
+    await callback(a, `state=${st}&code=C`);
+
+    // Simula una conexión previa SIN ad account (como la creada antes del fix): quita ese candidato.
+    const repos = crearRepositoriosMetaPg(pool);
+    const antes = await repos.connRepo.obtener('org-a', 'meta-org-a');
+    await repos.connRepo.guardar({ conexion: antes!.conexion, candidatos: antes!.candidatos.filter((c) => c.assetType !== 'adAccount') });
+    const stripped = await repos.connRepo.obtener('org-a', 'meta-org-a');
+    expect(stripped!.candidatos.some((c) => c.assetType === 'adAccount')).toBe(false);
+
+    // RE-DISCOVERY read-only: reusa la credencial, re-enumera, re-materializa el ad account.
+    const r = await rediscover(a);
+    expect(r.statusCode).toBe(200);
+    const cands = r.json().datos.candidatos as { assetType: string; externalId: string; ownerBusinessId?: string | null; accessMode?: string; bindingEligible: boolean }[];
+    expect(cands.map((c) => c.externalId).sort()).toEqual(['1037025024374407', '1066708446525633', '17841432883225770', '934186066270538'].sort());
+    const ad = cands.find((c) => c.assetType === 'adAccount')!;
+    expect(ad.externalId).toBe('1037025024374407');
+    expect(ad.ownerBusinessId).toBeNull();
+    expect(ad.accessMode).toBe('USER_ACCESSIBLE');
+    expect(ad.bindingEligible).toBe(true);
+
+    // N: sin token en la respuesta.
+    expect(JSON.stringify(r.json())).not.toContain('SYNTH_LONG_TOKEN');
+
+    // K/L/M: no binding, conexión sigue BINDING_PENDING, bindings [].
+    const conn = (await a.inject({ method: 'GET', url: '/acquisition/meta/connection', headers: H() })).json().datos;
+    expect(conn.estado).toBe('BINDING_PENDING');
+    expect(conn.bindings).toHaveLength(0);
+
+    // Credencial/ciphertext intactos (persistencia de sólo-candidatos preserva credencialRef).
+    const post = await repos.connRepo.obtener('org-a', 'meta-org-a');
+    expect(post!.conexion.credencialRef).toBe(antes!.conexion.credencialRef);
+    expect(post!.conexion.bindings).toHaveLength(0);
+  });
+});
