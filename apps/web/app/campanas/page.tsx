@@ -13,7 +13,19 @@ import {
   mandatoActual, crearMandato, gobernarMandato, simularCampana, correrShadow, writeStatus,
   money, type Mandato, type CampaignPlan, type EjecucionCampana, type ShadowRun, type EntradaCampana, type WriteStatus,
 } from '../../lib/campana-client';
+import { conexion, activos } from '../../lib/meta-client';
 import { Badge, Callout, EmptyState, Metric, PageHeader, TechDetails, type Tono } from '../../components/ui';
+
+interface OpcionActivo { externalId: string; nombre: string }
+
+/** Descubre las cuentas publicitarias conectadas (sin que el usuario tenga que conocer IDs de Meta). */
+async function cuentasPublicitarias(org: string): Promise<OpcionActivo[]> {
+  const [con, act] = await Promise.all([conexion(org).catch(() => null), activos(org).catch(() => null)]);
+  const vistos = new Map<string, string>();
+  for (const b of con?.bindings ?? []) if (b.assetType === 'adAccount') vistos.set(b.externalId, b.displayName ?? b.externalId);
+  for (const c of act?.candidatos ?? []) if (c.assetType === 'adAccount') vistos.set(c.externalId, c.displayName ?? c.externalId);
+  return [...vistos.entries()].map(([externalId, nombre]) => ({ externalId, nombre }));
+}
 
 const estadoTono = (s: string): Tono => (s === 'ACTIVE' ? 'ok' : s === 'PAUSED' || s === 'AUTHORIZED' ? 'warn' : s === 'REVOKED' || s === 'EXPIRED' || s === 'EXHAUSTED' ? 'risk' : 'mut');
 
@@ -74,8 +86,13 @@ function SinMandato({ org, onCreado }: { org: string; onCreado: () => void }): R
   const [inicio, setInicio] = useState(hoy);
   const [fin, setFin] = useState(en30);
   const [adAccount, setAdAccount] = useState('');
+  const [cuentas, setCuentas] = useState<OpcionActivo[]>([]);
   const [enviando, setEnviando] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    void cuentasPublicitarias(org).then((cs) => { setCuentas(cs); if (cs[0]) setAdAccount((prev) => prev || cs[0]!.externalId); });
+  }, [org]);
 
   const enviar = async () => {
     setEnviando(true); setErr(null);
@@ -100,8 +117,13 @@ function SinMandato({ org, onCreado }: { org: string; onCreado: () => void }): R
         <label>Presupuesto tope (CLP)<input type="number" min={0} value={presupuesto} onChange={(e) => setPresupuesto(Number(e.target.value))} /></label>
         <label>Desde<input type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} /></label>
         <label>Hasta<input type="date" value={fin} onChange={(e) => setFin(e.target.value)} /></label>
-        <label>Cuenta publicitaria (activo Meta autorizado)<input value={adAccount} placeholder="act_XXXXXXXXX" onChange={(e) => setAdAccount(e.target.value)} /></label>
+        <label>Cuenta publicitaria
+          {cuentas.length > 0
+            ? <select value={adAccount} onChange={(e) => setAdAccount(e.target.value)}>{cuentas.map((c) => <option key={c.externalId} value={c.externalId}>{c.nombre}</option>)}</select>
+            : <input value={adAccount} disabled placeholder="Conecta Meta para elegir tu cuenta" />}
+        </label>
       </div>
+      {cuentas.length === 0 && <Callout tono="info" ico="🔗">Aún no detectamos cuentas publicitarias. Ve a <b>Conexión Meta</b> y conecta tu cuenta; luego vuelve aquí.</Callout>}
       {err && <Callout tono="warn" ico="⚠">{err}</Callout>}
       <div style={{ marginTop: 12 }}>
         <button className="btn primary" onClick={enviar} disabled={enviando}>{enviando ? 'Autorizando…' : 'Autorizar presupuesto'}</button>
@@ -121,7 +143,7 @@ function ConMandato({ org, mandato, onCambio }: { org: string; mandato: Mandato;
       </div>
       <Gobierno org={org} mandato={mandato} onCambio={onCambio} />
       <Preparar org={org} mandato={mandato} />
-      <Autonomia org={org} />
+      <Autonomia org={org} mandato={mandato} onCambio={onCambio} />
     </>
   );
 }
@@ -137,6 +159,7 @@ function Gobierno({ org, mandato, onCambio }: { org: string; mandato: Mandato; o
           ? <button className="btn" disabled={ocupado} onClick={() => gobernar({ accion: 'reanudar' })}>Reanudar</button>
           : <button className="btn" disabled={ocupado} onClick={() => gobernar({ accion: 'pausar' })}>Pausar</button>}
         <button className="btn" disabled={ocupado} onClick={() => gobernar({ accion: 'killswitch', killSwitch: !mandato.killSwitch })}>{mandato.killSwitch ? 'Quitar freno de emergencia' : 'Freno de emergencia'}</button>
+        <button className="btn danger" disabled={ocupado || mandato.status === 'REVOKED'} onClick={() => { if (window.confirm('¿Revocar la autonomía de este presupuesto? SOEC dejará de operar sobre él.')) void gobernar({ accion: 'revocar' }); }}>Revocar autonomía</button>
       </div>
       <p className="mut" style={{ marginBottom: 0 }}>Detener siempre es inmediato y es tu decisión. SOEC no puede reanudar ni ampliar por su cuenta.</p>
     </div>
@@ -224,8 +247,37 @@ function ResultadoPlan({ plan, ejecucion, moneda }: { plan: CampaignPlan; ejecuc
   );
 }
 
+/* ── Aprobar/rechazar una solicitud de más presupuesto (decisión HUMANA) ────── */
+function AprobarAumento({ org, mandato, onCambio }: { org: string; mandato: Mandato; onCambio: () => void }): React.ReactElement {
+  const [abierto, setAbierto] = useState(false);
+  const [nuevo, setNuevo] = useState(Math.round(mandato.authorizedBudgetMinor * 1.5));
+  const [finfin, setFinfin] = useState(mandato.periodEnd.slice(0, 10));
+  const [ocupado, setOcupado] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const aprobar = async () => {
+    setOcupado(true); setErr(null);
+    try { await gobernarMandato(org, mandato.id, { accion: 'reautorizar', authorizedBudgetMinor: Math.trunc(nuevo), periodEnd: new Date(finfin).toISOString() }); onCambio(); }
+    catch (e) { setErr(e instanceof Error ? e.message : 'No se pudo autorizar'); }
+    finally { setOcupado(false); }
+  };
+  if (!abierto) return <div className="row-wrap" style={{ gap: 8 }}><button className="btn primary" onClick={() => setAbierto(true)}>Aprobar aumento…</button><span className="mut">SOEC no puede hacerlo por ti.</span></div>;
+  return (
+    <div className="card" style={{ margin: '8px 0' }}>
+      <div className="grid g-2" style={{ gap: 12 }}>
+        <label>Nuevo presupuesto tope (CLP)<input type="number" min={mandato.spentMinor} value={nuevo} onChange={(e) => setNuevo(Number(e.target.value))} /></label>
+        <label>Nueva fecha fin<input type="date" value={finfin} onChange={(e) => setFinfin(e.target.value)} /></label>
+      </div>
+      {err && <Callout tono="warn" ico="⚠">{err}</Callout>}
+      <div className="row-wrap" style={{ gap: 8, marginTop: 8 }}>
+        <button className="btn primary" disabled={ocupado} onClick={aprobar}>Autorizar nuevo tope</button>
+        <button className="btn" disabled={ocupado} onClick={() => setAbierto(false)}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
 /* ── Autonomía en sombra: qué decidiría SOEC observando resultados ──────────── */
-function Autonomia({ org }: { org: string }): React.ReactElement {
+function Autonomia({ org, mandato, onCambio }: { org: string; mandato: Mandato; onCambio: () => void }): React.ReactElement {
   const [run, setRun] = useState<ShadowRun | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -261,7 +313,10 @@ function Autonomia({ org }: { org: string }): React.ReactElement {
             <>
               <h4>Requieren tu decisión (más presupuesto)</h4>
               {run.recomendacionesFinancieras.map((r, i) => (
-                <Callout key={i} tono="warn" ico="✋">{r.justificacion} <Badge tono="warn">{r.estado}</Badge></Callout>
+                <div key={i}>
+                  <Callout tono="warn" ico="✋">{r.justificacion} <Badge tono="warn">{r.estado}</Badge></Callout>
+                  <AprobarAumento org={org} mandato={mandato} onCambio={onCambio} />
+                </div>
               ))}
             </>
           )}

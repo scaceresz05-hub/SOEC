@@ -44,16 +44,22 @@ describe('V2 pre-real · contract (Fake transport)', () => {
       expect(transport.llamadas[0]!.path).toBe(path);
     }
   });
-  it('clasifica errores de Graph sin reintentar ciegamente', async () => {
-    const casos: Array<[TransportResponse, string]> = [
-      [{ status: 400, body: { error: { code: 190 } } }, 'AUTH'],
-      [{ status: 403, body: { error: { code: 10 } } }, 'SCOPE_MISSING'],
-      [{ status: 429, body: { error: { code: 4 } } }, 'RATE_LIMIT'],
-      [{ status: 400, body: { error: { code: 1487390 } } }, 'META_POLICY'],
+  it('clasifica errores de Graph sin reintentar ciegamente (matriz completa)', async () => {
+    const casos: Array<[TransportResponse, string, boolean]> = [
+      [{ status: 400, body: { error: { code: 190 } } }, 'AUTH', false], // token expirado/ inválido
+      [{ status: 403, body: { error: { code: 10 } } }, 'SCOPE_MISSING', false],
+      [{ status: 429, body: { error: { code: 4 } } }, 'RATE_LIMIT', true],
+      [{ status: 400, body: { error: { code: 1487390 } } }, 'META_POLICY', false],
+      [{ status: 400, body: { error: { code: 100, error_subcode: 1487056 } } }, 'INVALID_CREATIVE', false], // creative rechazado
+      [{ status: 400, body: { error: { code: 100 } } }, 'INVALID_ASSET', false], // activo/objeto inválido
+      [{ status: 500, body: { error: { code: 2, is_transient: true } } }, 'NETWORK', true],
+      [{ status: 200, body: {} }, 'UNKNOWN', true], // 200 sin id ⇒ resultado no confirmable
     ];
-    for (const [resp, clase] of casos) {
+    const { esReintentable } = await import('../src/campana/meta-write-errors');
+    for (const [resp, clase, reint] of casos) {
       const { adapter } = real({ transport: new FakeWriteTransport(() => resp) });
       await expect(adapter.ejecutar(sol({ idempotencyKey: `e-${clase}` }))).rejects.toMatchObject({ clase });
+      expect(esReintentable(clase as never)).toBe(reint); // retry sólo si es demostrablemente seguro
     }
   });
 });

@@ -32,8 +32,17 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </header>
         <main>{children}</main>
         <footer className="pie">
-          SOEC está en <b>modo seguro</b>: observa tus datos, te explica y te propone. No publica, no
-          gasta ni cambia nada real sin tu aprobación.
+          <p>
+            SOEC está en <b>modo seguro</b>: observa tus datos, te explica y te propone. No publica, no
+            gasta ni cambia nada real sin tu aprobación.
+          </p>
+          <nav aria-label="Legal" className="pie-legal">
+            <Link href="/legal/privacidad">Privacidad</Link>
+            <Link href="/legal/terminos">Términos</Link>
+            <Link href="/legal/eliminacion-datos">Eliminación de datos</Link>
+            <Link href="/soporte">Soporte</Link>
+          </nav>
+          <p className="mut">SC INNOVATION SPA · Chile</p>
         </footer>
       </body>
     </html>
