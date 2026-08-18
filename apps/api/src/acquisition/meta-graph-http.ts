@@ -129,6 +129,7 @@ export class MetaGraphReadHttpAdapter implements MetaGraphReadPort {
     return this.get(`${enc(nodoAdAccount(externalAdAccountId))}/campaigns`, { fields: 'id,name,objective,status,effective_status' });
   }
   readAdsInsights(externalAdAccountId: string): Promise<unknown> {
-    return this.get(`${enc(nodoAdAccount(externalAdAccountId))}/insights`, { fields: 'impressions,clicks,spend,actions', level: 'account' });
+    // Período EXPLÍCITO y estable (V1): últimos 7 días. Nunca se depende de la ventana implícita de Meta.
+    return this.get(`${enc(nodoAdAccount(externalAdAccountId))}/insights`, { fields: 'impressions,clicks,spend,actions', level: 'account', date_preset: 'last_7d' });
   }
 }

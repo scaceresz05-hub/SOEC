@@ -36,9 +36,16 @@ interface ProductosCruce { catalogoObservado?: number; conVentasObservadas?: num
 interface Ventas { observado: boolean; motivo?: string; lineaBase?: LineaBase; productos?: ProductosCruce }
 interface Catalogo { observado: boolean; resumen?: { productosObservados: number; categoriasObservadas: number; enStock: number; sinStock: number } }
 interface Panel {
-  ads?: { impressions: number; clicks: number; cost: number; ctr: number; cpc: number };
+  // Alineado con el backend (panel-resultados): métricas nullable + sinDatos. NUNCA se asume 0.
+  ads?: { impressions: number | null; clicks: number | null; cost: number | null; ctr: number | null; cpc: number | null; sinDatos: boolean };
   growthFunnel?: { comercial?: Record<string, number>; diagnostico?: Record<string, number> };
   searchTerms?: { termino: string; impresiones: number; clics: number }[];
+}
+/** Fuente publicitaria de este panel SaaS: Google Ads (solo lectura). Etiqueta única de origen. */
+const FUENTE_ADS = 'Google Ads';
+/** ¿No hay datos de Google Ads (no conectado / sin entrega)? Nunca convertimos no-data en 0. */
+function adsVacio(p: Panel | null): boolean {
+  return !p?.ads || p.ads.sinDatos === true || (p.ads.impressions === null && p.ads.clicks === null && p.ads.cost === null);
 }
 interface Director { veredicto?: string }
 interface Plan { oportunidadesTacticas?: { termino: string; accion: string }[] }
@@ -189,14 +196,22 @@ export default function Panel(): React.ReactElement {
               </div>
             </>
           )}
-          {!esEcom && panel?.ads && (
+          {!esEcom && panel && (
             <>
-              <div className="section">Hoy <span className="hint">lo que SOEC ve en tus campañas</span></div>
-              <div className="grid g-4">
-                <Metric ico="👁" label="Impresiones" value={num(panel.ads.impressions)} sub="veces que se mostró tu anuncio" accent />
-                <Metric ico="🖱" label="Clics" value={num(panel.ads.clicks)} sub={`${(panel.ads.ctr * 100).toFixed(1)}% de quienes lo vieron`} />
-                <Metric ico="💸" label="Inversión" value={clp(panel.ads.cost)} sub={`${clp(panel.ads.cpc)} por clic`} />
-                <Metric ico="🌱" label="Clientes nuevos" value={num(panel.growthFunnel?.comercial?.lead_created ?? 0)} sub="contactos reales desde el sitio" accent />
+              <div className="section">Publicidad <span className="hint">{FUENTE_ADS} · acumulado reciente</span></div>
+              {adsVacio(panel) ? (
+                <Callout tono="info" ico="🔌">
+                  <b>{FUENTE_ADS} sin datos.</b> No hay campañas con entrega o {FUENTE_ADS} no está conectado para este negocio. No mostramos cifras que no provengan de una fuente real.
+                </Callout>
+              ) : (
+                <div className="grid g-4">
+                  <Metric ico="👁" label="Impresiones" value={num(panel.ads!.impressions)} sub={`${FUENTE_ADS} · acumulado reciente`} accent />
+                  <Metric ico="🖱" label="Clics" value={num(panel.ads!.clicks)} sub={panel.ads!.ctr !== null ? `${(panel.ads!.ctr * 100).toFixed(1)}% de quienes lo vieron` : FUENTE_ADS} />
+                  <Metric ico="💸" label="Inversión" value={clp(panel.ads!.cost)} sub={panel.ads!.cpc !== null ? `${clp(panel.ads!.cpc)} por clic` : FUENTE_ADS} />
+                </div>
+              )}
+              <div className="grid g-4" style={{ marginTop: 12 }}>
+                <Metric ico="🌱" label="Clientes nuevos" value={num(panel.growthFunnel?.comercial?.lead_created ?? null)} sub="contactos reales desde el sitio · medición web" accent />
               </div>
             </>
           )}
@@ -316,15 +331,19 @@ export default function Panel(): React.ReactElement {
 
       {/* ══════════════ MARKETING ══════════════ */}
       {tab === 'marketing' && (
-        !esEcom && panel?.ads ? (
+        !esEcom && panel ? (
           <>
-            <div className="section">Marketing pagado <span className="hint">Google Ads · solo lectura</span></div>
+            <div className="section">Marketing pagado <span className="hint">{FUENTE_ADS} · acumulado reciente · solo lectura</span></div>
+            {adsVacio(panel) ? (
+              <Callout tono="info" ico="🔌"><b>{FUENTE_ADS} sin datos.</b> No hay campañas con entrega o {FUENTE_ADS} no está conectado. Sin cifras sintéticas ni de otra fuente.</Callout>
+            ) : (
             <div className="grid g-4">
-              <Metric ico="👁" label="Impresiones" value={num(panel.ads.impressions)} />
-              <Metric ico="🖱" label="Clics" value={num(panel.ads.clicks)} sub={`${(panel.ads.ctr * 100).toFixed(1)}% CTR`} />
-              <Metric ico="💸" label="Inversión" value={clp(panel.ads.cost)} />
-              <Metric ico="🏷" label="Costo por clic" value={clp(panel.ads.cpc)} />
+              <Metric ico="👁" label="Impresiones" value={num(panel.ads!.impressions)} sub={FUENTE_ADS} />
+              <Metric ico="🖱" label="Clics" value={num(panel.ads!.clicks)} sub={panel.ads!.ctr !== null ? `${(panel.ads!.ctr * 100).toFixed(1)}% CTR` : FUENTE_ADS} />
+              <Metric ico="💸" label="Inversión" value={clp(panel.ads!.cost)} sub={FUENTE_ADS} />
+              <Metric ico="🏷" label="Costo por clic" value={clp(panel.ads!.cpc)} />
             </div>
+            )}
             <div className="section">Búsquedas que te muestran</div>
             <div className="card">
               <div className="stack">
@@ -357,10 +376,13 @@ export default function Panel(): React.ReactElement {
       {tab === 'contactos' && !esEcom && panel && (
         <>
           <div className="section">Del anuncio al cliente <span className="hint">tu embudo</span></div>
+          {adsVacio(panel) && <Callout tono="info" ico="🔌"><b>{FUENTE_ADS} sin datos</b> — el tramo de anuncios no se muestra. Abajo, los contactos reales medidos en el sitio.</Callout>}
           <div className="card">
             <Funnel steps={[
-              { label: 'Vieron tu anuncio', value: panel.ads?.impressions ?? 0 },
-              { label: 'Hicieron clic', value: panel.ads?.clicks ?? 0 },
+              ...(adsVacio(panel) ? [] : [
+                { label: `Vieron tu anuncio (${FUENTE_ADS})`, value: panel.ads!.impressions ?? 0 },
+                { label: 'Hicieron clic', value: panel.ads!.clicks ?? 0 },
+              ]),
               { label: 'Pidieron demo', value: panel.growthFunnel?.comercial?.demo_cta_clicked ?? 0 },
               { label: 'Empezaron el formulario', value: panel.growthFunnel?.comercial?.demo_form_started ?? 0 },
               { label: 'Se volvieron clientes', value: panel.growthFunnel?.comercial?.lead_created ?? 0 },
@@ -409,10 +431,10 @@ export default function Panel(): React.ReactElement {
               <div className="card">
                 <div className="section" style={{ margin: '0 0 10px' }}>Indicadores</div>
                 <div className="stack">
-                  <div className="spread"><span className="s">Tráfico (impresiones)</span><b>{num(panel?.ads?.impressions ?? 0)}</b></div>
-                  <div className="spread"><span className="s">Clics</span><b>{num(panel?.ads?.clicks ?? 0)}</b></div>
-                  <div className="spread"><span className="s">Contactos reales</span><b>{num(panel?.growthFunnel?.comercial?.lead_created ?? 0)}</b></div>
-                  <div className="spread"><span className="s">Costo por contacto</span><b>{(() => { const l = panel?.growthFunnel?.comercial?.lead_created ?? 0; return l > 0 ? clp((panel?.ads?.cost ?? 0) / l) : 'aún sin contactos'; })()}</b></div>
+                  <div className="spread"><span className="s">Tráfico ({FUENTE_ADS})</span><b>{adsVacio(panel) ? 'sin datos' : num(panel?.ads?.impressions ?? null)}</b></div>
+                  <div className="spread"><span className="s">Clics ({FUENTE_ADS})</span><b>{adsVacio(panel) ? 'sin datos' : num(panel?.ads?.clicks ?? null)}</b></div>
+                  <div className="spread"><span className="s">Contactos reales (medición web)</span><b>{num(panel?.growthFunnel?.comercial?.lead_created ?? null)}</b></div>
+                  <div className="spread"><span className="s">Costo por contacto</span><b>{(() => { const l = panel?.growthFunnel?.comercial?.lead_created ?? 0; const c = panel?.ads?.cost; return l > 0 && c != null ? clp(c / l) : 'aún sin contactos'; })()}</b></div>
                 </div>
               </div>
             </div>
@@ -544,8 +566,8 @@ function frase(esEcom: boolean, ventas: Ventas | null, panel: Panel | null, pued
     return puedeRecomendar ? `${base} Con esto ya puedo ayudarte a decidir dónde invertir.` : `${base} Todavía no puedo recomendarte publicidad porque no conozco tu margen ni tengo medición web instalada.`;
   }
   const a = panel?.ads;
-  if (a && a.clicks > 0 && (panel?.growthFunnel?.comercial?.lead_created ?? 0) === 0)
-    return `Tu campaña está consiguiendo clics (${num(a.clicks)} de ${num(a.impressions)} personas que vieron el anuncio), pero todavía no genera contactos. No recomiendo aumentar el gasto hasta entender por qué.`;
-  if (a) return `Estoy observando tu campaña: ${num(a.impressions)} impresiones y ${num(a.clicks)} clics. Reúno evidencia antes de proponer cambios.`;
-  return 'Todavía estoy reuniendo datos de tus campañas.';
+  if (adsVacio(panel)) return `Aún no tengo datos de anuncios (${FUENTE_ADS} sin datos o no conectado). No invento cifras: observo tus contactos reales y te aviso cuando haya con qué decidir.`;
+  if (a && (a.clicks ?? 0) > 0 && (panel?.growthFunnel?.comercial?.lead_created ?? 0) === 0)
+    return `Tu campaña en ${FUENTE_ADS} está consiguiendo clics (${num(a.clicks)} de ${num(a.impressions)} personas que vieron el anuncio), pero todavía no genera contactos. No recomiendo aumentar el gasto hasta entender por qué.`;
+  return `Estoy observando tu campaña en ${FUENTE_ADS}: ${num(a?.impressions ?? null)} impresiones y ${num(a?.clicks ?? null)} clics (acumulado reciente). Reúno evidencia antes de proponer cambios.`;
 }
