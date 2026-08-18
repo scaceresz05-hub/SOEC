@@ -231,6 +231,7 @@ function PanelDatos({ org }: { org: string }): React.ReactElement {
         <Metric label="Próxima actualización" value={est?.syncEnabled ? en(est?.nextEligibleSyncAt ?? null) : 'pausada'} ico="⏭" />
         <Metric label="Actualización automática" value={est?.syncEnabled ? 'Activada' : 'Pausada'} sub={est ? `${est.consecutiveFailures} fallo(s) reciente(s)` : undefined} />
       </div>
+      <p className="mut" style={{ marginTop: 8 }}>Fuente: <b>Meta</b> · Período de métricas de anuncios: <b>últimos 7 días</b> · las publicaciones/identidad se leen al momento.</p>
       {est && est.consecutiveFailures > 0 && est.capabilitiesAffected.length > 0 && (
         <Callout tono="warn" ico="⚠">No se pudieron actualizar: {est.capabilitiesAffected.map(capacidadHumana).join(', ')}. SOEC reintenta automáticamente.</Callout>
       )}

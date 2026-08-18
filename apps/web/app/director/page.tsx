@@ -9,8 +9,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { orgActiva } from '../../lib/org-activa';
 import { yo } from '../../lib/auth-client';
-import { director, sincronizar, type ItemConocimiento, type VistaDirector } from '../../lib/meta-client';
-import { capacidadHumana, freshnessHumano, hace, saludHumana } from '../../lib/meta-ux';
+import { director, sincronizar, estadoSync, type ItemConocimiento, type VistaDirector, type EstadoSync } from '../../lib/meta-client';
+import { capacidadHumana, freshnessHumano, hace, en, saludHumana } from '../../lib/meta-ux';
 import { Badge, Callout, DirectorCard, EmptyState, Metric, PageHeader, TechDetails, type Tono } from '../../components/ui';
 
 const TIPO: Record<ItemConocimiento['type'], { etiqueta: string; tono: Tono }> = {
@@ -46,13 +46,17 @@ export default function DirectorPage(): React.ReactElement {
   const router = useRouter();
   const [org, setOrg] = useState<string | null | undefined>(undefined);
   const [v, setV] = useState<VistaDirector | null>(null);
+  const [est, setEst] = useState<EstadoSync | null>(null);
   const [cargando, setCargando] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [sincronizando, setSincronizando] = useState(false);
 
   const cargar = useCallback(async (o: string) => {
     setCargando(true); setErr(null);
-    try { setV(await director(o)); } catch (e) { setErr((e as Error).message); } finally { setCargando(false); }
+    try {
+      setV(await director(o));
+      setEst(await estadoSync(o).catch(() => null));
+    } catch (e) { setErr((e as Error).message); } finally { setCargando(false); }
   }, []);
 
   useEffect(() => {
@@ -88,7 +92,7 @@ export default function DirectorPage(): React.ReactElement {
     <div className="panel dash">
       <PageHeader eyebrow="Tu director de marketing" title="Cómo va tu marketing" right={<Badge tono={salud.tono}>{salud.texto}</Badge>} />
 
-      <DirectorCard estado={<Badge tono={salud.tono}>{salud.texto}</Badge>} dice={inteligencia.overview} extra={<span className="small muted">Última actualización de datos: {hace(v.lastSuccessfulSyncAt)}</span>} />
+      <DirectorCard estado={<Badge tono={salud.tono}>{salud.texto}</Badge>} dice={inteligencia.overview} extra={<span className="small muted">Fuente: <b>Meta</b> · Última actualización: {hace(v.lastSuccessfulSyncAt)}{est?.syncEnabled ? ` · próxima ${en(est.nextEligibleSyncAt)}` : est ? ' · actualización automática pausada' : ''} · anuncios: últimos 7 días</span>} />
 
       {/* Requiere tu atención */}
       <div className="card" style={{ marginTop: 12 }}>

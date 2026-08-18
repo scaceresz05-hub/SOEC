@@ -45,11 +45,17 @@ export const TTL_POR_CAPACIDAD: Readonly<Record<CapacidadSync, number>> = {
   ADS_INSIGHTS: 3 * 3600_000,
 };
 
+/** Etiqueta de período de la ventana consultada para insights (debe coincidir con el date_preset del read port). */
+export const PERIODO_INSIGHTS = 'LAST_7D';
+
 export interface ResumenNormalizado {
   readonly kind: CapacidadSync;
   readonly count?: number;
   readonly identity?: Readonly<Record<string, string>>;
   readonly metrics?: Readonly<Record<string, number>>;
+  readonly periodo?: string; // etiqueta de la ventana consultada (p.ej. LAST_7D) — sólo capacidades con período
+  readonly estados?: Readonly<Record<string, number>>; // conteo por effective_status (ADS_CAMPAIGNS)
+  readonly entregando?: number; // campañas con effective_status ACTIVE (entrega real)
 }
 
 export interface SnapshotSync {
@@ -181,6 +187,22 @@ function leerCapacidad(g: MetaGraphReadPort, cap: CapacidadSync, id: string): Pr
     case 'ADS_INSIGHTS': return g.readAdsInsights(id);
   }
 }
+/** Conteo por effective_status (o status) de las campañas + cuántas entregan (ACTIVE). Whitelist: sólo estados. */
+function estadosCampanas(json: unknown): { estados: Record<string, number>; entregando: number } {
+  const d = (json as { data?: unknown } | null)?.data;
+  const estados: Record<string, number> = {};
+  let entregando = 0;
+  if (Array.isArray(d)) {
+    for (const c of d) {
+      const eff = (c as { effective_status?: unknown; status?: unknown }).effective_status ?? (c as { status?: unknown }).status;
+      const key = typeof eff === 'string' ? eff : 'UNKNOWN';
+      estados[key] = (estados[key] ?? 0) + 1;
+      if (key === 'ACTIVE') entregando += 1;
+    }
+  }
+  return { estados, entregando };
+}
+
 function normalizarCapacidad(cap: CapacidadSync, json: unknown): ResumenNormalizado {
   switch (cap) {
     case 'BUSINESS_IDENTITY':
@@ -189,8 +211,8 @@ function normalizarCapacidad(cap: CapacidadSync, json: unknown): ResumenNormaliz
     case 'INSTAGRAM_MEDIA': return { kind: cap, count: contarData(json) };
     case 'INSTAGRAM_INSIGHTS': return { kind: cap, metrics: metricasInsights(json, ['reach', 'follower_count']) };
     case 'ADS_ACCOUNT': return { kind: cap, identity: identidadWhitelist(json, ['id', 'account_id', 'currency', 'account_status']) };
-    case 'ADS_CAMPAIGNS': return { kind: cap, count: contarData(json) };
-    case 'ADS_INSIGHTS': return { kind: cap, metrics: metricasInsights(json, ['impressions', 'clicks', 'spend', 'reach']) };
+    case 'ADS_CAMPAIGNS': { const { estados, entregando } = estadosCampanas(json); return { kind: cap, count: contarData(json), estados, entregando }; }
+    case 'ADS_INSIGHTS': return { kind: cap, metrics: metricasInsights(json, ['impressions', 'clicks', 'spend', 'reach']), periodo: PERIODO_INSIGHTS };
   }
 }
 

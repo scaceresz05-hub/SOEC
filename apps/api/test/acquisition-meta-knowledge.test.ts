@@ -131,4 +131,33 @@ describe('conocimiento · freshness + seguridad', () => {
     const k = construirConocimiento(vistaCompleta(), [], T0);
     expect(k.organizationId).toBe('smileflow');
   });
+
+  it('campañas configuradas + insights vacío + período LAST_7D ⇒ signal explícito "sin entrega en los últimos 7 días"', () => {
+    const v = vistaCompleta();
+    const caps = v.capacidades.map((c) =>
+      c.capability === 'ADS_CAMPAIGNS' ? capd('ADS_CAMPAIGNS', AD, { kind: 'ADS_CAMPAIGNS', count: 3, entregando: 0, estados: { PAUSED: 3 } })
+      : c.capability === 'ADS_INSIGHTS' ? capd('ADS_INSIGHTS', AD, { kind: 'ADS_INSIGHTS', metrics: {}, periodo: 'LAST_7D' })
+      : c,
+    );
+    const k = construirConocimiento({ ...v, capacidades: caps }, [], T0);
+    const s = k.signals.find((x) => x.id === 'signal:ads:insights:nodata');
+    expect(s).toBeTruthy();
+    expect(s!.summary).toContain('los últimos 7 días');
+    expect(s!.summary).toContain('campañas configuradas');
+    expect(s!.priority).toBe('MEDIUM'); // con campañas, sube de LOW a MEDIUM
+    // El FACT de campañas refleja que ninguna está activa (no infiere "activa" por existir).
+    expect(k.facts.some((f) => f.id === 'fact:ads:campaigns' && /ninguna activa/.test(f.summary))).toBe(true);
+    // No-data NUNCA se convierte en 0: no hay FACT de insights con impresiones.
+    expect(k.facts.some((f) => f.id === 'fact:ads:insights')).toBe(false);
+  });
+
+  it('insights con datos ⇒ FACT etiqueta el período (Meta, últimos 7 días)', () => {
+    const v = vistaCompleta();
+    const caps = v.capacidades.map((c) => (c.capability === 'ADS_INSIGHTS' ? capd('ADS_INSIGHTS', AD, { kind: 'ADS_INSIGHTS', metrics: { impressions: 556, clicks: 22, spend: 13843 }, periodo: 'LAST_7D' }) : c));
+    const k = construirConocimiento({ ...v, capacidades: caps }, [], T0);
+    const f = k.facts.find((x) => x.id === 'fact:ads:insights');
+    expect(f).toBeTruthy();
+    expect(f!.summary).toContain('los últimos 7 días');
+    expect(f!.summary).toContain('Meta');
+  });
 });

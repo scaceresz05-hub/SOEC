@@ -79,6 +79,16 @@ function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
+/** Etiqueta humana del período de insights. Nunca inventa: si no hay etiqueta, dice "el período consultado". */
+function periodoHumano(periodo: string | undefined): string {
+  switch (periodo) {
+    case 'LAST_7D': return 'los últimos 7 días';
+    case 'TODAY': return 'hoy';
+    case 'LAST_30D': return 'los últimos 30 días';
+    default: return 'el período consultado';
+  }
+}
+
 /** Extrae el valor numérico comparable de un snapshot para una métrica dada (count o métrica). */
 function valorMetrica(snap: SnapshotSync | undefined, metrica: string): number | null {
   if (!snap) return null;
@@ -155,21 +165,33 @@ export function construirConocimiento(vista: VistaDirectorMeta, historial: reado
     push({ id: 'fact:ads:account', type: 'FACT', title: `Cuenta publicitaria conectada${moneda ? ` (${moneda})` : ''}`, summary: 'SOEC está leyendo la cuenta de anuncios vinculada.', evidence: [EV(adAcc)], sourceCapabilities: ['ADS_ACCOUNT'], capturedAt: adAcc.capturedAt, freshness: adAcc.freshness, confidence: confianzaPorFreshness(adAcc.freshness), priority: 'INFO' });
   }
   const adCamp = cap('ADS_CAMPAIGNS');
+  const campCount = adCamp ? (num(adCamp.resumen?.count) ?? 0) : 0;
+  const entregando = adCamp ? (num(adCamp.resumen?.entregando) ?? 0) : 0;
   if (adCamp) {
-    const c = num(adCamp.resumen?.count) ?? 0;
-    push({ id: 'fact:ads:campaigns', type: 'FACT', title: `${c} campañas visibles`, summary: c === 0 ? 'No se observan campañas en la cuenta.' : `Se observan ${c} campañas en la cuenta de anuncios.`, evidence: [EV(adCamp)], sourceCapabilities: ['ADS_CAMPAIGNS'], capturedAt: adCamp.capturedAt, freshness: adCamp.freshness, confidence: confianzaPorFreshness(adCamp.freshness), priority: 'INFO' });
-    if (c === 0) {
+    const detalle = campCount === 0 ? 'No se observan campañas en la cuenta.' : `Se observan ${campCount} campañas${entregando > 0 ? `, ${entregando} activa(s)` : ', ninguna activa (todas pausadas o sin entrega)'}.`;
+    push({ id: 'fact:ads:campaigns', type: 'FACT', title: `${campCount} campañas${entregando > 0 ? ` · ${entregando} activa(s)` : ''}`, summary: detalle, evidence: [EV(adCamp)], sourceCapabilities: ['ADS_CAMPAIGNS'], capturedAt: adCamp.capturedAt, freshness: adCamp.freshness, confidence: confianzaPorFreshness(adCamp.freshness), priority: 'INFO' });
+    if (campCount === 0) {
       push({ id: 'signal:ads:nocampaigns', type: 'SIGNAL', title: 'No hay campañas visibles', summary: 'La cuenta de anuncios no muestra campañas. Puede ser correcto si no estás pautando ahora.', evidence: [EV(adCamp)], sourceCapabilities: ['ADS_CAMPAIGNS'], capturedAt: adCamp.capturedAt, freshness: adCamp.freshness, confidence: 'MEDIUM', priority: 'MEDIUM' });
     }
   }
   const adIns = cap('ADS_INSIGHTS');
   if (adIns) {
     const m = adIns.resumen?.metrics ?? {};
+    const periodo = periodoHumano(adIns.resumen?.periodo);
     if (Object.keys(m).length === 0) {
-      push({ id: 'signal:ads:insights:nodata', type: 'SIGNAL', title: 'Sin métricas de inversión publicitaria', summary: 'Meta no devolvió impresiones/clics/gasto. Suele ocurrir cuando no hay inversión reciente. No se puede calcular rendimiento con estos datos.', evidence: [EV(adIns)], sourceCapabilities: ['ADS_INSIGHTS'], capturedAt: adIns.capturedAt, freshness: adIns.freshness, confidence: 'MEDIUM', priority: 'LOW' });
+      // No-data NUNCA se convierte en 0. Si además hay campañas configuradas, se dice explícito con período.
+      const conCampanas = campCount > 0;
+      push({
+        id: 'signal:ads:insights:nodata', type: 'SIGNAL',
+        title: conCampanas ? 'Campañas configuradas, pero sin entrega' : 'Sin métricas de inversión publicitaria',
+        summary: conCampanas
+          ? `Hay ${campCount} campañas configuradas, pero Meta no registra impresiones, clics ni gasto en ${periodo}. No se puede calcular rendimiento con estos datos.`
+          : `Meta no devolvió impresiones/clics/gasto en ${periodo}. Suele ocurrir cuando no hay inversión reciente. No se puede calcular rendimiento con estos datos.`,
+        evidence: [EV(adIns)], sourceCapabilities: ['ADS_INSIGHTS'], capturedAt: adIns.capturedAt, freshness: adIns.freshness, confidence: 'MEDIUM', priority: conCampanas ? 'MEDIUM' : 'LOW',
+      });
     } else {
       const imp = num(m['impressions']) ?? 0;
-      push({ id: 'fact:ads:insights', type: 'FACT', title: `Actividad de anuncios: ${imp} impresiones`, summary: 'Métricas de anuncios observadas en el período más reciente.', evidence: [EV(adIns)], sourceCapabilities: ['ADS_INSIGHTS'], capturedAt: adIns.capturedAt, freshness: adIns.freshness, confidence: confianzaPorFreshness(adIns.freshness), priority: 'INFO' });
+      push({ id: 'fact:ads:insights', type: 'FACT', title: `Actividad de anuncios: ${imp} impresiones`, summary: `Métricas de anuncios observadas en ${periodo} (Meta).`, evidence: [EV(adIns)], sourceCapabilities: ['ADS_INSIGHTS'], capturedAt: adIns.capturedAt, freshness: adIns.freshness, confidence: confianzaPorFreshness(adIns.freshness), priority: 'INFO' });
     }
   }
 
