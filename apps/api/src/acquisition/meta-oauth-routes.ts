@@ -25,6 +25,8 @@ import { construirConocimiento } from './meta-knowledge';
 export interface DepsMetaRoutes {
   readonly composicion: ComposicionMetaOAuth | null;
   readonly ahora?: () => string;
+  /** Si se define, el callback redirige al frontend tras procesar (UX comercial) en vez de responder JSON. */
+  readonly webBaseUrl?: string;
 }
 
 function authed(req: FastifyRequest, reply: FastifyReply): { ctx: RequestContext; org: string; actor: string } | null {
@@ -162,12 +164,19 @@ async function orquestarCallback(comp: ComposicionMetaOAuth, stateValor: string,
 export function registerMetaCallbackPublico(app: FastifyInstance, deps: DepsMetaRoutes): void {
   const ahora = deps.ahora ?? (() => new Date().toISOString());
   const comp = deps.composicion;
+  const web = deps.webBaseUrl?.replace(/\/+$/, '') ?? null; // base fija del server (no controlada por query)
+  const irAWeb = (reply: FastifyReply, params: string): boolean => {
+    if (web === null) return false;
+    void reply.redirect(`${web}/meta?${params}`, 302);
+    return true;
+  };
   app.get('/acquisition/meta/oauth/callback', async (req, reply) => {
-    if (comp === null) return reply.code(503).send({ ok: false, error: 'META_NOT_CONFIGURED' });
+    if (comp === null) return irAWeb(reply, 'error=no_disponible') ? reply : reply.code(503).send({ ok: false, error: 'META_NOT_CONFIGURED' });
     const q = req.query as { state?: string; code?: string };
-    if (!q.state || !q.code) return reply.code(400).send({ ok: false, error: 'FALTA_STATE_O_CODE' });
+    if (!q.state || !q.code) return irAWeb(reply, 'error=incompleto') ? reply : reply.code(400).send({ ok: false, error: 'FALTA_STATE_O_CODE' });
     const r = await orquestarCallback(comp, q.state, q.code, ahora());
-    // DTO seguro: sin token/code/secretRef. No redirect controlado por query (evita open-redirect).
+    // Redirige al frontend a una pantalla comprensible (sin token/code/state). Fallback JSON si no hay web base.
+    if (irAWeb(reply, `estado=${encodeURIComponent(r.estado)}`)) return reply;
     return reply.send({ ok: true, datos: { estado: r.estado, connectionId: r.connectionId, scopesFaltantes: r.scopesFaltantes } });
   });
 }

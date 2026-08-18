@@ -24,9 +24,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <BusinessSelector />
             <nav className="mainnav" aria-label="Principal">
               <Link href="/">Mis empresas</Link>
-              <Link href="/negocios">Panel del negocio</Link>
-              <Link href="/adquisicion">Marketing</Link>
-              <Link href="/autonomia">Nivel de control</Link>
+              <Link href="/director">Mi director</Link>
+              <Link href="/meta">Conexión Meta</Link>
             </nav>
           </div>
         </header>
