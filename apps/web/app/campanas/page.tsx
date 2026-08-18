@@ -10,8 +10,8 @@ import { useRouter } from 'next/navigation';
 import { orgActiva } from '../../lib/org-activa';
 import { yo } from '../../lib/auth-client';
 import {
-  mandatoActual, crearMandato, gobernarMandato, simularCampana, correrShadow,
-  money, type Mandato, type CampaignPlan, type EjecucionCampana, type ShadowRun, type EntradaCampana,
+  mandatoActual, crearMandato, gobernarMandato, simularCampana, correrShadow, writeStatus,
+  money, type Mandato, type CampaignPlan, type EjecucionCampana, type ShadowRun, type EntradaCampana, type WriteStatus,
 } from '../../lib/campana-client';
 import { Badge, Callout, EmptyState, Metric, PageHeader, TechDetails, type Tono } from '../../components/ui';
 
@@ -21,13 +21,16 @@ export default function CampanasPage(): React.ReactElement {
   const router = useRouter();
   const [org, setOrg] = useState<string | null>(null);
   const [mandato, setMandato] = useState<Mandato | null>(null);
+  const [wstatus, setWstatus] = useState<WriteStatus | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const recargar = useCallback(async (o: string) => {
     setCargando(true); setError(null);
-    try { setMandato(await mandatoActual(o)); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Error al cargar'); }
+    try {
+      const [m, w] = await Promise.all([mandatoActual(o), writeStatus(o).catch(() => null)]);
+      setMandato(m); setWstatus(w);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Error al cargar'); }
     finally { setCargando(false); }
   }, []);
 
@@ -51,8 +54,10 @@ export default function CampanasPage(): React.ReactElement {
   return (
     <div className="wrap">
       <PageHeader eyebrow="Campañas · modo seguro" title="Prepara tu campaña" right={mandato ? <Badge tono={estadoTono(mandato.status)}>{mandato.status}</Badge> : undefined} />
-      <Callout tono="info" ico="🛡️">
-        Todo aquí es <b>simulación</b>. SOEC no publica ni gasta dinero real. Tú fijas un <b>tope de presupuesto</b> y SOEC trabaja siempre dentro de él: nunca lo sube por su cuenta.
+      <Callout tono={wstatus?.real ? 'warn' : 'info'} ico="🛡️">
+        {wstatus?.real
+          ? <><b>Modo real activo.</b> SOEC puede publicar cambios en Meta dentro de tu tope autorizado.</>
+          : <><b>Modo simulación.</b> SOEC todavía <b>no publica cambios en Meta</b> ni gasta dinero real. Tú fijas un <b>tope</b> y SOEC trabaja siempre dentro de él: nunca lo sube por su cuenta.</>}
       </Callout>
       {error && <Callout tono="warn" ico="⚠">{error}</Callout>}
       {cargando ? <p className="mut">Cargando…</p> : mandato ? <ConMandato org={org} mandato={mandato} onCambio={() => recargar(org)} /> : <SinMandato org={org} onCreado={() => recargar(org)} />}

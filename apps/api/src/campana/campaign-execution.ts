@@ -157,8 +157,8 @@ export async function ejecutarCampana(
     // Permitido: proyectar (shadow) el gasto que se comprometería si fuese REAL. Solo el paso pagado con costo.
     gastoProyectadoMinor += t.costMinor;
 
-    // Recién ahora se invoca el Meta Write Port (dry-run: sin red).
-    const solicitud: SolicitudEscrituraMeta = { operacion: t.operacionMeta, organizationId: plan.organizationId, assetId: plan.adAccountId, idempotencyKey, payload: t.payload };
+    // Recién ahora se invoca el Meta Write Port. guardApproved=true prueba que el Action Plane ya aprobó.
+    const solicitud: SolicitudEscrituraMeta = { operacion: t.operacionMeta, organizationId: plan.organizationId, assetId: plan.adAccountId, idempotencyKey, payload: t.payload, mandateId: mandato.id, guardApproved: true };
     const escritura: ResultadoEscrituraMeta = await port.ejecutar(solicitud);
     if (port.esReal && escritura.ok) metaWriteCallsReales += 1;
 

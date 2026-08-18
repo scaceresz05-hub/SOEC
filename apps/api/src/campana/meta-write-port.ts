@@ -40,6 +40,8 @@ export interface SolicitudEscrituraMeta {
   readonly assetId: string; // id canónico del activo afectado
   readonly idempotencyKey: string;
   readonly payload: Readonly<Record<string, unknown>>; // sanitizado; nunca token/secret/PII
+  readonly mandateId?: string; // mandato bajo el que se autorizó (defensa en profundidad del adapter real)
+  readonly guardApproved?: boolean; // el Action Plane (policy+budget guard+ledger) YA aprobó esta acción
 }
 
 export interface ResultadoEscrituraMeta {
