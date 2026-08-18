@@ -147,6 +147,7 @@ import { PlataformaError } from './plataforma';
 import { registerPlataformaRoutes } from './plataforma-routes';
 import { registerAcquisitionRoutes } from './acquisition-routes';
 import { registerMetaOAuthAutenticadas, registerMetaCallbackPublico } from './acquisition/meta-oauth-routes';
+import { registerAccionRoutes } from './accion/accion-routes';
 import { crearComposicionMetaOAuth } from './acquisition/meta-runtime';
 import { registrarProteccionCsrf } from './csrf';
 
@@ -415,6 +416,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // OAuth READ-ONLY de Meta — rutas AUTENTICADAS (start/connection/assets/binding). El CALLBACK va aparte,
     // PÚBLICO (fuera del gateway), porque el redirect de Meta llega sin sesión y se autentica por el state.
     registerMetaOAuthAutenticadas(target, { composicion: composicionMeta });
+    registerAccionRoutes(target, deps.pool); // Safe Action Plane (V2-A): mandatos + budget guard + ledger
 
     target.post('/events', async (req, reply) => {
       const ctx = contextFrom(req);
