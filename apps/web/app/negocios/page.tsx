@@ -36,8 +36,11 @@ interface ProductosCruce { catalogoObservado?: number; conVentasObservadas?: num
 interface Ventas { observado: boolean; motivo?: string; lineaBase?: LineaBase; productos?: ProductosCruce }
 interface Catalogo { observado: boolean; resumen?: { productosObservados: number; categoriasObservadas: number; enStock: number; sinStock: number } }
 interface Panel {
-  // Alineado con el backend (panel-resultados): métricas nullable + sinDatos. NUNCA se asume 0.
-  ads?: { impressions: number | null; clicks: number | null; cost: number | null; ctr: number | null; cpc: number | null; sinDatos: boolean };
+  // Alineado con el backend (panel-resultados): métricas nullable + sinDatos + trazabilidad. NUNCA se asume 0.
+  ads?: {
+    source: 'GOOGLE_ADS'; impressions: number | null; clicks: number | null; cost: number | null; ctr: number | null; cpc: number | null;
+    sinDatos: boolean; capturedAt: string | null; period: { kind: 'ALL_TIME'; from: string | null; to: string | null } | null; stale: boolean;
+  };
   growthFunnel?: { comercial?: Record<string, number>; diagnostico?: Record<string, number> };
   searchTerms?: { termino: string; impresiones: number; clics: number }[];
 }
@@ -46,6 +49,44 @@ const FUENTE_ADS = 'Google Ads';
 /** ¿No hay datos de Google Ads (no conectado / sin entrega)? Nunca convertimos no-data en 0. */
 function adsVacio(p: Panel | null): boolean {
   return !p?.ads || p.ads.sinDatos === true || (p.ads.impressions === null && p.ads.clicks === null && p.ads.cost === null);
+}
+/** Fecha absoluta humana (es-CL) — ej "16 ago 2026, 00:24". Nunca ISO crudo. */
+function fechaAbs(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('es-CL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function soloFecha(iso: string | null): string {
+  if (!iso) return '—';
+  // start_date de Google Ads viene como 'YYYY-MM-DD'; lo formateamos sin zona.
+  const d = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function haceRel(iso: string | null): string {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  const dd = Math.floor(h / 24);
+  return `hace ${dd} día${dd === 1 ? '' : 's'}`;
+}
+/** Línea de trazabilidad del bloque Google Ads: fuente + período real (all-time) + capturedAt/STALE. */
+function LineaAds({ ads }: { ads: NonNullable<Panel['ads']> }): React.ReactElement {
+  const rango = ads.period?.from ? `desde ${soloFecha(ads.period.from)}` : 'acumulado histórico';
+  const al = ads.period?.to ?? ads.capturedAt;
+  return (
+    <p className="s" style={{ margin: '4px 0 0', color: ads.stale ? 'var(--warn)' : undefined }}>
+      {FUENTE_ADS} · {rango} al {soloFecha(al)}
+      {ads.stale
+        ? <> · <b>Último dato conocido: {fechaAbs(ads.capturedAt)}</b> · desactualizado</>
+        : <> · Actualizado {fechaAbs(ads.capturedAt)}{haceRel(ads.capturedAt) ? ` (${haceRel(ads.capturedAt)})` : ''}</>}
+    </p>
+  );
 }
 interface Director { veredicto?: string }
 interface Plan { oportunidadesTacticas?: { termino: string; accion: string }[] }
@@ -199,17 +240,20 @@ export default function Panel(): React.ReactElement {
           )}
           {!esEcom && panel && (
             <>
-              <div className="section">Publicidad <span className="hint">{FUENTE_ADS} · acumulado reciente</span></div>
+              <div className="section">Publicidad <span className="hint">{FUENTE_ADS} · histórico de la campaña</span></div>
               {adsVacio(panel) ? (
                 <Callout tono="info" ico="🔌">
                   <b>{FUENTE_ADS} sin datos.</b> No hay campañas con entrega o {FUENTE_ADS} no está conectado para este negocio. No mostramos cifras que no provengan de una fuente real.
                 </Callout>
               ) : (
-                <div className="grid g-4">
-                  <Metric ico="👁" label="Impresiones" value={num(panel.ads!.impressions)} sub={`${FUENTE_ADS} · acumulado reciente`} accent />
-                  <Metric ico="🖱" label="Clics" value={num(panel.ads!.clicks)} sub={panel.ads!.ctr !== null ? `${(panel.ads!.ctr * 100).toFixed(1)}% de quienes lo vieron` : FUENTE_ADS} />
-                  <Metric ico="💸" label="Inversión" value={clp(panel.ads!.cost)} sub={panel.ads!.cpc !== null ? `${clp(panel.ads!.cpc)} por clic` : FUENTE_ADS} />
-                </div>
+                <>
+                  <div className="grid g-4">
+                    <Metric ico="👁" label="Impresiones" value={num(panel.ads!.impressions)} sub={FUENTE_ADS} accent />
+                    <Metric ico="🖱" label="Clics" value={num(panel.ads!.clicks)} sub={panel.ads!.ctr !== null ? `${(panel.ads!.ctr * 100).toFixed(1)}% de quienes lo vieron` : FUENTE_ADS} />
+                    <Metric ico="💸" label="Inversión" value={clp(panel.ads!.cost)} sub={panel.ads!.cpc !== null ? `${clp(panel.ads!.cpc)} por clic` : FUENTE_ADS} />
+                  </div>
+                  <LineaAds ads={panel.ads!} />
+                </>
               )}
               <div className="grid g-4" style={{ marginTop: 12 }}>
                 <Metric ico="🌱" label="Clientes nuevos" value={num(panel.growthFunnel?.comercial?.lead_created ?? null)} sub="contactos reales desde el sitio · medición web" accent />
@@ -334,16 +378,19 @@ export default function Panel(): React.ReactElement {
       {tab === 'marketing' && (
         !esEcom && panel ? (
           <>
-            <div className="section">Marketing pagado <span className="hint">{FUENTE_ADS} · acumulado reciente · solo lectura</span></div>
+            <div className="section">Marketing pagado <span className="hint">{FUENTE_ADS} · histórico de la campaña · solo lectura</span></div>
             {adsVacio(panel) ? (
               <Callout tono="info" ico="🔌"><b>{FUENTE_ADS} sin datos.</b> No hay campañas con entrega o {FUENTE_ADS} no está conectado. Sin cifras sintéticas ni de otra fuente.</Callout>
             ) : (
+            <>
             <div className="grid g-4">
               <Metric ico="👁" label="Impresiones" value={num(panel.ads!.impressions)} sub={FUENTE_ADS} />
               <Metric ico="🖱" label="Clics" value={num(panel.ads!.clicks)} sub={panel.ads!.ctr !== null ? `${(panel.ads!.ctr * 100).toFixed(1)}% CTR` : FUENTE_ADS} />
               <Metric ico="💸" label="Inversión" value={clp(panel.ads!.cost)} sub={FUENTE_ADS} />
               <Metric ico="🏷" label="Costo por clic" value={clp(panel.ads!.cpc)} />
             </div>
+            <LineaAds ads={panel.ads!} />
+            </>
             )}
             <div className="section">Búsquedas que te muestran</div>
             <div className="card">
@@ -570,5 +617,5 @@ function frase(esEcom: boolean, ventas: Ventas | null, panel: Panel | null, pued
   if (adsVacio(panel)) return `Aún no tengo datos de anuncios (${FUENTE_ADS} sin datos o no conectado). No invento cifras: observo tus contactos reales y te aviso cuando haya con qué decidir.`;
   if (a && (a.clicks ?? 0) > 0 && (panel?.growthFunnel?.comercial?.lead_created ?? 0) === 0)
     return `Tu campaña en ${FUENTE_ADS} está consiguiendo clics (${num(a.clicks)} de ${num(a.impressions)} personas que vieron el anuncio), pero todavía no genera contactos. No recomiendo aumentar el gasto hasta entender por qué.`;
-  return `Estoy observando tu campaña en ${FUENTE_ADS}: ${num(a?.impressions ?? null)} impresiones y ${num(a?.clicks ?? null)} clics (acumulado reciente). Reúno evidencia antes de proponer cambios.`;
+  return `Estoy observando tu campaña en ${FUENTE_ADS}: ${num(a?.impressions ?? null)} impresiones y ${num(a?.clicks ?? null)} clics (histórico de la campaña). Reúno evidencia antes de proponer cambios.`;
 }

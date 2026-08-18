@@ -71,7 +71,7 @@ export function gaqlTerminos(desde: string, hasta: string): string {
  * sirve (0 impresiones)" y, ya sirviendo, el acumulado vigente. NO fabrica actividad: si el valor es 0, es 0.
  */
 export const GAQL_CAMPANIA_SNAPSHOT =
-  'SELECT campaign.id, campaign.name, campaign.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.average_cpc, metrics.ctr FROM campaign';
+  'SELECT campaign.id, campaign.name, campaign.status, campaign.start_date, campaign.end_date, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.average_cpc, metrics.ctr FROM campaign';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Parseo del searchStream (array de batches → results)
@@ -175,7 +175,9 @@ export interface SnapshotAdsActual {
   readonly impressions: number | null;
   readonly clicks: number | null;
   readonly cost: number | null;
-  readonly at: string; // instante de sync (ISO) — orden last-wins
+  readonly at: string; // instante de sync (ISO) — orden last-wins; también el "as-of" del acumulado all-time
+  readonly startDate?: string | null; // inicio de la campaña (campaign.start_date) = "from" del acumulado all-time
+  readonly endDate?: string | null; // fin de la campaña (campaign.end_date), si aplica
 }
 
 /** Extrae el snapshot acumulado de la 1ª fila (la consulta snapshot devuelve la campaña). null si no hay id. */
@@ -195,6 +197,8 @@ export function extraerSnapshotActual(rows: readonly FilaGoogleAds[], at: string
     clicks: num(metrics.clicks),
     cost: costMicros === null ? null : costMicros / 1e6,
     at,
+    startDate: str(campaign.startDate),
+    endDate: str(campaign.endDate),
   };
 }
 
