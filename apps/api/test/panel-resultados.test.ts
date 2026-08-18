@@ -114,3 +114,40 @@ describe('construirPanel', () => {
     expect(p.ads.cpc).toBeNull(); // 0 clics ⇒ NO_CALCULABLE
   });
 });
+
+// ── Trazabilidad Google Ads: source / capturedAt / período ALL_TIME / stale / no-data ──────────────
+const SNAP_REAL: SnapshotAdsActual = {
+  campaignId: '24120966895', campaignName: 'SmileFlow Search Chile', status: 'ENABLED',
+  impressions: 556, clicks: 22, cost: 13842.571271, at: '2026-08-16T00:24:06.440Z',
+  startDate: '2026-07-01', endDate: null,
+};
+
+describe('construirPanel · trazabilidad Google Ads', () => {
+  it('snapshot con valores: source, capturedAt y período ALL_TIME (from=inicio campaña, to=capturedAt)', () => {
+    const p = construirPanel([], SYNCS, SNAP_REAL, '2026-08-16T01:00:00Z');
+    expect(p.ads.source).toBe('GOOGLE_ADS');
+    expect(p.ads.impressions).toBe(556);
+    expect(p.ads.clicks).toBe(22);
+    expect(p.ads.cost).toBe(13842.571271); // exacto del event store, sin redondear
+    expect(p.ads.capturedAt).toBe('2026-08-16T00:24:06.440Z');
+    expect(p.ads.period).toEqual({ kind: 'ALL_TIME', from: '2026-07-01', to: '2026-08-16T00:24:06.440Z' });
+    expect(p.ads.sinDatos).toBe(false);
+  });
+  it('fresco (dentro del umbral) ⇒ no stale; viejo ⇒ stale, nunca como actual', () => {
+    expect(construirPanel([], SYNCS, SNAP_REAL, '2026-08-16T01:00:00Z').ads.stale).toBe(false);
+    expect(construirPanel([], SYNCS, SNAP_REAL, '2026-08-18T12:00:00Z').ads.stale).toBe(true); // ~2 días
+  });
+  it('sin snapshot ⇒ capturedAt/period null, sinDatos true, NO se inventa rango ni 0 como dato', () => {
+    const p = construirPanel([], SYNCS, null, '2026-08-18T12:00:00Z');
+    expect(p.ads.capturedAt).toBeNull();
+    expect(p.ads.period).toBeNull();
+    expect(p.ads.sinDatos).toBe(true);
+    expect(p.ads.impressions).toBeNull(); // no-data ≠ 0
+    expect(p.ads.stale).toBe(false); // sin dato ⇒ no aplica STALE
+  });
+  it('snapshot viejo sin start_date persistido ⇒ period.from null (no se infiere desde capturedAt)', () => {
+    const viejo: SnapshotAdsActual = { ...SNAP_REAL, startDate: undefined };
+    const p = construirPanel([], SYNCS, viejo, '2026-08-18T12:00:00Z');
+    expect(p.ads.period).toEqual({ kind: 'ALL_TIME', from: null, to: '2026-08-16T00:24:06.440Z' });
+  });
+});

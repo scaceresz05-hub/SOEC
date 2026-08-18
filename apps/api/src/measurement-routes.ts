@@ -155,7 +155,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
 
     return reply.send({
       organizationId: org,
-      ...construirPanel(observaciones, sincronizaciones, snapshotActual),
+      ...construirPanel(observaciones, sincronizaciones, snapshotActual, new Date().toISOString()),
     });
   });
 

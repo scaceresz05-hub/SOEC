@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  clasificarTermino, extraerSnapshotActual, fechaLocal, fechaMaxima, gaqlCampanias, gaqlTerminos, mapearCampania,
+  clasificarTermino, extraerSnapshotActual, fechaLocal, fechaMaxima, GAQL_CAMPANIA_SNAPSHOT, gaqlCampanias, gaqlTerminos, mapearCampania,
   mapearTerminos, parsearSearchStream, sha1corto, ventanaIngesta,
 } from '../src/ingesta/mapa-google-ads';
 
@@ -117,6 +117,20 @@ describe('mapa-google-ads', () => {
     const sirviendo = extraerSnapshotActual(parsearSearchStream(BODY_SNAPSHOT_SIRVIENDO), '2026-08-10T22:00:00Z');
     expect(sirviendo!.impressions).toBe(51);
     expect(extraerSnapshotActual([], 'x')).toBeNull(); // sin filas ⇒ null (no fabrica)
+  });
+
+  it('extraerSnapshotActual persiste start_date/end_date (from del acumulado all-time; no se infiere)', () => {
+    const body = JSON.stringify([{ results: [{ campaign: { id: '24120966895', name: 'SmileFlow Search Chile', status: 'ENABLED', startDate: '2026-07-01', endDate: '2030-12-31' }, metrics: { impressions: '556', clicks: '22', costMicros: '13842571271' } }] }]);
+    const s = extraerSnapshotActual(parsearSearchStream(body), '2026-08-16T00:24:06.440Z');
+    expect(s!.startDate).toBe('2026-07-01');
+    expect(s!.endDate).toBe('2030-12-31');
+    expect(s!.impressions).toBe(556);
+    expect(s!.cost).toBe(13842.571271); // costMicros/1e6 exacto
+  });
+
+  it('GAQL del snapshot incluye start_date/end_date', () => {
+    expect(GAQL_CAMPANIA_SNAPSHOT).toContain('campaign.start_date');
+    expect(GAQL_CAMPANIA_SNAPSHOT).toContain('campaign.end_date');
   });
 
   it('fechaLocal calcula el día en la zona de la cuenta (América/Santiago, GMT-04/-03)', () => {

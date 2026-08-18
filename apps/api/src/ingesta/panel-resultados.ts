@@ -37,13 +37,24 @@ export interface PanelCampaign {
   readonly id: string | null;
 }
 
+/** Período REAL del acumulado de anuncios. El snapshot Google Ads es all-time (sin filtro de fecha): el `from`
+ *  es el inicio de la campaña y el `to` es el instante de captura (as-of). Nunca se infiere desde capturedAt. */
+export interface PeriodoAds {
+  readonly kind: 'ALL_TIME';
+  readonly from: string | null; // campaign.start_date (si el snapshot lo persistió); null en snapshots viejos
+  readonly to: string | null; // as-of = capturedAt
+}
 export interface PanelAds {
+  readonly source: 'GOOGLE_ADS';
   readonly impressions: number | null;
   readonly clicks: number | null;
   readonly cost: number | null;
   readonly ctr: number | null; // clicks/impressions — null si impressions no > 0 (nunca 0 por defecto)
   readonly cpc: number | null; // cost/clicks — null si clicks no > 0 (nunca 0 por defecto)
   readonly sinDatos: boolean;
+  readonly capturedAt: string | null; // occurred_at del ads.snapshot (as-of real). null si no hay snapshot
+  readonly period: PeriodoAds | null; // null si no hay snapshot
+  readonly stale: boolean; // capturedAt más viejo que el umbral (dato antiguo, no actual)
 }
 
 export interface PanelFunnelCounts {
@@ -102,10 +113,14 @@ function contarFunnel(obs: readonly ObsPanel[]): PanelFunnelCounts {
  * Construye el panel. `snapshotActual` = último snapshot acumulado (stream dedicado last-wins); provee la
  * cabecera de campaña y las cifras Ads vigentes (frescas cada sync). `obs` aporta términos y embudo Growth.
  */
+/** Umbral de obsolescencia del acumulado Google Ads: más viejo que esto ⇒ STALE (dato antiguo, no actual). */
+export const ADS_STALE_MS = 24 * 3600_000;
+
 export function construirPanel(
   obs: readonly ObsPanel[],
   syncs: readonly Sync[],
   snapshotActual: SnapshotAdsActual | null,
+  ahoraISO: string = new Date().toISOString(),
 ): PanelResultados {
   const ads = obs.filter((o) => o.provider === GOOGLE_ADS);
   const growth = obs.filter((o) => o.provider === GROWTH);
@@ -122,7 +137,12 @@ export function construirPanel(
   const ctr = impressions !== null && impressions > 0 && clicks !== null ? clicks / impressions : null;
   const cpc = clicks !== null && clicks > 0 && cost !== null ? cost / clicks : null;
   const sinDatos = (impressions ?? 0) === 0 && (clicks ?? 0) === 0 && (cost ?? 0) === 0;
-  const adsPanel: PanelAds = { impressions, clicks, cost, ctr, cpc, sinDatos };
+  // Trazabilidad real: capturedAt = as-of del snapshot; período ALL_TIME (from=inicio campaña, to=capturedAt).
+  // NO se inventa rango ni capturedAt si no hay snapshot. STALE si el acumulado es más viejo que el umbral.
+  const capturedAt = snapshotActual?.at ?? null;
+  const period: PeriodoAds | null = snapshotActual ? { kind: 'ALL_TIME', from: snapshotActual.startDate ?? null, to: snapshotActual.at } : null;
+  const stale = capturedAt !== null && Date.parse(ahoraISO) - Date.parse(capturedAt) > ADS_STALE_MS;
+  const adsPanel: PanelAds = { source: 'GOOGLE_ADS', impressions, clicks, cost, ctr, cpc, sinDatos, capturedAt, period, stale };
 
   // Embudo Growth: conteos por eventName, separando comercial (aprende) de diagnóstico (no aprende).
   const growthFunnel: PanelGrowthFunnel = {
