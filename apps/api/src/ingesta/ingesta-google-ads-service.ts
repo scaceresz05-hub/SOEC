@@ -39,6 +39,7 @@ export interface ResumenIngestaAds {
   readonly nuevos: number;
   readonly ingeridos: number;
   readonly fallos: readonly string[]; // 'etiqueta: mensaje' por cada consulta fallida (sin secretos)
+  readonly dataThrough: string | null; // ÚLTIMA fecha (segments.date) realmente devuelta por Google; null si sin filas
 }
 
 /** Atribución interna de la ingesta real: observación empírica de baja incertidumbre. */
@@ -187,7 +188,7 @@ export class IngestaGoogleAds {
 
     const exitos = Number(ok.snapshot) + Number(ok.campanias) + Number(ok.terminos);
     const estado: EstadoIngesta = exitos === 3 ? 'OK' : exitos === 0 ? 'FALLO' : 'PARCIAL';
-    return { estado, ventana, campaniasFilas, snapshotFilas, terminosFilas, nuevos, ingeridos, fallos };
+    return { estado, ventana, campaniasFilas, snapshotFilas, terminosFilas, nuevos, ingeridos, fallos, dataThrough: fecha };
   }
 
   /** Lee la última fecha del cursor (o null) junto con la versión actual del stream. */

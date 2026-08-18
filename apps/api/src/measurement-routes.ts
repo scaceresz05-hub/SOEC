@@ -183,7 +183,8 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const r = await ingesta.correrUnaVez(cAppend, { ahora: queriedAt });
     const okReal = r.estado === 'OK';
     const error = r.fallos.length > 0 ? r.fallos[0]!.replace(/^[^:]+:\s*/, '') : null; // clase/mensaje, sin secretos
-    const estadoState: AdsRefreshState = { queriedAt, ok: okReal, estado: r.estado, ventana: r.ventana, error, dataThrough: okReal ? r.ventana.hasta : null };
+    // dataThrough = ÚLTIMA fecha realmente devuelta por Google (no la ventana solicitada ni capturedAt).
+    const estadoState: AdsRefreshState = { queriedAt, ok: okReal, estado: r.estado, ventana: r.ventana, error, dataThrough: r.dataThrough };
     // Persistimos el estado del intento (LAST-WINS): hace VISIBLE que se consultó y si falló.
     const prev = await store.readStream(cAppend, adsRefreshStateStreamId(org));
     await store.append(cAppend, adsRefreshStateStreamId(org), prev.length, [{ type: EVENTO_REFRESH_STATE, payload: estadoState, attribution: { source: 'google-ads', purpose: 'refresh-manual', assumptions: [], claimType: 'observational', regime: 'empirical', uncertainty: 'baja' }, occurredAt: queriedAt }]).catch(() => undefined);
