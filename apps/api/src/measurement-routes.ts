@@ -15,7 +15,8 @@ import { ActorId, OrganizationId, type EventStore, type RequestContext } from '@
 import { ObservacionService } from '@soec/motor-medicion';
 import { MeasurementExperience } from './measurement-experience';
 import { construirPanel, type ObsPanel, type Sync } from './ingesta/panel-resultados';
-import { adsSnapshotStreamId, ultimoSnapshotAds } from './ingesta/ingesta-google-ads-service';
+import { adsSnapshotStreamId, ultimoSnapshotAds, adsRefreshStateStreamId, ultimoRefreshState, EVENTO_REFRESH_STATE, type AdsRefreshState } from './ingesta/ingesta-google-ads-service';
+import { construirIngestaGoogleAds, googleAdsConfigurado } from './ingesta/google-ads-runtime';
 import { LecturaDirectorRealService } from './real-director/lectura-director-real';
 import { PlanAccionDryRunService, type PerfilUsuario } from './autonomia-ads/plan-accion-service';
 import { G2AService } from './autonomia-ads/g2a-service';
@@ -152,11 +153,42 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
 
     // Snapshot acumulado vigente (stream dedicado last-wins): cabecera + cifras Ads frescas de cada sync.
     const snapshotActual = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(org)));
+    // Estado del último refresh a Google Ads (observabilidad: cuándo se consultó y si falló, p.ej. OAuth caducado).
+    const lastRefresh = ultimoRefreshState(await store.readStream(c, adsRefreshStateStreamId(org)));
 
     return reply.send({
       organizationId: org,
       ...construirPanel(observaciones, sincronizaciones, snapshotActual, new Date().toISOString()),
+      adsRefresh: lastRefresh, // { queriedAt, ok, estado, ventana, error, dataThrough } | null
+      googleAdsConfigured: googleAdsConfigurado(process.env, org),
     });
+  });
+
+  /**
+   * Refresh MANUAL de Google Ads (READ ONLY). Reutiliza el MISMO caso de uso que el scheduler/script
+   * (`construirIngestaGoogleAds` → `IngestaGoogleAds.correrUnaVez`). Consulta REAL a Google Ads, normaliza y
+   * persiste; si OAuth/consulta falla, el fallo queda VISIBLE (fail-closed) y NO se fabrica frescura. Nunca
+   * escribe en Google Ads. Si la org no está configurada ⇒ NOT_CONFIGURED (sin inventar datos).
+   */
+  app.post('/medicion/refresh-ads', async (req, reply) => {
+    const { org } = real(req, 'medicion-real');
+    const o = OrganizationId(org);
+    const cAppend: RequestContext = { organizationId: o, actor: ActorId('panel-refresh'), scope: { organizationId: o, permissions: ['events:read', 'events:append'] }, correlationId: `panel-refresh-${org}` };
+    const queriedAt = new Date().toISOString();
+
+    const ingesta = construirIngestaGoogleAds(store, process.env, org);
+    if (ingesta === null) {
+      return reply.send({ ok: false, estado: 'NOT_CONFIGURED', queriedAt, mensaje: 'Google Ads no está conectado para este negocio.' });
+    }
+    const r = await ingesta.correrUnaVez(cAppend, { ahora: queriedAt });
+    const okReal = r.estado === 'OK';
+    const error = r.fallos.length > 0 ? r.fallos[0]!.replace(/^[^:]+:\s*/, '') : null; // clase/mensaje, sin secretos
+    const estadoState: AdsRefreshState = { queriedAt, ok: okReal, estado: r.estado, ventana: r.ventana, error, dataThrough: okReal ? r.ventana.hasta : null };
+    // Persistimos el estado del intento (LAST-WINS): hace VISIBLE que se consultó y si falló.
+    const prev = await store.readStream(cAppend, adsRefreshStateStreamId(org));
+    await store.append(cAppend, adsRefreshStateStreamId(org), prev.length, [{ type: EVENTO_REFRESH_STATE, payload: estadoState, attribution: { source: 'google-ads', purpose: 'refresh-manual', assumptions: [], claimType: 'observational', regime: 'empirical', uncertainty: 'baja' }, occurredAt: queriedAt }]).catch(() => undefined);
+
+    return reply.send({ ok: okReal, estado: r.estado, queriedAt, ventana: r.ventana, snapshotFilas: r.snapshotFilas, nuevos: r.nuevos, error });
   });
 
   // LECTURA DEL DIRECTOR sobre datos REALES (org-smileflow). GET = lectura pura (sin efectos);

@@ -14,6 +14,7 @@ const POST_ACCIONES = new Set([
   'optimizar',
   'g2a-aprobar',
   'g2a-rechazar',
+  'refresh-ads',
 ]);
 
 /**

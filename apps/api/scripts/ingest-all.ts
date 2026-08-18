@@ -14,15 +14,14 @@ import { ActorId, OrganizationId, type RequestContext } from '@soec/contracts';
 import { SecretStoreEnv } from '@soec/secretos';
 import { ObservacionService } from '@soec/motor-medicion';
 import type { EsquemaSalida } from '@soec/adaptadores';
-import { GoogleAdsAdapter } from '../src/ingesta/google-ads-adapter';
-import { IngestaGoogleAds } from '../src/ingesta/ingesta-google-ads-service';
+import { construirIngestaGoogleAds } from '../src/ingesta/google-ads-runtime';
 import { SmileFlowGrowthAdapter } from '../src/ingesta/smileflow-growth-adapter';
 import { IngestaSmileFlowGrowth } from '../src/ingesta/ingesta-smileflow-service';
 import { SchedulerIngesta } from '../src/ingesta/scheduler';
 import { LecturaDirectorRealService } from '../src/real-director/lectura-director-real';
 import { PlanAccionDryRunService } from '../src/autonomia-ads/plan-accion-service';
 import { G2AService } from '../src/autonomia-ads/g2a-service';
-import { ORG_SMILEFLOW, buscarFuente, getBusiness, getRecursoGoogleAds } from '../src/plataforma';
+import { ORG_SMILEFLOW, buscarFuente, getBusiness } from '../src/plataforma';
 
 /**
  * Organización que ingiere en esta corrida. El script sigue siendo de UNA organización por
@@ -32,15 +31,6 @@ import { ORG_SMILEFLOW, buscarFuente, getBusiness, getRecursoGoogleAds } from '.
  */
 const ORG = process.env.SOEC_INGESTA_ORG ?? ORG_SMILEFLOW;
 const ARCHIVO_ENV = 'C:/proyectos/SOEC/.env.google-ads';
-
-/** Egress cerrado y tipado para Google Ads: sólo query/customerId (strings) pueden salir. READ ONLY. */
-const ESQUEMA_EGRESS_ADS: EsquemaSalida = {
-  operacion: 'ingesta-ads',
-  campos: [
-    { nombre: 'query', tipo: 'string' },
-    { nombre: 'customerId', tipo: 'string' },
-  ],
-};
 
 /** Egress cerrado y tipado para Growth: sólo cursor/limit/since (strings). */
 const ESQUEMA_EGRESS_GROWTH: EsquemaSalida = {
@@ -104,31 +94,9 @@ async function main(): Promise<void> {
       );
 
     // ── Fuente: Google Ads (READ ONLY) ────────────────────────────────────────
-    // La cuenta externa proviene del PERFIL de la organización, no de una variable global.
-    const ads = getRecursoGoogleAds(ORG);
-    const loginCustomerId = ads.loginCustomerId;
-    const customerId = ads.customerId;
-    const adaptadorAds = new GoogleAdsAdapter({
-      secretStore,
-      esquemaEgress: ESQUEMA_EGRESS_ADS,
-      secretRefs: {
-        developerToken: 'env:GOOGLE_ADS_DEVELOPER_TOKEN',
-        clientId: 'env:GOOGLE_ADS_CLIENT_ID',
-        clientSecret: 'env:GOOGLE_ADS_CLIENT_SECRET',
-        // Referencia OPACA declarada por la FUENTE de esta organización (nunca el valor).
-        refreshToken:
-          fuenteAds.credenciales.find((c) => c.nombreLogico === 'google-ads-refresh-token')
-            ?.secretRef ?? 'env:GOOGLE_ADS_REFRESH_TOKEN',
-      },
-      loginCustomerId,
-    });
-    const ingestaAds = new IngestaGoogleAds({
-      adaptador: adaptadorAds,
-      observaciones,
-      store,
-      org: ORG,
-      customerId,
-    });
+    // MISMO caso de uso central que el refresh manual desde la UI (no se duplica el wiring).
+    const ingestaAds = construirIngestaGoogleAds(store, process.env, ORG);
+    if (ingestaAds === null) throw new Error(`GOOGLE_ADS_NOT_CONFIGURED: ${ORG} (fuente/credenciales incompletas)`);
 
     // ── Fuente: SmileFlow Growth ──────────────────────────────────────────────
     const baseUrl = process.env.SMILEFLOW_M2M_URL;
