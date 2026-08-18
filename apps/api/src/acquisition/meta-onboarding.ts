@@ -218,6 +218,7 @@ export interface MetaGraphReadPort {
    * de la propiedad del Business. Incluye tanto business-owned como user-accessible (ownerBusinessId null).
    */
   discoverAdAccounts(): Promise<readonly CandidatoActivo[]>;
+  readInstagramProfile(igsid: string): Promise<unknown>;
   readInstagramMedia(igsid: string): Promise<unknown>;
   readInstagramMediaInsights(externalMediaId: string): Promise<unknown>;
   readInstagramAccountInsights(igsid: string): Promise<unknown>;
@@ -239,6 +240,9 @@ export class MetaGraphReadFake implements MetaGraphReadPort {
   }
   async discoverAdAccounts(): Promise<readonly CandidatoActivo[]> {
     return [];
+  }
+  async readInstagramProfile(): Promise<unknown> {
+    return {};
   }
   async readInstagramMedia(): Promise<unknown> {
     return { data: [] };
