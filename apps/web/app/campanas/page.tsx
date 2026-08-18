@@ -71,6 +71,16 @@ export default function CampanasPage(): React.ReactElement {
           ? <><b>Modo real activo.</b> SOEC puede publicar cambios en Meta dentro de tu tope autorizado.</>
           : <><b>Modo simulación.</b> SOEC todavía <b>no publica cambios en Meta</b> ni gasta dinero real. Tú fijas un <b>tope</b> y SOEC trabaja siempre dentro de él: nunca lo sube por su cuenta.</>}
       </Callout>
+      {wstatus && !wstatus.real && (
+        <TechDetails titulo="¿Por qué está en modo simulación?">
+          <p className="mut">Para publicar de verdad faltan permisos de Meta que aún no están habilitados. Mientras tanto, todo lo que ves es una simulación fiel.</p>
+          {wstatus.scopesRequeridos.length > 0 && (
+            <ul>{wstatus.scopesRequeridos.map((s) => (
+              <li key={s}>{s} — <b>{wstatus.scopesConcedidos.includes(s) ? 'concedido' : 'pendiente'}</b></li>
+            ))}</ul>
+          )}
+        </TechDetails>
+      )}
       {error && <Callout tono="warn" ico="⚠">{error}</Callout>}
       {cargando ? <p className="mut">Cargando…</p> : mandato ? <ConMandato org={org} mandato={mandato} onCambio={() => recargar(org)} /> : <SinMandato org={org} onCreado={() => recargar(org)} />}
     </div>
