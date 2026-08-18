@@ -12,13 +12,14 @@
 import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { ActorId, OrganizationId, type RequestContext } from '@soec/contracts';
-import { contextoDe } from '../superficie-auth';
+import { contextoDe, permisosDe } from '../superficie-auth';
 import type { ComposicionMetaOAuth } from './meta-runtime';
 import { crearEstadoOAuth, dedupCandidatos, SCOPES_REQUERIDOS, type CandidatoActivo } from './meta-oauth';
 import { procesarCallbackMeta, confirmarBindingMeta, aConexionDTO, aCandidatoDTO } from './meta-oauth-flow';
 import type { TipoBindingMeta } from './meta-onboarding';
 import { MetaAutenticacionError, MetaPermisoError } from './meta-http';
 import { ejecutarSync } from './meta-sync';
+import { construirVistaDirector } from './meta-director';
 
 export interface DepsMetaRoutes {
   readonly composicion: ComposicionMetaOAuth | null;
@@ -287,10 +288,24 @@ export function registerMetaOAuthAutenticadas(app: FastifyInstance, deps: DepsMe
     if (reg.conexion.bindings.length === 0) return reply.code(409).send({ ok: false, error: 'SIN_BINDINGS' });
     const cred = await comp.credRepo.obtener(a.org, connectionId);
     if (cred === null) return reply.code(409).send({ ok: false, error: 'NO_CREDENTIAL' });
+    // `force` (re-lee todo, ignorando freshness) sólo para actor con permiso de gestión del negocio.
+    const force = (req.body as { force?: unknown } | undefined)?.force === true;
+    if (force && !permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'FORCE_NO_AUTORIZADO' });
+    const composicion = comp; // narrowed no-null para el closure de resolución perezosa
     let estado;
     try {
-      const resuelto = await comp.secretWriter.resolver(a.ctx, cred.secretRef);
-      estado = await resuelto.usar((token) => ejecutarSync({ graph: comp.crearGraphRead(token), repo: comp.syncRepo, ahora }, a.org, connectionId, reg.conexion.bindings));
+      // Resolución PEREZOSA del token: si toda la matriz está FRESH, ejecutarSync no invoca esto (cero Graph).
+      estado = await ejecutarSync(
+        {
+          resolverGraph: (uso) => composicion.secretWriter.resolver(a.ctx, cred.secretRef).then((r) => r.usar((token) => uso(composicion.crearGraphRead(token)))),
+          repo: composicion.syncRepo,
+          ahora,
+        },
+        a.org,
+        connectionId,
+        reg.conexion.bindings,
+        { force },
+      );
     } catch {
       return reply.code(502).send({ ok: false, error: 'SYNC_FAILED' });
     }
@@ -298,5 +313,21 @@ export function registerMetaOAuthAutenticadas(app: FastifyInstance, deps: DepsMe
       ok: true,
       datos: { lastSyncAt: estado.lastSyncAt, lastSuccessfulSyncAt: estado.lastSuccessfulSyncAt, lastErrorClass: estado.lastErrorClass, saludConexion: estado.saludConexion, capacidades: estado.capacidades },
     });
+  });
+
+  /**
+   * READ MODEL del DIRECTOR (autenticado, tenant-scoped, read-only): expone el conocimiento Meta
+   * sincronizado (snapshots NORMALIZADOS + freshness + metadata). NO llama a Graph. NUNCA expone token,
+   * secretRef, ciphertext, raw Graph, URLs de paging ni PII de leads.
+   */
+  app.get('/acquisition/meta/director', async (req, reply) => {
+    const a = authed(req, reply);
+    if (!a) return;
+    if (comp === null) return reply.code(503).send({ ok: false, error: 'META_NOT_CONFIGURED' });
+    const connectionId = `meta-${a.org}`;
+    const reg = await comp.connRepo.obtener(a.org, connectionId);
+    if (reg === null) return reply.code(409).send({ ok: false, error: 'NOT_CONNECTED' });
+    const vista = await construirVistaDirector(comp.syncRepo, a.org, connectionId, reg.conexion.bindings, ahora());
+    return reply.send({ ok: true, datos: vista });
   });
 }
