@@ -354,7 +354,17 @@ export interface CandidatoDTO {
   readonly externalId: string;
   readonly displayName: string | null;
   readonly provider: 'meta';
+  /** Sólo `adAccount`: Business propietario o `null` (accesible sin ownership demostrado). */
+  readonly ownerBusinessId?: string | null;
+  /** Sólo `adAccount`: BUSINESS_OWNED vs USER_ACCESSIBLE. */
+  readonly accessMode?: string;
+  /** Un candidato descubierto es elegible para binding humano (ownership NO es requisito). */
+  readonly bindingEligible: boolean;
 }
 export function aCandidatoDTO(c: CandidatoActivo): CandidatoDTO {
-  return { assetType: c.assetType, externalId: c.externalId, displayName: c.displayName, provider: c.provider };
+  const base = { assetType: c.assetType, externalId: c.externalId, displayName: c.displayName, provider: c.provider, bindingEligible: true };
+  // ACCESSIBLE ≠ OWNED: para ad accounts se expone la relación real; el binding sigue exigiendo confirmación humana.
+  return c.assetType === 'adAccount'
+    ? { ...base, ownerBusinessId: c.ownerBusinessId ?? null, accessMode: c.accessMode ?? 'USER_ACCESSIBLE' }
+    : base;
 }

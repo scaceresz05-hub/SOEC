@@ -94,6 +94,8 @@ export class FakeTransporteMeta implements TransporteMeta {
     if (u.includes('/debug_token')) return this.ok({ data: { scopes: [...(this.opts.scopes ?? ['pages_show_list', 'business_management', 'instagram_basic', 'pages_read_engagement', 'instagram_manage_insights', 'ads_read'])], user_id: 'SYNTH_USER_1', expires_at: 0 } });
     if (this.opts.forzarErrorCodigo !== undefined) return { status: 400, ok: false, json: { error: { code: this.opts.forzarErrorCodigo, message: 'forzado' } } };
     if (u.includes('/me/businesses')) return this.ok({ data: [{ id: '934186066270538', name: 'SmileFlow' }], paging: { next: 'https://graph.facebook.com/next?access_token=SYNTH_LONG_TOKEN', cursors: { after: 'CUR_A' } } });
+    // Cuenta publicitaria ACCESSIBLE-ONLY: el token accede pero Meta NO reporta business owner (ownerBusinessId null).
+    if (u.includes('/me/adaccounts')) return this.ok({ data: [{ account_id: '1037025024374407', name: 'Caceres SC', account_status: 1 }] });
     if (u.includes('/me/accounts')) return this.ok({ data: [{ id: '1066708446525633', name: 'Smileflow.clinic', instagram_business_account: { id: '17841432883225770', username: 'smileflow' } }] });
     return this.ok({ data: [], paging: { next: 'https://graph.facebook.com/n?access_token=SYNTH_LONG_TOKEN', cursors: { after: 'CUR_B' } } });
   }

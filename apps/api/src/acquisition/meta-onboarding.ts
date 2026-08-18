@@ -213,6 +213,11 @@ export interface MetaGraphReadPort {
   discoverBusinesses(): Promise<readonly CandidatoActivo[]>;
   discoverPages(): Promise<readonly CandidatoActivo[]>;
   discoverInstagram(): Promise<readonly CandidatoActivo[]>;
+  /**
+   * Enumera las cuentas publicitarias ACCESIBLES por el token (Graph `me/adaccounts`), independientemente
+   * de la propiedad del Business. Incluye tanto business-owned como user-accessible (ownerBusinessId null).
+   */
+  discoverAdAccounts(): Promise<readonly CandidatoActivo[]>;
   readInstagramMedia(igsid: string): Promise<unknown>;
   readInstagramMediaInsights(externalMediaId: string): Promise<unknown>;
   readInstagramAccountInsights(igsid: string): Promise<unknown>;
@@ -230,6 +235,9 @@ export class MetaGraphReadFake implements MetaGraphReadPort {
     return [];
   }
   async discoverInstagram(): Promise<readonly CandidatoActivo[]> {
+    return [];
+  }
+  async discoverAdAccounts(): Promise<readonly CandidatoActivo[]> {
     return [];
   }
   async readInstagramMedia(): Promise<unknown> {

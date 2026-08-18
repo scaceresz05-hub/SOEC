@@ -66,12 +66,50 @@ export function validarScopes(efectivos: readonly ScopeMeta[]): ResultadoValidac
 // Candidato de activo (asset discovery, FASE 7) — nombre display-only, identidad por ID
 // ---------------------------------------------------------------------------
 
+/**
+ * Relación del token con una cuenta publicitaria. Distinta de la propiedad del Business:
+ *  - BUSINESS_OWNED: la cuenta pertenece a un Business canónico (ownerBusinessId demostrado por Graph).
+ *  - USER_ACCESSIBLE: el token OAuth tiene acceso válido a la cuenta aunque su ownerBusinessId sea null.
+ * ACCESSIBLE ≠ OWNED: la ausencia de ownership NO implica ausencia de acceso.
+ */
+export type ModoAccesoAdAccount = 'BUSINESS_OWNED' | 'USER_ACCESSIBLE';
+
 export interface CandidatoActivo {
   readonly provider: 'meta';
   readonly assetType: 'business' | 'page' | 'instagram' | 'adAccount';
   readonly externalId: string; // ID canónico de Graph
   readonly displayName: string | null; // sólo display; NUNCA identidad
   readonly provenance: 'GRAPH_OBSERVED' | 'UI_OBSERVED' | 'INFERRED';
+  /**
+   * Sólo `adAccount`: Business propietario según Graph, o `null` si el token accede a la cuenta sin
+   * ownership demostrado. NUNCA se falsea con el Business seleccionado si Meta no lo demuestra.
+   */
+  readonly ownerBusinessId?: string | null;
+  /** Sólo `adAccount`: cómo el token llega a la cuenta (propiedad del Business vs accesible por el token). */
+  readonly accessMode?: ModoAccesoAdAccount;
+}
+
+/**
+ * Deduplica candidatos por (assetType, externalId), preservando la relación MÁS INFORMATIVA: si el mismo
+ * activo llega por business-owned discovery Y por accessible-only discovery, gana la entrada con ownership
+ * demostrado (ownerBusinessId no nulo). Una sola fila por ID. Estable respecto al orden de entrada.
+ */
+export function dedupCandidatos(cands: readonly CandidatoActivo[]): readonly CandidatoActivo[] {
+  const orden: string[] = [];
+  const m = new Map<string, CandidatoActivo>();
+  for (const c of cands) {
+    const k = `${c.assetType}:${c.externalId}`;
+    const prev = m.get(k);
+    if (prev === undefined) {
+      m.set(k, c);
+      orden.push(k);
+      continue;
+    }
+    const prevOwned = prev.ownerBusinessId != null;
+    const curOwned = c.ownerBusinessId != null;
+    if (curOwned && !prevOwned) m.set(k, c); // ownership demostrado > accessible-only
+  }
+  return orden.map((k) => m.get(k)!);
 }
 
 // ---------------------------------------------------------------------------

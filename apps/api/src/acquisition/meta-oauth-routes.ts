@@ -14,7 +14,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { ActorId, OrganizationId, type RequestContext } from '@soec/contracts';
 import { contextoDe } from '../superficie-auth';
 import type { ComposicionMetaOAuth } from './meta-runtime';
-import { crearEstadoOAuth, SCOPES_REQUERIDOS, type CandidatoActivo } from './meta-oauth';
+import { crearEstadoOAuth, dedupCandidatos, SCOPES_REQUERIDOS, type CandidatoActivo } from './meta-oauth';
 import { procesarCallbackMeta, confirmarBindingMeta, aConexionDTO, aCandidatoDTO } from './meta-oauth-flow';
 import type { TipoBindingMeta } from './meta-onboarding';
 import { MetaAutenticacionError, MetaPermisoError } from './meta-http';
@@ -41,8 +41,9 @@ function ctxSistema(org: string): RequestContext {
 }
 
 async function descubrirAssets(g: ReturnType<ComposicionMetaOAuth['crearGraphRead']>): Promise<readonly CandidatoActivo[]> {
-  const [b, p, i] = await Promise.all([g.discoverBusinesses(), g.discoverPages(), g.discoverInstagram()]);
-  return [...b, ...p, ...i];
+  // Ad accounts se descubren por ACCESO del token (me/adaccounts), no sólo por ownership del Business.
+  const [b, p, i, a] = await Promise.all([g.discoverBusinesses(), g.discoverPages(), g.discoverInstagram(), g.discoverAdAccounts()]);
+  return dedupCandidatos([...b, ...p, ...i, ...a]);
 }
 
 /** Read-smoke read-only tras el binding: plausibilidad + clasificación de salud. No persiste raw Graph. */
