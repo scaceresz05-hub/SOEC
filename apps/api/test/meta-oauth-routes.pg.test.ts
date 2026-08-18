@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { makeTestPool, ejecutarDestructivoDePrueba } from '@soec/event-store/test-db';
 import { runMigrations } from '@soec/event-store/pg';
 import { metaOAuthMigrations, crearRepositoriosMetaPg } from '../src/acquisition/meta-oauth-pg';
+import { metaSyncMigrations, crearMetaSyncRepo } from '../src/acquisition/meta-sync-pg';
 import { EnvelopeSecretBackend } from '../src/acquisition/meta-secret-backend';
 import { AwsKmsPort } from '../src/acquisition/aws-kms';
 import { ClienteKmsProductivoSimulado } from '../src/acquisition/aws-kms-fake';
@@ -35,6 +36,7 @@ function comp(): ComposicionMetaOAuth {
     secretWriter,
     oauth: new MetaOAuthHttpAdapter(CFG, transporte),
     crearGraphRead: (t) => new MetaGraphReadHttpAdapter({ graphVersion: CFG.graphVersion, appSecret: CFG.appSecret }, transporte, t),
+    syncRepo: crearMetaSyncRepo(pool),
     graphVersion: CFG.graphVersion,
     redirectUri: CFG.redirectUri,
   };
@@ -55,7 +57,8 @@ const callback = (a: FastifyInstance, qs: string) => a.inject({ method: 'GET', u
 
 beforeEach(async () => {
   await runMigrations(pool, metaOAuthMigrations);
-  await ejecutarDestructivoDePrueba(pool, 'truncate table meta_oauth_state, meta_credential, meta_connection, meta_ciphertext');
+  await runMigrations(pool, metaSyncMigrations);
+  await ejecutarDestructivoDePrueba(pool, 'truncate table meta_oauth_state, meta_credential, meta_connection, meta_ciphertext, meta_sync_snapshot, meta_sync_state');
 });
 afterAll(async () => {
   await pool.end();
@@ -260,5 +263,63 @@ describe('meta read-smoke completo (endpoint on-demand)', () => {
       expect(d.checks[c]).toBe('PASS');
     }
     expect(JSON.stringify(r.json())).not.toContain('SYNTH_LONG_TOKEN');
+  });
+});
+
+describe('meta sync read-only (endpoint on-demand)', () => {
+  const sync = (a: FastifyInstance, org = 'org-a') => a.inject({ method: 'POST', url: '/acquisition/meta/sync', headers: H(org) });
+
+  async function conectado(a: FastifyInstance): Promise<void> {
+    const st = await start(a);
+    await callback(a, `state=${st}&code=C`);
+    for (const b of [
+      { externalId: '934186066270538', assetType: 'business' },
+      { externalId: '1066708446525633', assetType: 'page' },
+      { externalId: '17841432883225770', assetType: 'instagram' },
+      { externalId: '1037025024374407', assetType: 'adAccount' },
+    ]) {
+      expect((await a.inject({ method: 'POST', url: '/acquisition/meta/binding', headers: H(), payload: b })).statusCode).toBe(200);
+    }
+  }
+
+  it('sin auth ⇒ 401 · sin conexión ⇒ 409 · composicion null ⇒ 503', async () => {
+    const a = app();
+    expect((await a.inject({ method: 'POST', url: '/acquisition/meta/sync' })).statusCode).toBe(401);
+    expect((await sync(a)).json().error).toBe('NOT_CONNECTED');
+    expect((await sync(app(null))).statusCode).toBe(503);
+  });
+
+  it('tras callback SIN bindings ⇒ 409 SIN_BINDINGS', async () => {
+    const a = app();
+    const st = await start(a);
+    await callback(a, `state=${st}&code=C`);
+    expect((await sync(a)).json().error).toBe('SIN_BINDINGS');
+  });
+
+  it('sync persiste snapshots normalizados + estado HEALTHY; idempotente; sin token/raw', async () => {
+    const a = app();
+    await conectado(a);
+    const r = await sync(a);
+    expect(r.statusCode).toBe(200);
+    const d = r.json().datos as { lastErrorClass: string; saludConexion: string; capacidades: { capability: string; estado: string }[] };
+    expect(d.lastErrorClass).toBe('NONE');
+    expect(d.saludConexion).toBe('HEALTHY');
+    expect(d.capacidades).toHaveLength(8);
+    expect(d.capacidades.every((c) => c.estado === 'OK')).toBe(true);
+    expect(JSON.stringify(r.json())).not.toContain('SYNTH_LONG_TOKEN');
+
+    // Persistencia normalizada + idempotencia (segundo sync no duplica).
+    const repo = crearMetaSyncRepo(pool);
+    expect(await repo.listarSnapshots('org-a', 'meta-org-a')).toHaveLength(8);
+    await sync(a);
+    const snaps = await repo.listarSnapshots('org-a', 'meta-org-a');
+    expect(snaps).toHaveLength(8);
+    const raw = JSON.stringify(snaps);
+    expect(raw).not.toContain('SYNTH_LONG_TOKEN');
+    expect(raw).not.toContain('graph.facebook.com');
+
+    // La conexión OAuth NO se modifica por el sync (observabilidad separada).
+    const conn = (await a.inject({ method: 'GET', url: '/acquisition/meta/connection', headers: H() })).json().datos;
+    expect(conn.estado).toBe('CONNECTED_READ_ONLY');
   });
 });
