@@ -88,6 +88,14 @@ export interface EstadoSync {
   freshness: { capability: string; freshness: string; capturedAt: string | null }[];
 }
 
+export interface ResultadoReadSmoke {
+  estado?: string;
+  salud?: string;
+  pass?: boolean;
+  resumen?: string; // p.ej. PASS_7_OF_8
+  checks?: Record<string, string>; // nombre de check → 'PASS' | 'FAIL' | 'SKIP'
+}
+
 export const conexion = (org: string) => get(org, 'connection').then(j<Conexion>);
 export const iniciarOAuth = (org: string) => post(org, 'oauth/start').then(j<{ authorizationUrl: string; state: string }>);
 export const activos = (org: string) => get(org, 'assets').then(j<{ candidatos: Candidato[] }>);
@@ -96,3 +104,5 @@ export const redescubrir = (org: string) => post(org, 'assets/rediscover').then(
 export const sincronizar = (org: string, force = false) => post(org, 'sync', force ? { force } : {}).then(j<EstadoSync>);
 export const director = (org: string) => get(org, 'director').then(j<VistaDirector>);
 export const estadoSync = (org: string) => get(org, 'sync/estado').then(j<EstadoSync>);
+export const configurarSync = (org: string, enabled: boolean) => post(org, 'sync/config', { enabled }).then(j<{ syncEnabled: boolean }>);
+export const readSmoke = (org: string) => post(org, 'read-smoke').then(j<ResultadoReadSmoke>);

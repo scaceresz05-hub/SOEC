@@ -85,6 +85,21 @@ export function capacidadHumana(c: string): string {
   return m[c] ?? c;
 }
 
+/** Tiempo futuro relativo humano ("aprox. en 1 h", "en breve"); nunca ISO crudo. */
+export function en(iso: string | null): string {
+  if (!iso) return '—';
+  const ms = Date.parse(iso) - Date.now();
+  if (!Number.isFinite(ms)) return '—';
+  if (ms <= 0) return 'en breve';
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return 'en menos de 1 min';
+  if (min < 60) return `aprox. en ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `aprox. en ${h} h`;
+  const d = Math.floor(h / 24);
+  return `aprox. en ${d} día${d === 1 ? '' : 's'}`;
+}
+
 /** Tiempo relativo humano; nunca ISO crudo. */
 export function hace(iso: string | null): string {
   if (!iso) return 'nunca';

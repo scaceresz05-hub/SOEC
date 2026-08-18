@@ -27,6 +27,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <Link href="/director">Mi director</Link>
               <Link href="/campanas">Campañas</Link>
               <Link href="/meta">Conexión Meta</Link>
+              <Link href="/administracion">Equipo</Link>
             </nav>
           </div>
         </header>
