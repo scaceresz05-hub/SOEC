@@ -59,7 +59,7 @@ const callback = (a: FastifyInstance, qs: string) => a.inject({ method: 'GET', u
 beforeEach(async () => {
   await runMigrations(pool, metaOAuthMigrations);
   await runMigrations(pool, metaSyncMigrations);
-  await ejecutarDestructivoDePrueba(pool, 'truncate table meta_oauth_state, meta_credential, meta_connection, meta_ciphertext, meta_sync_snapshot, meta_sync_state, meta_sync_schedule');
+  await ejecutarDestructivoDePrueba(pool, 'truncate table meta_oauth_state, meta_credential, meta_connection, meta_ciphertext, meta_sync_snapshot, meta_sync_state, meta_sync_schedule, meta_sync_snapshot_history');
 });
 afterAll(async () => {
   await pool.end();
@@ -413,5 +413,41 @@ describe('meta scheduler endpoints (config + observabilidad)', () => {
     const a = app();
     expect((await a.inject({ method: 'GET', url: '/acquisition/meta/sync/estado' })).statusCode).toBe(401);
     expect((await a.inject({ method: 'GET', url: '/acquisition/meta/sync/estado', headers: H() })).json().error).toBe('NOT_CONNECTED');
+  });
+});
+
+describe('meta director inteligencia + histórico (E2E)', () => {
+  async function conectado(a: FastifyInstance): Promise<void> {
+    const st = await start(a);
+    await callback(a, `state=${st}&code=C`);
+    for (const b of [
+      { externalId: '934186066270538', assetType: 'business' },
+      { externalId: '1066708446525633', assetType: 'page' },
+      { externalId: '17841432883225770', assetType: 'instagram' },
+      { externalId: '1037025024374407', assetType: 'adAccount' },
+    ]) {
+      expect((await a.inject({ method: 'POST', url: '/acquisition/meta/binding', headers: H(), payload: b })).statusCode).toBe(200);
+    }
+  }
+
+  it('sync + GET /director ⇒ inteligencia útil, trazable, sin secretos; histórico idempotente', async () => {
+    const a = app();
+    await conectado(a);
+    await a.inject({ method: 'POST', url: '/acquisition/meta/sync', headers: H() });
+    const r = await a.inject({ method: 'GET', url: '/acquisition/meta/director', headers: H() });
+    expect(r.statusCode).toBe(200);
+    const d = r.json().datos as { inteligencia: { overview: string; facts: unknown[]; signals: unknown[]; recommendations: unknown[]; priorities: unknown[] } };
+    expect(typeof d.inteligencia.overview).toBe('string');
+    expect(d.inteligencia.facts.length).toBeGreaterThan(0);
+    expect(JSON.stringify(d.inteligencia).includes('info:no-roi')).toBe(true); // frontera de capacidad declarada
+    const s = JSON.stringify(r.json()).toLowerCase();
+    for (const p of ['synth_long_token', 'access_token', 'secretref', 'file:', 'graph.facebook.com', 'paging']) expect(s.includes(p)).toBe(false);
+
+    // Histórico: append-only + idempotente (segundo sync mismo instante no duplica).
+    const repo = crearMetaSyncRepo(pool);
+    const h1 = await repo.historial('org-a', 'meta-org-a');
+    expect(h1.length).toBe(8);
+    await a.inject({ method: 'POST', url: '/acquisition/meta/sync', headers: H() }); // fresh ⇒ no reescribe/duplica
+    expect((await repo.historial('org-a', 'meta-org-a')).length).toBe(8);
   });
 });
