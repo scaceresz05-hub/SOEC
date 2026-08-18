@@ -128,9 +128,11 @@ describe('mapa-google-ads', () => {
     expect(s!.cost).toBe(13842.571271); // costMicros/1e6 exacto
   });
 
-  it('GAQL del snapshot incluye start_date/end_date', () => {
-    expect(GAQL_CAMPANIA_SNAPSHOT).toContain('campaign.start_date');
-    expect(GAQL_CAMPANIA_SNAPSHOT).toContain('campaign.end_date');
+  it('GAQL del snapshot es all-time (sin filtro de fecha) y NO selecciona start_date/end_date (rompen la query, HTTP 400)', () => {
+    expect(GAQL_CAMPANIA_SNAPSHOT).toContain('FROM campaign');
+    expect(GAQL_CAMPANIA_SNAPSHOT).not.toContain('segments.date');
+    expect(GAQL_CAMPANIA_SNAPSHOT).not.toContain('campaign.start_date');
+    expect(GAQL_CAMPANIA_SNAPSHOT).not.toContain('campaign.end_date');
   });
 
   it('fechaLocal calcula el día en la zona de la cuenta (América/Santiago, GMT-04/-03)', () => {

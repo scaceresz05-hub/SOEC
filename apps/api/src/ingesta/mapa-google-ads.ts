@@ -70,8 +70,11 @@ export function gaqlTerminos(desde: string, hasta: string): string {
  * aunque no haya actividad diaria. Permite observar el hecho real "la campaña existe, está ENABLED y aún no
  * sirve (0 impresiones)" y, ya sirviendo, el acumulado vigente. NO fabrica actividad: si el valor es 0, es 0.
  */
+// NOTA: campaign.start_date/end_date NO se seleccionan aquí — en la versión de API que usa SOEC rompen la
+// consulta all-time (HTTP 400). El período del acumulado es ALL_TIME con `from` desconocido (null), lo cual es
+// honesto: el snapshot es lifetime "as-of capturedAt", sin fabricar un inicio de campaña.
 export const GAQL_CAMPANIA_SNAPSHOT =
-  'SELECT campaign.id, campaign.name, campaign.status, campaign.start_date, campaign.end_date, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.average_cpc, metrics.ctr FROM campaign';
+  'SELECT campaign.id, campaign.name, campaign.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.average_cpc, metrics.ctr FROM campaign';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Parseo del searchStream (array de batches → results)
