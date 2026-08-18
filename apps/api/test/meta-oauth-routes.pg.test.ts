@@ -78,6 +78,29 @@ describe('meta callback · certificación (SIN Authorization, autoridad por stat
     expect(bind.json().datos.salud).toBe('HEALTHY');
   });
 
+  it('AD-ACCOUNT: /assets expone los 4 activos (incl. ad_account accessible-only) sin auto-bind', async () => {
+    const a = app();
+    const state = await start(a);
+    expect((await callback(a, `state=${state}&code=CODE`)).json().datos.estado).toBe('BINDING_PENDING');
+
+    const assets = (await a.inject({ method: 'GET', url: '/acquisition/meta/assets', headers: H() })).json().datos
+      .candidatos as { assetType: string; externalId: string; ownerBusinessId?: string | null; accessMode?: string; bindingEligible: boolean }[];
+    // Cuatro activos canónicos: business, page, instagram y la ad account accesible.
+    expect(assets.map((c) => c.externalId).sort()).toEqual(
+      ['1037025024374407', '1066708446525633', '17841432883225770', '934186066270538'].sort(),
+    );
+    const ad = assets.find((c) => c.assetType === 'adAccount')!;
+    expect(ad.externalId).toBe('1037025024374407');
+    expect(ad.ownerBusinessId).toBeNull(); // accessible-only: NO se falsea con el Business
+    expect(ad.accessMode).toBe('USER_ACCESSIBLE');
+    expect(ad.bindingEligible).toBe(true);
+
+    // No auto-bind: la conexión sigue BINDING_PENDING con bindings vacíos hasta confirmación humana.
+    const conn = (await a.inject({ method: 'GET', url: '/acquisition/meta/connection', headers: H() })).json().datos;
+    expect(conn.estado).toBe('BINDING_PENDING');
+    expect(conn.bindings).toHaveLength(0);
+  });
+
   it('B/C/E/F callback: sin state 400 · forged NOT_CONNECTED · replay NOT_CONNECTED', async () => {
     const a = app();
     expect((await callback(a, 'code=C')).statusCode).toBe(400);
