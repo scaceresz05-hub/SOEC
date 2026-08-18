@@ -451,3 +451,17 @@ describe('meta director inteligencia + histórico (E2E)', () => {
     expect((await repo.historial('org-a', 'meta-org-a')).length).toBe(8);
   });
 });
+
+describe('meta callback · redirect a web (UX comercial)', () => {
+  it('con webBaseUrl ⇒ 302 a la web con estado, sin token/code/state en la URL', async () => {
+    const a = app();
+    const st = await start(a);
+    const w = Fastify();
+    registerMetaCallbackPublico(w, { composicion: comp(), ahora: () => AHORA, webBaseUrl: 'https://web.test/' });
+    const r = await w.inject({ method: 'GET', url: `/acquisition/meta/oauth/callback?state=${st}&code=CODE` });
+    expect(r.statusCode).toBe(302);
+    expect(r.headers.location).toBe('https://web.test/meta?estado=BINDING_PENDING');
+    expect(r.headers.location).not.toContain('CODE');
+    expect(r.headers.location).not.toContain(st);
+  });
+});

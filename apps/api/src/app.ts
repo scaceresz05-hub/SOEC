@@ -461,7 +461,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // llega sin sesión ni Authorization. La autoridad viene del `state` persistido (org+actor, one-time, TTL,
     // consumo atómico); no acepta org/actor externos, no expone token y jamás deja CONNECTED (binding humano
     // posterior y autenticado). Fail-closed si no hay composición.
-    registerMetaCallbackPublico(app, { composicion: composicionMeta });
+    registerMetaCallbackPublico(app, { composicion: composicionMeta, webBaseUrl: (deps.allowedOrigins ?? [])[0] });
 
     // CUTOVER (Macrobloque 1, incremento final): en condiciones normales (sin demo legacy), la
     // superficie vertical se registra DENTRO del gateway autenticado ⇒ sin sesión 401, sin
