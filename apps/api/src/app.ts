@@ -148,6 +148,7 @@ import { registerPlataformaRoutes } from './plataforma-routes';
 import { registerAcquisitionRoutes } from './acquisition-routes';
 import { registerMetaOAuthAutenticadas, registerMetaCallbackPublico } from './acquisition/meta-oauth-routes';
 import { registerAccionRoutes } from './accion/accion-routes';
+import { registerCampanaRoutes } from './campana/campana-routes';
 import { crearComposicionMetaOAuth } from './acquisition/meta-runtime';
 import { registrarProteccionCsrf } from './csrf';
 
@@ -417,6 +418,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // PÚBLICO (fuera del gateway), porque el redirect de Meta llega sin sesión y se autentica por el state.
     registerMetaOAuthAutenticadas(target, { composicion: composicionMeta });
     registerAccionRoutes(target, deps.pool); // Safe Action Plane (V2-A): mandatos + budget guard + ledger
+    registerCampanaRoutes(target, deps.pool); // V2-B/C: campaña + autonomía en dry-run/shadow (dormante)
 
     target.post('/events', async (req, reply) => {
       const ctx = contextFrom(req);
