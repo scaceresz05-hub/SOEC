@@ -2,6 +2,7 @@ import { makePool, PgEventStore, runMigrations } from '@soec/event-store/pg';
 import { identityMigrations } from '@soec/identity/pg';
 import { metaOAuthMigrations } from './acquisition/meta-oauth-pg';
 import { metaSyncMigrations } from './acquisition/meta-sync-pg';
+import { accionMigrations } from './accion/accion-pg';
 import { crearComposicionMetaOAuth } from './acquisition/meta-runtime';
 import { iniciarMetaScheduler, INTERVALO_SCHEDULER_MS } from './acquisition/meta-scheduler';
 import { ejecutarBootstrap } from '@soec/identity';
@@ -56,6 +57,7 @@ async function main(): Promise<void> {
   await runMigrations(pool, identityMigrations); // asegura el esquema de identidad
   await runMigrations(pool, metaOAuthMigrations); // esquema de persistencia OAuth Meta (Parte 2)
   await runMigrations(pool, metaSyncMigrations); // esquema de sync read-only + observabilidad Meta
+  await runMigrations(pool, accionMigrations); // Safe Action Plane (V2-A): mandatos + action ledger
   const boot = await ejecutarBootstrap(pool);
   if (boot.ejecutado) console.log(JSON.stringify({ bootstrap: boot }));
 
