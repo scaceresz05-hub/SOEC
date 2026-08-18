@@ -59,6 +59,22 @@ export const metaSyncMigrations: ReadonlyArray<Migration> = [
       create index if not exists meta_sync_schedule_due_idx on meta_sync_schedule (next_eligible_sync_at);
     `,
   },
+  {
+    id: '0004_meta_sync_snapshot_history',
+    sql: `
+      create table if not exists meta_sync_snapshot_history (
+        organization_id text not null,
+        connection_id   text not null,
+        capability      text not null,
+        external_id     text not null,
+        observed_at     timestamptz not null,
+        source          text not null default 'meta',
+        resumen         jsonb not null,
+        primary key (organization_id, connection_id, capability, external_id, observed_at)
+      );
+      create index if not exists meta_sync_hist_idx on meta_sync_snapshot_history (organization_id, connection_id, capability, observed_at desc);
+    `,
+  },
 ];
 
 export class PgMetaSyncRepo implements MetaSyncRepo {
@@ -72,6 +88,39 @@ export class PgMetaSyncRepo implements MetaSyncRepo {
        do update set observed_at = excluded.observed_at, source = excluded.source, resumen = excluded.resumen`,
       [s.organizationId, s.connectionId, s.capability, s.externalId, s.period, s.observedAt, s.source, JSON.stringify(s.resumen)],
     );
+  }
+
+  async appendHistory(s: SnapshotSync): Promise<void> {
+    // Idempotente por (org, conn, capability, externalId, observedAt): misma captura lógica no duplica.
+    await this.pool.query(
+      `insert into meta_sync_snapshot_history (organization_id, connection_id, capability, external_id, observed_at, source, resumen)
+       values ($1,$2,$3,$4,$5,$6,$7)
+       on conflict (organization_id, connection_id, capability, external_id, observed_at) do nothing`,
+      [s.organizationId, s.connectionId, s.capability, s.externalId, s.observedAt, s.source, JSON.stringify(s.resumen)],
+    );
+    // Retención V1: 90 días por (org, conn, capability). Barato y sin cron.
+    await this.pool.query(
+      `delete from meta_sync_snapshot_history
+        where organization_id=$1 and connection_id=$2 and capability=$3 and observed_at < ($4::timestamptz - interval '90 days')`,
+      [s.organizationId, s.connectionId, s.capability, s.observedAt],
+    );
+  }
+
+  async historial(organizationId: string, connectionId: string): Promise<readonly SnapshotSync[]> {
+    const r = await this.pool.query(
+      'select * from meta_sync_snapshot_history where organization_id = $1 and connection_id = $2 order by observed_at desc',
+      [organizationId, connectionId],
+    );
+    return r.rows.map((row: { capability: string; external_id: string; observed_at: Date; source: string; resumen: unknown }) => ({
+      organizationId,
+      connectionId,
+      capability: row.capability as CapacidadSync,
+      externalId: row.external_id,
+      period: 'CURRENT',
+      observedAt: row.observed_at.toISOString(),
+      source: row.source as 'meta',
+      resumen: row.resumen as ResumenNormalizado,
+    }));
   }
 
   async guardarEstado(e: EstadoSync): Promise<void> {

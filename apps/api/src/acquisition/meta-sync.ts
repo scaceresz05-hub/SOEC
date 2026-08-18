@@ -82,9 +82,13 @@ export interface EstadoSync {
 
 export interface MetaSyncRepo {
   upsertSnapshot(s: SnapshotSync): Promise<void>;
+  /** Append-only para evolución temporal. Idempotente por (org, conn, capability, externalId, observedAt). */
+  appendHistory(s: SnapshotSync): Promise<void>;
   guardarEstado(e: EstadoSync): Promise<void>;
   obtenerEstado(organizationId: string, connectionId: string): Promise<EstadoSync | null>;
   listarSnapshots(organizationId: string, connectionId: string): Promise<readonly SnapshotSync[]>;
+  /** Histórico ordenado por observedAt DESC (para comparación de ventanas). */
+  historial(organizationId: string, connectionId: string): Promise<readonly SnapshotSync[]>;
 }
 
 // --- Capacidades aplicables por binding ----------------------------------------------------------
@@ -236,7 +240,9 @@ export async function ejecutarSync(deps: DepsSync, organizationId: string, conne
         try {
           const json = await leerCapacidad(g, p.capability, p.externalId);
           const resumen = normalizarCapacidad(p.capability, json);
-          await deps.repo.upsertSnapshot({ organizationId, connectionId, capability: p.capability, externalId: p.externalId, period: 'CURRENT', observedAt: ahora, source: 'meta', resumen });
+          const snap: SnapshotSync = { organizationId, connectionId, capability: p.capability, externalId: p.externalId, period: 'CURRENT', observedAt: ahora, source: 'meta', resumen };
+          await deps.repo.upsertSnapshot(snap);
+          await deps.repo.appendHistory(snap); // evolución temporal (append-only, idempotente por observedAt)
           resultados.set(p.capability, { capability: p.capability, estado: 'OK', freshness: 'FRESH', observedAt: ahora });
         } catch (e) {
           // Fail parcial: NO se sobrescribe el snapshot previo (se preserva el último bueno).
@@ -277,11 +283,18 @@ export async function ejecutarSync(deps: DepsSync, organizationId: string, conne
 export class InMemoryMetaSyncRepo implements MetaSyncRepo {
   private readonly snaps = new Map<string, SnapshotSync>();
   private readonly estados = new Map<string, EstadoSync>();
+  private readonly hist = new Map<string, SnapshotSync>();
   private clave(s: Pick<SnapshotSync, 'organizationId' | 'connectionId' | 'capability' | 'externalId' | 'period'>): string {
     return `${s.organizationId}:${s.connectionId}:${s.capability}:${s.externalId}:${s.period}`;
   }
   async upsertSnapshot(s: SnapshotSync): Promise<void> {
     this.snaps.set(this.clave(s), s);
+  }
+  async appendHistory(s: SnapshotSync): Promise<void> {
+    this.hist.set(`${s.organizationId}:${s.connectionId}:${s.capability}:${s.externalId}:${s.observedAt}`, s);
+  }
+  async historial(org: string, connectionId: string): Promise<readonly SnapshotSync[]> {
+    return [...this.hist.values()].filter((s) => s.organizationId === org && s.connectionId === connectionId).sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt));
   }
   async guardarEstado(e: EstadoSync): Promise<void> {
     this.estados.set(`${e.organizationId}:${e.connectionId}`, e);

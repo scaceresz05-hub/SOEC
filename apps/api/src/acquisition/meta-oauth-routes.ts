@@ -20,6 +20,7 @@ import type { TipoBindingMeta } from './meta-onboarding';
 import { MetaAutenticacionError, MetaPermisoError } from './meta-http';
 import { ejecutarSync } from './meta-sync';
 import { construirVistaDirector } from './meta-director';
+import { construirConocimiento } from './meta-knowledge';
 
 export interface DepsMetaRoutes {
   readonly composicion: ComposicionMetaOAuth | null;
@@ -327,8 +328,11 @@ export function registerMetaOAuthAutenticadas(app: FastifyInstance, deps: DepsMe
     const connectionId = `meta-${a.org}`;
     const reg = await comp.connRepo.obtener(a.org, connectionId);
     if (reg === null) return reply.code(409).send({ ok: false, error: 'NOT_CONNECTED' });
-    const vista = await construirVistaDirector(comp.syncRepo, a.org, connectionId, reg.conexion.bindings, ahora());
-    return reply.send({ ok: true, datos: vista });
+    const ahoraIso = ahora();
+    const vista = await construirVistaDirector(comp.syncRepo, a.org, connectionId, reg.conexion.bindings, ahoraIso);
+    const historial = await comp.syncRepo.historial(a.org, connectionId);
+    const inteligencia = construirConocimiento(vista, historial, ahoraIso);
+    return reply.send({ ok: true, datos: { ...vista, inteligencia } });
   });
 
   /**
