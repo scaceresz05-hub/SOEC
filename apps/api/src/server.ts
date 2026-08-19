@@ -8,6 +8,10 @@ import { metaWriteMigrations } from './campana/meta-write-pg';
 import { dataDeletionMigrations } from './acquisition/meta-data-deletion';
 import { crearComposicionMetaOAuth } from './acquisition/meta-runtime';
 import { iniciarMetaScheduler, INTERVALO_SCHEDULER_MS } from './acquisition/meta-scheduler';
+import { randomUUID } from 'node:crypto';
+import { runGoogleAdsMigrationsSeguro, PgGoogleAdsSyncLease } from './acquisition/google-ads-oauth-pg';
+import { crearComposicionGoogleAdsOAuth } from './acquisition/google-ads-runtime-oauth';
+import { GoogleAdsScheduler } from './ingesta/google-ads-scheduler';
 import { ejecutarBootstrap } from '@soec/identity';
 import { DeterministicIntelligenceProvider } from '@soec/intelligence';
 import { buildApp } from './app';
@@ -64,6 +68,7 @@ async function main(): Promise<void> {
   await runMigrations(pool, autonomiaMigrations); // V2-C: shadow runs (autonomía en sombra)
   await runMigrations(pool, metaWriteMigrations); // V2 pre-real: reconciliación del write path (dormante)
   await runMigrations(pool, dataDeletionMigrations); // Meta data deletion callback (App Review)
+  await runGoogleAdsMigrationsSeguro(pool); // OAuth Google Ads multi-tenant (google_ads_*) bajo advisory lock (boot concurrente seguro)
   const boot = await ejecutarBootstrap(pool);
   if (boot.ejecutado) console.log(JSON.stringify({ bootstrap: boot }));
 
@@ -91,6 +96,29 @@ async function main(): Promise<void> {
     } else {
       console.log(JSON.stringify({ metaScheduler: 'idle_no_meta_config' }));
     }
+  }
+
+  // Scheduler READ-ONLY multi-tenant de Google Ads. DORMIDO por defecto: sólo agenda si
+  // GOOGLE_ADS_SCHEDULER_ENABLED=true (se activa recién tras la certificación + gate humano). In-proceso
+  // (no Windows Task); aísla fallos por tenant. Sólo corre si Google Ads está configurado (composición != null).
+  const habilitadoGoogleAds = process.env.GOOGLE_ADS_SCHEDULER_ENABLED === 'true';
+  const compGoogleAds = crearComposicionGoogleAdsOAuth(pool, process.env);
+  if (compGoogleAds !== null) {
+    const scheduler = new GoogleAdsScheduler({
+      store: new PgEventStore(pool),
+      env: process.env,
+      comp: compGoogleAds,
+      connRepo: compGoogleAds.connRepo,
+      lease: new PgGoogleAdsSyncLease(pool), // exclusión distribuida: dos réplicas no sincronizan la misma conexión
+      holder: `${process.env.RAILWAY_REPLICA_ID ?? 'local'}:${randomUUID()}`,
+      habilitado: habilitadoGoogleAds,
+      ahora: () => new Date().toISOString(),
+      log: (evento) => console.log(JSON.stringify({ googleAdsScheduler: evento })),
+    });
+    const { agendado } = scheduler.iniciar();
+    console.log(JSON.stringify({ googleAdsScheduler: agendado ? 'started' : 'dormant_disabled' }));
+  } else {
+    console.log(JSON.stringify({ googleAdsScheduler: 'idle_no_google_ads_config' }));
   }
 }
 
