@@ -33,10 +33,20 @@ In-proceso (`GoogleAdsScheduler`, `setInterval`, `.unref()`), NO Windows Task. A
 
 ## Gate humano (acciones externas, en orden)
 
-1. **Google Cloud Console** (OAuth client existente):
-   - Authorized redirect URI (producción): `https://<soec-api-prod>/acquisition/google-ads/oauth/callback`
-   - OAuth consent screen: scope `https://www.googleapis.com/auth/adwords`; estado de publicación correcto.
-   - Developer token con acceso a las cuentas objetivo (nivel correcto en el MCC).
+1. **Google Cloud Console** — proyecto "SOEC Marketing Intelligence":
+   - **CORRECCIÓN (verificado 2026-08):** el OAuth client existente `961879980086-…` es de tipo **Escritorio
+     (Desktop)** → NO admite redirect URI web (sólo loopback). Para el callback productivo hay que **crear un
+     OAuth client NUEVO de tipo "Aplicación web"** (conservando el Desktop para el flujo local; el
+     `developer_token` es independiente del cliente OAuth).
+   - Authorized redirect URI (en el cliente Web nuevo):
+     `https://soec-api-production.up.railway.app/acquisition/google-ads/oauth/callback`
+   - OAuth consent screen: declarar el scope `https://www.googleapis.com/auth/adwords` (hoy la lista está vacía).
+   - **Publicación:** hoy = "Prueba" (Testing) / Externos / 1 usuario. En Testing, Google **caduca los refresh
+     tokens a los 7 días** y limita a 100 usuarios ⇒ inviable para un conector multi-tenant desatendido. Para
+     tokens durables hay que pasar a **"En producción" (Published)**, lo que para un scope sensible como
+     `adwords` con usuarios externos normalmente exige la **verificación de la app por Google** (semanas,
+     proceso externo). Ésta es la restricción de fondo, no un detalle.
+   - Developer token con acceso a las cuentas objetivo (nivel correcto en el MCC). Google Ads API ya habilitada.
 2. **Railway → soec-api** (variables app-level; KMS ya presente):
    - `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_DEVELOPER_TOKEN`,
      `GOOGLE_ADS_OAUTH_REDIRECT_URI` (= exactamente la URI del punto 1).
