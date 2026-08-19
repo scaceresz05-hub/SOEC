@@ -11,17 +11,12 @@ const GET_PATHS = new Set(['connection']);
 const POST_PATHS = new Set(['oauth/start', 'accounts', 'select-account', 'refresh', 'disconnect']);
 
 function cabecerasDe(req: Request): Record<string, string> {
-  const h: Record<string, string> = { 'content-type': 'application/json' };
+  // Reenviar la COOKIE de sesión: el gateway autenticado la exige (si no, 401 NO_AUTENTICADO → la UI de
+  // conexión queda en "cargando…"). La cabecera de organización no autoriza por sí sola; el gateway la
+  // valida contra la membresía de la sesión e inyecta permisos/scope reales. Mismo patrón que /api/backend.
+  const h: Record<string, string> = { 'content-type': 'application/json', cookie: req.headers.get('cookie') ?? '' };
   const slug = req.headers.get('x-organization-slug') ?? req.headers.get('x-organization-id');
-  if (slug) {
-    h['x-organization-slug'] = slug;
-    h['x-organization-id'] = slug;
-    h['x-actor-id'] = req.headers.get('x-actor-id') ?? 'panel-web';
-    h['x-scope'] = 'events:read,events:append';
-    // Permisos de gestión del negocio (conectar/seleccionar/desconectar). En prod el gateway los
-    // sobreescribe con los del rol autenticado; aquí es el valor de desarrollo.
-    h['x-permissions'] = req.headers.get('x-permissions') ?? 'business.manage';
-  }
+  if (slug) h['x-organization-slug'] = slug;
   return h;
 }
 

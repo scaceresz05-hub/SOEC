@@ -109,9 +109,11 @@ export class GoogleAdsScheduler {
     if (!this.deps.habilitado) return { agendado: false };
     if (this.timer !== null) return { agendado: true };
     const intervalo = this.deps.intervaloMs ?? 3 * 60 * 60 * 1000;
-    this.timer = setInterval(() => {
+    const correr = (): void => {
       void correrTodasLasConexiones(this.deps).catch((e) => this.deps.log?.({ scheduler: 'google-ads', error: e instanceof Error ? e.message : 'error' }));
-    }, intervalo);
+    };
+    correr(); // corrida INICIAL inmediata: setInterval no dispara hasta pasado el intervalo (antes no había 1ª corrida observable)
+    this.timer = setInterval(correr, intervalo);
     if (typeof this.timer.unref === 'function') this.timer.unref();
     return { agendado: true };
   }
