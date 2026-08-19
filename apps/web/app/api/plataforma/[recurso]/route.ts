@@ -11,14 +11,12 @@ const GET_RECURSOS = new Set([
 
 /** Reenvía la organización declarada por el navegador. Sin organización no hay negocio: hay rechazo. */
 function cabecerasDe(req: Request): Record<string, string> {
-  const h: Record<string, string> = { 'content-type': 'application/json' };
+  // Reenviar la COOKIE de sesión es imprescindible: el gateway autenticado exige la sesión (si no, 401
+  // NO_AUTENTICADO). La cabecera de organización por sí sola no autoriza; el gateway la valida contra la
+  // membresía de la sesión. Sin la cookie, /plataforma devolvía 401 y el panel quedaba con negocio=null.
+  const h: Record<string, string> = { 'content-type': 'application/json', cookie: req.headers.get('cookie') ?? '' };
   const slug = req.headers.get('x-organization-slug') ?? req.headers.get('x-organization-id');
-  if (slug) {
-    h['x-organization-slug'] = slug;
-    h['x-organization-id'] = slug;
-    h['x-actor-id'] = req.headers.get('x-actor-id') ?? 'panel-web';
-    h['x-scope'] = 'events:read';
-  }
+  if (slug) h['x-organization-slug'] = slug;
   return h;
 }
 
