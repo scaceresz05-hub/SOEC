@@ -16,5 +16,9 @@ export function middleware(req: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ['/select-organization/:path*', '/settings/:path*', '/organizaciones/:path*'],
+  // Punto de entrada único: TODA ruta de aplicación exige sesión (sin sesión → /login), salvo las
+  // superficies PÚBLICAS por diseño: /login, /legal/*, /soporte, /eliminacion-datos/* (callback Meta),
+  // el proxy /api/*, y los assets de Next. Así el usuario entra por la raíz y es llevado al flujo correcto
+  // sin conocer rutas técnicas. La API sigue siendo la autoridad final (401 sin sesión válida).
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|login|legal|soporte|eliminacion-datos).*)'],
 };

@@ -39,7 +39,7 @@ export default function SelectOrganizationPage() {
 
   function entrar(slug: string): void {
     fijarOrgActiva(slug);
-    router.push('/director');
+    router.push('/negocios'); // inicio/resumen unificado del negocio (mismo destino que "Entrar" de la home)
   }
 
   async function crear(e: React.FormEvent) {
