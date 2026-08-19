@@ -1,19 +1,28 @@
 /**
- * Estado de Google Ads separado en CONEXIÓN (registro de la fuente) vs DATOS (event-store). Una sola fuente
- * de verdad para el copy de /negocios (Marketing/Inicio/Objetivos/Por qué), coherente con Preparación.
- * "Conectado sin datos" NUNCA se muestra como "no conectado". No se afirma actividad sobre datos inexistentes.
+ * Estado de Google Ads con VERDAD REAL, no la declaración estática del registry.
+ *
+ * El registry sólo representa CAPACIDAD (proveedor soportado, modo READ_ONLY). La CONEXIÓN real se deriva de
+ * evidencia real de credencial/autorización — `googleAdsConfigured` del panel (source + recurso + credenciales
+ * app-level presentes). Sin OAuth productivo / credenciales ⇒ NOT_CONNECTED, aunque el registry diga
+ * CONNECTED_READ_ONLY. "Capacidad soportada" ≠ "conexión establecida".
+ *
+ * Los eventos del sitio (medición first-party) son una capacidad INDEPENDIENTE de Google Ads: se evalúan por
+ * separado (`midiendoContactos`) y no se ven afectados por el estado de Google Ads.
  */
 
 export interface EstadoAds {
-  /** La fuente está conectada/autorizada (según el registro), independiente de si hay métricas. */
+  /** Conexión REAL (hay credencial/autorización productiva), NO la mera declaración del registry. */
   readonly conectado: boolean;
   /** Hay datos reales de campañas en el event-store. */
   readonly conDatos: boolean;
 }
 
-/** Deriva el estado desde el `estado` de la fuente (registro) y si el panel de ads está vacío (datos). */
-export function estadoAds(estadoFuente: string | undefined, adsVacio: boolean): EstadoAds {
-  return { conectado: estadoFuente === 'CONNECTED_READ_ONLY', conDatos: !adsVacio };
+/**
+ * Deriva el estado desde la EVIDENCIA REAL de conexión (`googleAdsConfigured`: hay source+recurso+credenciales)
+ * y si el panel de ads está vacío (datos). El `estado` del registry NO es entrada: no implica conexión.
+ */
+export function estadoAds(googleAdsConfigured: boolean | undefined, adsVacio: boolean): EstadoAds {
+  return { conectado: googleAdsConfigured === true, conDatos: !adsVacio };
 }
 
 /** Copy honesto para Marketing/Inicio. 'FRESH' ⇒ hay datos: mostrar métricas reales en su lugar. */
@@ -23,15 +32,23 @@ export function copyConexionAds(e: EstadoAds): string {
   return 'FRESH';
 }
 
-/** Línea de "SOEC está haciendo" en Objetivos: sólo afirma "observando" si conectado Y con datos. */
+/** Línea de "SOEC está haciendo" en Objetivos: si NO está conectado, no afirma ninguna actividad de Google Ads. */
 export function lineaObjetivoAds(e: EstadoAds): { readonly t: string; readonly ok: boolean } {
   if (e.conectado && e.conDatos) return { t: 'Observando tus anuncios de Google Ads', ok: true };
   if (e.conectado) return { t: 'Google Ads conectado; esperando datos de campaña', ok: false };
   return { t: 'Google Ads todavía no está conectado', ok: false };
 }
 
-/** Copy de "Por qué" cuando NO hay términos de búsqueda: distingue no-conectado de conectado-sin-datos. */
+/** Copy de "Por qué" cuando NO hay términos: distingue no-conectado de conectado-sin-datos. */
 export function copyPorqueSinTerminos(e: EstadoAds): string {
-  if (!e.conectado) return 'Google Ads aún no está conectado, así que todavía no hay búsquedas de dónde leer una conclusión.';
+  if (!e.conectado) return 'Google Ads aún no está conectado. Cuando exista una conexión real y haya datos, SOEC podrá explicar qué búsquedas están generando resultados.';
   return 'Google Ads está conectado, pero aún no hay datos de búsquedas disponibles para explicar una conclusión.';
+}
+
+/**
+ * ¿Está la medición de contactos del sitio (first-party) realmente activa? Independiente de Google Ads:
+ * se demuestra por la presencia de datos de embudo comercial (no por el registry ni por GA4).
+ */
+export function midiendoContactos(growthComercial: Record<string, number> | undefined): boolean {
+  return !!growthComercial && Object.keys(growthComercial).length > 0;
 }

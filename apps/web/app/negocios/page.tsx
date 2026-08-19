@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { cabecerasOrg, ETIQUETA_ESTADO_FUENTE, orgActiva } from '../../lib/org-activa';
-import { estadoAds, lineaObjetivoAds } from '../../lib/ads-estado';
+import { estadoAds, lineaObjetivoAds, midiendoContactos } from '../../lib/ads-estado';
 import {
   Badge, Callout, clp, colorDeNegocio, DirectorCard, EmptyState, Funnel, iniciales, Metric, num,
   PriorityList, SourceRow, TechDetails, TrendBars, valor, type Desconocible, type Tono,
@@ -231,11 +231,10 @@ export default function Panel(): React.ReactElement {
     ? (fundamentos?.motivos ?? []).slice(0, 4).map((m) => ({ t: PRIORIDAD_TITULO[m.codigo] ?? m.explicacion, s: m.resuelveCon }))
     : saasPrioridades(panel, plan);
 
-  // Estado de Google Ads separado: CONEXIÓN (estado de la fuente en el registro — lo que muestra Preparación)
-  // vs DATOS (hay cifras reales en el event-store). "Conectado sin datos" ≠ "no conectado". Una sola verdad
-  // reutilizada en Marketing/Inicio/Objetivos/Por qué para no contradecir a Preparación.
-  const adsFuente = negocio?.fuentes?.find((f) => f.proveedor === 'google-ads' || f.tipo === 'ADS');
-  const eAds = estadoAds(adsFuente?.estado, adsVacio(panel));
+  // Estado de Google Ads con VERDAD REAL: la CONEXIÓN se deriva de evidencia real de credencial/autorización
+  // (`panel.googleAdsConfigured` = source+recurso+credenciales presentes), NO de la declaración estática del
+  // registry. Sin OAuth productivo ⇒ NOT_CONNECTED aunque el registry diga CONNECTED_READ_ONLY. DATOS = event-store.
+  const eAds = estadoAds(panel?.googleAdsConfigured, adsVacio(panel));
   const adsConectado = eAds.conectado;
   const adsConDatos = eAds.conDatos;
 
@@ -292,7 +291,7 @@ export default function Panel(): React.ReactElement {
                 <Callout tono="info" ico="🔌">
                   {adsConectado
                     ? <><b>{FUENTE_ADS} conectado</b>, pero todavía no hay datos de campañas disponibles. No mostramos cifras que no provengan de una fuente real.</>
-                    : <><b>{FUENTE_ADS} todavía no está conectado</b> para este negocio. No mostramos cifras que no provengan de una fuente real.</>}
+                    : <><b>{FUENTE_ADS} todavía no está conectado en producción.</b> No mostramos cifras que no provengan de una fuente real.</>}
                 </Callout>
               ) : (
                 <>
@@ -535,7 +534,7 @@ export default function Panel(): React.ReactElement {
                     // Coherencia: cada afirmación deriva del estado REAL, separando CONEXIÓN de DATOS. Sólo se
                     // afirma "observando anuncios / revisando búsquedas" si Google Ads está conectado Y con datos.
                     const observandoAds = adsConectado && adsConDatos;
-                    const midiendoWeb = !!panel?.growthFunnel?.comercial && Object.keys(panel.growthFunnel.comercial).length > 0;
+                    const midiendoWeb = midiendoContactos(panel?.growthFunnel?.comercial);
                     const lineaAds = lineaObjetivoAds(eAds);
                     const items: { t: string; ok: boolean }[] = [
                       lineaAds,
@@ -634,8 +633,16 @@ export default function Panel(): React.ReactElement {
           <Callout tono="info" ico="ℹ">Una fuente «no conectada» no es un error ni un cero: es algo que todavía no configuraste. A medida que conectes fuentes, SOEC podrá decir más.</Callout>
           <div className="card" style={{ marginTop: 12 }}>
             {negocio.fuentes.map((f) => {
-              const e = ETIQUETA_ESTADO_FUENTE[f.estado] ?? { texto: f.estado, cls: 'mut' };
-              return <SourceRow key={f.sourceId} ico={ICO_FUENTE[f.tipo] ?? '◆'} nombre={TIPO_FUENTE[f.tipo] ?? f.tipo} estado={{ texto: e.texto, tono: e.cls as Tono }} falta={f.faltantes.length > 0 ? f.faltantes.join(' · ') : undefined} />;
+              // VERDAD REAL para Google Ads: el registry sólo declara la CAPACIDAD (soportada, modo lectura);
+              // la CONEXIÓN se deriva de la evidencia real (credenciales). Sin OAuth productivo ⇒ "No conectado".
+              const esAds = f.proveedor === 'google-ads' || f.tipo === 'ADS';
+              const e = esAds && !adsConectado
+                ? { texto: 'No conectado', cls: 'mut' }
+                : (ETIQUETA_ESTADO_FUENTE[f.estado] ?? { texto: f.estado, cls: 'mut' });
+              const falta = esAds && !adsConectado
+                ? 'Integración disponible en modo lectura; conexión productiva pendiente.'
+                : (f.faltantes.length > 0 ? f.faltantes.join(' · ') : undefined);
+              return <SourceRow key={f.sourceId} ico={ICO_FUENTE[f.tipo] ?? '◆'} nombre={TIPO_FUENTE[f.tipo] ?? f.tipo} estado={{ texto: e.texto, tono: e.cls as Tono }} falta={falta} />;
             })}
           </div>
           {negocio.datosHumanosPendientes.length > 0 && (
