@@ -687,7 +687,7 @@ function saasPrioridades(panel: Panel | null, plan: Plan | null): { t: string; s
   const clicks = panel?.ads?.clicks ?? 0;
   if (clicks > 0 && leads === 0) out.push({ t: 'Revisar el mensaje del anuncio y la página de destino', s: 'llega tráfico pero todavía no se convierte en clientes' });
   if (plan?.oportunidadesTacticas && plan.oportunidadesTacticas.length > 0) out.push({ t: 'Revisar los anuncios de las búsquedas que no reciben clic', s: `por ejemplo «${plan.oportunidadesTacticas[0]!.termino}»` });
-  out.push({ t: 'Medir las conversiones del sitio', s: 'para saber qué anuncios traen clientes reales, no solo visitas' });
+  out.push({ t: 'Seguir midiendo las conversiones reales del sitio', s: 'los contactos reales que deja tu sitio, no solo visitas' });
   return out;
 }
 
@@ -698,7 +698,7 @@ function frase(esEcom: boolean, ventas: Ventas | null, panel: Panel | null, pued
     return puedeRecomendar ? `${base} Con esto ya puedo ayudarte a decidir dónde invertir.` : `${base} Todavía no puedo recomendarte publicidad porque no conozco tu margen ni tengo medición web instalada.`;
   }
   const a = panel?.ads;
-  if (adsVacio(panel)) return `Aún no tengo datos de anuncios (${FUENTE_ADS} sin datos o no conectado). No invento cifras: observo tus contactos reales y te aviso cuando haya con qué decidir.`;
+  if (adsVacio(panel)) return `${FUENTE_ADS} todavía no está conectado en producción. No invento cifras: observo tus contactos reales del sitio y te aviso cuando haya información suficiente para decidir.`;
   if (a && (a.clicks ?? 0) > 0 && (panel?.growthFunnel?.comercial?.lead_created ?? 0) === 0)
     return `Tu campaña en ${FUENTE_ADS} está consiguiendo clics (${num(a.clicks)} de ${num(a.impressions)} personas que vieron el anuncio), pero todavía no genera contactos. No recomiendo aumentar el gasto hasta entender por qué.`;
   return `Estoy observando tu campaña en ${FUENTE_ADS}: ${num(a?.impressions ?? null)} impresiones y ${num(a?.clicks ?? null)} clics (histórico de la campaña). Reúno evidencia antes de proponer cambios.`;
