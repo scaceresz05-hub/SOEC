@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { cabecerasOrg, ETIQUETA_ESTADO_FUENTE, orgActiva } from '../../lib/org-activa';
+import { estadoAds, lineaObjetivoAds } from '../../lib/ads-estado';
 import {
   Badge, Callout, clp, colorDeNegocio, DirectorCard, EmptyState, Funnel, iniciales, Metric, num,
   PriorityList, SourceRow, TechDetails, TrendBars, valor, type Desconocible, type Tono,
@@ -230,6 +231,14 @@ export default function Panel(): React.ReactElement {
     ? (fundamentos?.motivos ?? []).slice(0, 4).map((m) => ({ t: PRIORIDAD_TITULO[m.codigo] ?? m.explicacion, s: m.resuelveCon }))
     : saasPrioridades(panel, plan);
 
+  // Estado de Google Ads separado: CONEXIÓN (estado de la fuente en el registro — lo que muestra Preparación)
+  // vs DATOS (hay cifras reales en el event-store). "Conectado sin datos" ≠ "no conectado". Una sola verdad
+  // reutilizada en Marketing/Inicio/Objetivos/Por qué para no contradecir a Preparación.
+  const adsFuente = negocio?.fuentes?.find((f) => f.proveedor === 'google-ads' || f.tipo === 'ADS');
+  const eAds = estadoAds(adsFuente?.estado, adsVacio(panel));
+  const adsConectado = eAds.conectado;
+  const adsConDatos = eAds.conDatos;
+
   return (
     <div className="dash panel">
       {/* ── Header de negocio ─────────────────────────────────────────────── */}
@@ -281,7 +290,9 @@ export default function Panel(): React.ReactElement {
               <div className="section">Publicidad <span className="hint">{FUENTE_ADS} · histórico de la campaña</span></div>
               {adsVacio(panel) ? (
                 <Callout tono="info" ico="🔌">
-                  <b>{FUENTE_ADS} sin datos.</b> No hay campañas con entrega o {FUENTE_ADS} no está conectado para este negocio. No mostramos cifras que no provengan de una fuente real.
+                  {adsConectado
+                    ? <><b>{FUENTE_ADS} conectado</b>, pero todavía no hay datos de campañas disponibles. No mostramos cifras que no provengan de una fuente real.</>
+                    : <><b>{FUENTE_ADS} todavía no está conectado</b> para este negocio. No mostramos cifras que no provengan de una fuente real.</>}
                 </Callout>
               ) : (
                 <>
@@ -421,7 +432,11 @@ export default function Panel(): React.ReactElement {
           <>
             <div className="section">Marketing pagado <span className="hint">{FUENTE_ADS} · histórico de la campaña · solo lectura</span></div>
             {adsVacio(panel) ? (
-              <Callout tono="info" ico="🔌"><b>{FUENTE_ADS} sin datos.</b> No hay campañas con entrega o {FUENTE_ADS} no está conectado. Sin cifras sintéticas ni de otra fuente.</Callout>
+              <Callout tono="info" ico="🔌">
+                {adsConectado
+                  ? <><b>{FUENTE_ADS} conectado</b>, pero todavía no hay datos de campañas disponibles. Sin cifras sintéticas ni de otra fuente.</>
+                  : <><b>{FUENTE_ADS} todavía no está conectado.</b> Sin cifras sintéticas ni de otra fuente.</>}
+              </Callout>
             ) : (
             <>
             <div className="grid g-4">
@@ -452,7 +467,7 @@ export default function Panel(): React.ReactElement {
             <div className="section">Marketing</div>
             <EmptyState ico="📣" titulo="El marketing pagado todavía no está conectado" detalle="Cuando conectes Google Ads (y la medición web), aquí verás tráfico, costo y resultados de tus campañas. No hay ceros que mostrar: simplemente aún no hay de dónde leer.">
               <div className="grid g-3" style={{ marginTop: 16, textAlign: 'left' }}>
-                <SourceEmpty ico="📣" nombre="Google Ads" estado="No conectado" />
+                <SourceEmpty ico="📣" nombre="Google Ads" estado={adsConectado ? 'Conectado · sin datos aún' : 'No conectado'} />
                 <SourceEmpty ico="📊" nombre="Medición web (GA4)" estado="No configurado" />
                 {/* Google Shopping es un concepto de tienda: sólo aplica a e-commerce, no a un negocio SaaS/servicios. */}
                 {esEcom && <SourceEmpty ico="🏷" nombre="Google Shopping" estado="No conectado" />}
@@ -517,13 +532,14 @@ export default function Panel(): React.ReactElement {
                 <div className="section" style={{ margin: '14px 0 8px' }}>SOEC está haciendo</div>
                 <div className="stack">
                   {(() => {
-                    // Coherencia: cada afirmación deriva del estado REAL. No afirmar actividad sobre una fuente
-                    // que la propia UI declara no conectada/no configurada.
-                    const adsOk = !adsVacio(panel);
+                    // Coherencia: cada afirmación deriva del estado REAL, separando CONEXIÓN de DATOS. Sólo se
+                    // afirma "observando anuncios / revisando búsquedas" si Google Ads está conectado Y con datos.
+                    const observandoAds = adsConectado && adsConDatos;
                     const midiendoWeb = !!panel?.growthFunnel?.comercial && Object.keys(panel.growthFunnel.comercial).length > 0;
+                    const lineaAds = lineaObjetivoAds(eAds);
                     const items: { t: string; ok: boolean }[] = [
-                      { t: adsOk ? 'Observando tus anuncios de Google Ads' : 'Google Ads todavía no está conectado', ok: adsOk },
-                      ...(adsOk ? [{ t: 'Revisando qué búsquedas te muestran', ok: true }] : []),
+                      lineaAds,
+                      ...(observandoAds ? [{ t: 'Revisando qué búsquedas te muestran', ok: true }] : []),
                       { t: midiendoWeb ? 'Midiendo los contactos reales del sitio' : 'La medición web todavía no está configurada', ok: midiendoWeb },
                       ...(midiendoWeb ? [{ t: 'Separando las pruebas internas de los clientes reales', ok: true }] : []),
                     ];
@@ -580,18 +596,22 @@ export default function Panel(): React.ReactElement {
             <div className="card">
               {(() => {
                 const t = (panel?.searchTerms ?? []).find((x) => x.clics === 0 && x.impresiones >= 10) ?? panel?.searchTerms?.[0];
-                return t ? (
+                if (t) return (
                   <>
                     <p className="s"><b>SOEC observó:</b> la búsqueda «{t.termino}» mostró tu anuncio {t.impresiones} veces y recibió {t.clics} clics.</p>
                     <p className="s"><b>Pero:</b> sigue siendo una búsqueda relevante (está relacionada con software dental de la competencia).</p>
                     <p className="s"><b>Conclusión:</b> no la excluí. El bajo rendimiento no es lo mismo que irrelevancia. Primero conviene revisar si el mensaje del anuncio responde a esa intención.</p>
+                    {/* La regla técnica de search_terms sólo se muestra cuando REALMENTE hay términos que explicar. */}
+                    <TechDetails titulo="Ver cómo llegué a esto (detalle técnico)">
+                      regla: 0 clics + muestra suficiente ⇒ OPTIMIZAR_MENSAJE, nunca NEGATIVA salvo política de irrelevancia por-organización ·
+                      una negativa exige evidencia de irrelevancia, no solo bajo CTR · fuente: search terms reales de Google Ads (solo lectura)
+                    </TechDetails>
                   </>
-                ) : <p className="s muted">{adsVacio(panel) ? 'Google Ads todavía no está conectado, así que aún no hay búsquedas de dónde leer una conclusión.' : 'Todavía no hay suficientes búsquedas para explicar una conclusión.'}</p>;
+                );
+                return <p className="s muted">{!adsConectado
+                  ? 'Google Ads aún no está conectado, así que todavía no hay búsquedas de dónde leer una conclusión.'
+                  : 'Google Ads está conectado, pero aún no hay datos de búsquedas disponibles para explicar una conclusión.'}</p>;
               })()}
-              <TechDetails titulo="Ver cómo llegué a esto (detalle técnico)">
-                regla: 0 clics + muestra suficiente ⇒ OPTIMIZAR_MENSAJE, nunca NEGATIVA salvo política de irrelevancia por-organización ·
-                una negativa exige evidencia de irrelevancia, no solo bajo CTR · fuente: search terms reales de Google Ads (solo lectura)
-              </TechDetails>
             </div>
           ) : (
             <div className="card">
