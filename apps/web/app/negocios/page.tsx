@@ -481,6 +481,9 @@ export default function Panel(): React.ReactElement {
           <Callout tono="info" ico="ℹ">SOEC separa los <b>clientes reales</b> de las pruebas internas del sitio: aquí solo cuentan los contactos reales, no los de test.</Callout>
         </>
       )}
+      {tab === 'contactos' && !esEcom && !panel && (
+        <EmptyState ico="👥" titulo="Todavía no hay contactos para mostrar" detalle="Cuando una persona solicite una demo o deje sus datos en tu sitio, aparecerá aquí. Aún no hay contactos reales medidos." />
+      )}
 
       {/* ══════════════ OBJETIVOS ══════════════ */}
       {tab === 'objetivos' && (
@@ -513,9 +516,21 @@ export default function Panel(): React.ReactElement {
                 <p className="s"><b>Estado:</b> todavía no hay conversiones suficientes para sacar conclusiones.</p>
                 <div className="section" style={{ margin: '14px 0 8px' }}>SOEC está haciendo</div>
                 <div className="stack">
-                  {['Observando tus anuncios', 'Revisando qué búsquedas te muestran', 'Midiendo los contactos reales', 'Separando las pruebas internas de los clientes reales'].map((t) => (
-                    <div key={t} className="s"><span style={{ color: 'var(--ok)' }}>✓</span> {t}</div>
-                  ))}
+                  {(() => {
+                    // Coherencia: cada afirmación deriva del estado REAL. No afirmar actividad sobre una fuente
+                    // que la propia UI declara no conectada/no configurada.
+                    const adsOk = !adsVacio(panel);
+                    const midiendoWeb = !!panel?.growthFunnel?.comercial && Object.keys(panel.growthFunnel.comercial).length > 0;
+                    const items: { t: string; ok: boolean }[] = [
+                      { t: adsOk ? 'Observando tus anuncios de Google Ads' : 'Google Ads todavía no está conectado', ok: adsOk },
+                      ...(adsOk ? [{ t: 'Revisando qué búsquedas te muestran', ok: true }] : []),
+                      { t: midiendoWeb ? 'Midiendo los contactos reales del sitio' : 'La medición web todavía no está configurada', ok: midiendoWeb },
+                      ...(midiendoWeb ? [{ t: 'Separando las pruebas internas de los clientes reales', ok: true }] : []),
+                    ];
+                    return items.map((it) => (
+                      <div key={it.t} className="s"><span style={{ color: it.ok ? 'var(--ok)' : 'var(--mut)' }}>{it.ok ? '✓' : '○'}</span> {it.t}</div>
+                    ));
+                  })()}
                 </div>
               </div>
               <div className="card">
@@ -571,7 +586,7 @@ export default function Panel(): React.ReactElement {
                     <p className="s"><b>Pero:</b> sigue siendo una búsqueda relevante (está relacionada con software dental de la competencia).</p>
                     <p className="s"><b>Conclusión:</b> no la excluí. El bajo rendimiento no es lo mismo que irrelevancia. Primero conviene revisar si el mensaje del anuncio responde a esa intención.</p>
                   </>
-                ) : <p className="s muted">Todavía no hay suficientes búsquedas para explicar una conclusión.</p>;
+                ) : <p className="s muted">{adsVacio(panel) ? 'Google Ads todavía no está conectado, así que aún no hay búsquedas de dónde leer una conclusión.' : 'Todavía no hay suficientes búsquedas para explicar una conclusión.'}</p>;
               })()}
               <TechDetails titulo="Ver cómo llegué a esto (detalle técnico)">
                 regla: 0 clics + muestra suficiente ⇒ OPTIMIZAR_MENSAJE, nunca NEGATIVA salvo política de irrelevancia por-organización ·

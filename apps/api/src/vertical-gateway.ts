@@ -20,6 +20,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { requireUser } from './auth-context';
 import type { ContextoOrg, IdentityService, Permission } from '@soec/identity';
 import { EntradaInvalidaError } from '@soec/identity';
+import { canonizarAliasLegado } from './plataforma/identidad-organizacion';
 
 function header(req: FastifyRequest, name: string): string | undefined {
   const v = req.headers[name];
@@ -65,7 +66,11 @@ export function guardarVerticales(identity: IdentityService) {
     if (!slug || !slug.trim()) throw new EntradaInvalidaError('falta la organización (x-organization-slug)');
     const ctx: ContextoOrg = await identity.resolverContextoOrganizacion(user, slug.trim()); // 404 si no es miembro
     // Contexto AUTORITATIVO: se sobreescriben las cabeceras que leen las rutas header-driven.
-    req.headers['x-organization-id'] = ctx.organization.slug;
+    // CANONIZACIÓN de alias legado (post-validación de membresía, seguro): el slug de identidad puede ser un
+    // alias histórico (p. ej. 'smileflow') mientras el tenant canónico del registro/event-store es 'org-smileflow'.
+    // Sin esto, getBusiness(slug) devolvía 404 ⇒ negocio=null. Sólo remapea aliases conocidos; si el slug ya es
+    // canónico, pasa sin cambios. La membresía ya fue validada arriba: esto no acepta un alias sin autenticar.
+    req.headers['x-organization-id'] = canonizarAliasLegado(ctx.organization.slug) ?? ctx.organization.slug;
     req.headers['x-actor-id'] = ctx.user.id;
     req.headers['x-scope'] = scopeEventStore(ctx.permisos).join(',');
     // Permisos comerciales EFECTIVOS del rol, para autorización fina de las rutas que la exijan
