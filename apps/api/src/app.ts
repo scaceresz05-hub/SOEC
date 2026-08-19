@@ -147,6 +147,9 @@ import { PlataformaError } from './plataforma';
 import { registerPlataformaRoutes } from './plataforma-routes';
 import { registerAcquisitionRoutes } from './acquisition-routes';
 import { registerMetaOAuthAutenticadas, registerMetaCallbackPublico } from './acquisition/meta-oauth-routes';
+import { registerGoogleAdsOAuthAutenticadas, registerGoogleAdsCallbackPublico } from './acquisition/google-ads-oauth-routes';
+import { crearComposicionGoogleAdsOAuth } from './acquisition/google-ads-runtime-oauth';
+import type { ComponentesFlujoGoogleAds } from './acquisition/google-ads-oauth-flow';
 import { registerAccionRoutes } from './accion/accion-routes';
 import { registerCampanaRoutes } from './campana/campana-routes';
 import { registerMetaDataDeletionPublico } from './acquisition/meta-data-deletion';
@@ -160,6 +163,11 @@ export interface AppDeps {
   clock?: Clock;
   /** Pool PostgreSQL para el plano de identidad. Sin él, no se registran /auth ni /organizations. */
   pool?: Pool;
+  /**
+   * Override de la composición Google Ads OAuth. SÓLO para tests/smoke controlado con fakes; en producción se
+   * omite y se construye la real desde `pool` + env. No afecta el production path.
+   */
+  googleAdsComposicion?: ComponentesFlujoGoogleAds | null;
   /**
    * Acceso demo LEGACY (rutas /experience/* y verticales sin autenticación). DEFAULT false.
    * Prohibido en producción (el arranque lo bloquea). La ausencia de sesión NUNCA es autorización;
@@ -392,6 +400,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Composición productiva del OAuth de Meta (PG + AWS KMS + HTTP), construida UNA vez y compartida por el
   // callback público y las rutas autenticadas. Null si falta pool/config ⇒ fail-closed sin romper la API.
   const composicionMeta = deps.pool ? crearComposicionMetaOAuth(deps.pool, process.env) : null;
+  // Composición productiva del OAuth de Google Ads (provider AISLADO; PG google_ads_* + AWS KMS reutilizado +
+  // HTTP token/cuentas). Compartida por el callback público y las rutas autenticadas. Null si falta pool/config.
+  const composicionGoogleAds = deps.googleAdsComposicion !== undefined ? deps.googleAdsComposicion : deps.pool ? crearComposicionGoogleAdsOAuth(deps.pool, process.env) : null;
 
   const registrarSuperficieVertical = (target: FastifyInstance): void => {
     registerModelRoutes(target, deps.store);
@@ -418,6 +429,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // OAuth READ-ONLY de Meta — rutas AUTENTICADAS (start/connection/assets/binding). El CALLBACK va aparte,
     // PÚBLICO (fuera del gateway), porque el redirect de Meta llega sin sesión y se autentica por el state.
     registerMetaOAuthAutenticadas(target, { composicion: composicionMeta });
+    // OAuth READ-ONLY de Google Ads — rutas AUTENTICADAS (start/connection/accounts/select/refresh/disconnect).
+    // El CALLBACK va aparte, PÚBLICO. Provider aislado; multi-tenant dinámico por DB (no registro estático TS).
+    registerGoogleAdsOAuthAutenticadas(target, { composicion: composicionGoogleAds, store: deps.store, env: process.env });
     registerAccionRoutes(target, deps.pool); // Safe Action Plane (V2-A): mandatos + budget guard + ledger
     registerCampanaRoutes(target, deps.pool); // V2-B/C: campaña + autonomía en dry-run/shadow (dormante)
 
@@ -467,6 +481,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // consumo atómico); no acepta org/actor externos, no expone token y jamás deja CONNECTED (binding humano
     // posterior y autenticado). Fail-closed si no hay composición.
     registerMetaCallbackPublico(app, { composicion: composicionMeta, webBaseUrl: (deps.allowedOrigins ?? [])[0] });
+
+    // Callback OAuth de Google Ads: PÚBLICO (fuera del gateway). Autoridad = state provider-bound (org+actor,
+    // one-time, TTL). No acepta org externa, no expone token, jamás deja CONNECTED (selección de cuenta humana).
+    registerGoogleAdsCallbackPublico(app, { composicion: composicionGoogleAds, store: deps.store, env: process.env, webBaseUrl: (deps.allowedOrigins ?? [])[0] });
 
     // Data Deletion Callback de Meta: PÚBLICO (llega sin sesión, autenticado por firma del app secret).
     // Requisito de App Review. Registra la solicitud y devuelve { url, confirmation_code }.

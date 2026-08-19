@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { cabecerasOrg, ETIQUETA_ESTADO_FUENTE, orgActiva } from '../../lib/org-activa';
+import { GoogleAdsConexion } from '../../components/google-ads-conexion';
 import {
   Badge, Callout, clp, colorDeNegocio, DirectorCard, EmptyState, Funnel, iniciales, Metric, num,
   PriorityList, SourceRow, TechDetails, TrendBars, valor, type Desconocible, type Tono,
@@ -414,6 +415,7 @@ export default function Panel(): React.ReactElement {
         !esEcom && panel ? (
           <>
             <div className="section">Marketing pagado <span className="hint">{FUENTE_ADS} · histórico de la campaña · solo lectura</span></div>
+            {org && <GoogleAdsConexion org={org} />}
             {adsVacio(panel) ? (
               <Callout tono="info" ico="🔌"><b>{FUENTE_ADS} sin datos.</b> No hay campañas con entrega o {FUENTE_ADS} no está conectado. Sin cifras sintéticas ni de otra fuente.</Callout>
             ) : (
