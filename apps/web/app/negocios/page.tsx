@@ -196,7 +196,10 @@ export default function Panel(): React.ReactElement {
 
   useEffect(() => { if (org) void cargar(org); }, [org, cargar]);
 
-  const esEcom = negocio?.modeloDeNegocio !== 'SAAS_FUNNEL';
+  // E-commerce SÓLO si el modelo es explícitamente de tienda. Antes defaulteaba a e-commerce cuando el
+  // negocio aún no cargaba (negocio=null) o el modelo era desconocido, lo que pintaba pestañas de tienda
+  // (Ventas/Productos/Google Shopping) a negocios SaaS o mientras cargaba ⇒ superficies en blanco/fantasma.
+  const esEcom = negocio?.modeloDeNegocio === 'ECOMMERCE_DISTRIBUCION';
   const tabsBandeja = useMemo(() => (Array.isArray(bandeja?.items) ? bandeja!.items!.length : 0), [bandeja]);
 
   const tabs: { id: TabId; label: string; count?: number }[] = useMemo(() => {
@@ -368,6 +371,9 @@ export default function Panel(): React.ReactElement {
       )}
 
       {/* ══════════════ PRODUCTOS (e-commerce) ══════════════ */}
+      {tab === 'productos' && esEcom && !ventas?.lineaBase && (
+        <EmptyState ico="📦" titulo="Todavía no hay productos observados" detalle="No es que no haya productos: es que SOEC aún no puede leer las ventas por producto de la tienda." />
+      )}
       {tab === 'productos' && esEcom && ventas?.lineaBase && (
         <>
           <div className="section">Productos</div>
@@ -448,7 +454,8 @@ export default function Panel(): React.ReactElement {
               <div className="grid g-3" style={{ marginTop: 16, textAlign: 'left' }}>
                 <SourceEmpty ico="📣" nombre="Google Ads" estado="No conectado" />
                 <SourceEmpty ico="📊" nombre="Medición web (GA4)" estado="No configurado" />
-                <SourceEmpty ico="🏷" nombre="Google Shopping" estado="No conectado" />
+                {/* Google Shopping es un concepto de tienda: sólo aplica a e-commerce, no a un negocio SaaS/servicios. */}
+                {esEcom && <SourceEmpty ico="🏷" nombre="Google Shopping" estado="No conectado" />}
               </div>
             </EmptyState>
           </>
