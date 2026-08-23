@@ -17,6 +17,9 @@ import { MeasurementExperience } from './measurement-experience';
 import { construirPanel, type ObsPanel, type Sync } from './ingesta/panel-resultados';
 import { adsSnapshotStreamId, ultimoSnapshotAds, adsRefreshStateStreamId, ultimoRefreshState, EVENTO_REFRESH_STATE, type AdsRefreshState } from './ingesta/ingesta-google-ads-service';
 import { construirIngestaGoogleAds, googleAdsConfigurado } from './ingesta/google-ads-runtime';
+import { PgBudgetAuthorizationRepo } from './autonomia-ads/budget-authorization-pg';
+import { evaluarGuardrail } from './autonomia-ads/guardrail-financiero';
+import type { Pool } from 'pg';
 import { LecturaDirectorRealService } from './real-director/lectura-director-real';
 import { PlanAccionDryRunService, type PerfilUsuario } from './autonomia-ads/plan-accion-service';
 import { G2AService } from './autonomia-ads/g2a-service';
@@ -47,8 +50,9 @@ function real(
   return { ctx, org: binding.organizationId, binding };
 }
 
-export function registerMeasurementRoutes(app: FastifyInstance, store: EventStore): void {
+export function registerMeasurementRoutes(app: FastifyInstance, store: EventStore, pool?: Pool): void {
   const exp = new MeasurementExperience(store);
+  const budgetRepo = pool ? new PgBudgetAuthorizationRepo(pool) : null;
 
   // LECTURA de observaciones REALES (M8, puerta gobernada) — separadas del eje simulado (med:*).
   // Con muestra mínima NO se emite recomendación: se reporta el HECHO real y conclusión NO_EVALUABLE.
@@ -156,11 +160,33 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     // Estado del último refresh a Google Ads (observabilidad: cuándo se consultó y si falló, p.ej. OAuth caducado).
     const lastRefresh = ultimoRefreshState(await store.readStream(c, adsRefreshStateStreamId(org)));
 
+    const panelBase = construirPanel(observaciones, sincronizaciones, snapshotActual, new Date().toISOString());
+
+    // GUARDRAIL FINANCIERO (P0, READ-ONLY): separa el presupuesto DIARIO de Google del cap TOTAL autorizado
+    // por el humano. El cap sale del registro de autorizaciones (vacío ⇒ SIN_CAP; NO se inventa un tope).
+    let googleAdsGuardrail: Record<string, unknown> | null = null;
+    if (snapshotActual) {
+      const cap = budgetRepo ? (await budgetRepo.obtenerVigente(org, snapshotActual.campaignId))?.authorizedTotalAmount ?? null : null;
+      const gf = (panelBase as unknown as { growthFunnel?: { comercial?: Record<string, number> } }).growthFunnel;
+      const contactos = gf?.comercial?.lead_created ?? 0;
+      googleAdsGuardrail = {
+        campaignId: snapshotActual.campaignId,
+        campaignName: snapshotActual.campaignName,
+        campaignStatus: snapshotActual.status, // PAUSED visible; el histórico de métricas NO se borra
+        dailyBudget: snapshotActual.dailyBudget ?? null, // GOOGLE_DAILY_BUDGET, distinto del cap total
+        gastoAcumulado: snapshotActual.cost,
+        capAutorizado: cap,
+        moneda: 'CLP',
+        ...evaluarGuardrail({ gastoActual: snapshotActual.cost ?? 0, capAutorizado: cap, contactosReales: contactos, moneda: 'CLP' }),
+      };
+    }
+
     return reply.send({
       organizationId: org,
-      ...construirPanel(observaciones, sincronizaciones, snapshotActual, new Date().toISOString()),
+      ...panelBase,
       adsRefresh: lastRefresh, // { queriedAt, ok, estado, ventana, error, dataThrough } | null
       googleAdsConfigured: googleAdsConfigurado(process.env, org),
+      googleAdsGuardrail, // { campaignStatus, dailyBudget, gastoAcumulado, capAutorizado, estado, decisionRequerida, ... } | null
     });
   });
 

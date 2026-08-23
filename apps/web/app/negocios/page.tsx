@@ -48,6 +48,13 @@ interface Panel {
   // Estado del último refresh REAL a Google Ads (visibilidad del intento/fallo, p.ej. OAuth caducado).
   adsRefresh?: { queriedAt: string; ok: boolean; estado: string; ventana: { desde: string; hasta: string }; error: string | null; dataThrough: string | null } | null;
   googleAdsConfigured?: boolean;
+  // GUARDRAIL FINANCIERO (P0): separa presupuesto DIARIO de Google del cap TOTAL autorizado por el humano.
+  googleAdsGuardrail?: {
+    campaignId: string; campaignName: string | null; campaignStatus: string | null;
+    dailyBudget: number | null; gastoAcumulado: number | null; capAutorizado: number | null; moneda: string;
+    estado: 'SIN_CAP_AUTORIZADO' | 'NORMAL' | 'WARNING' | 'CAP_REACHED';
+    ratio: number | null; decisionRequerida: boolean; recomendacion: string; tipoDecision: string | null; mensaje: string;
+  } | null;
 }
 /** Fuente publicitaria de este panel SaaS: Google Ads (solo lectura). Etiqueta única de origen. */
 const FUENTE_ADS = 'Google Ads';
@@ -307,6 +314,27 @@ export default function Panel(): React.ReactElement {
               <div className="grid g-4" style={{ marginTop: 12 }}>
                 <Metric ico="🌱" label="Clientes nuevos" value={num(panel.growthFunnel?.comercial?.lead_created ?? null)} sub="contactos reales desde el sitio · medición web" accent />
               </div>
+              {panel.googleAdsGuardrail && (
+                <>
+                  {/* PRESUPUESTO: inversión, tope TOTAL autorizado por vos y presupuesto DIARIO de Google NO se mezclan. */}
+                  <div className="section" style={{ marginTop: 12 }}>Presupuesto <span className="hint">inversión, tope autorizado y diario · no se mezclan</span></div>
+                  <div className="grid g-4">
+                    <Metric ico="💸" label="Inversión acumulada" value={clp(panel.googleAdsGuardrail.gastoAcumulado)} sub={FUENTE_ADS} />
+                    <Metric ico="🛡" label="Presupuesto total autorizado" value={panel.googleAdsGuardrail.capAutorizado != null ? clp(panel.googleAdsGuardrail.capAutorizado) : 'No registrado'} sub={panel.googleAdsGuardrail.capAutorizado != null ? 'tope que autorizaste' : 'sin tope en SOEC'} />
+                    <Metric ico="📅" label="Presupuesto diario Google" value={panel.googleAdsGuardrail.dailyBudget != null ? `${clp(panel.googleAdsGuardrail.dailyBudget)}/día` : '—'} sub="lo fijás en Google Ads" />
+                    <Metric ico="📡" label="Estado campaña" value={panel.googleAdsGuardrail.campaignStatus === 'PAUSED' ? 'Pausada' : panel.googleAdsGuardrail.campaignStatus === 'ENABLED' ? 'Activa' : (panel.googleAdsGuardrail.campaignStatus ?? '—')} />
+                  </div>
+                  {panel.googleAdsGuardrail.estado === 'SIN_CAP_AUTORIZADO' && (
+                    <Callout tono="info" ico="ℹ">No hay un presupuesto total autorizado registrado en SOEC. El gasto lo controla el presupuesto que fijaste en Google Ads, no SOEC.</Callout>
+                  )}
+                  {panel.googleAdsGuardrail.estado === 'WARNING' && (
+                    <Callout tono="warn" ico="⚠">{panel.googleAdsGuardrail.mensaje}</Callout>
+                  )}
+                  {panel.googleAdsGuardrail.decisionRequerida && (
+                    <Callout tono="warn" ico="🛑"><b>Decisión necesaria — presupuesto autorizado alcanzado.</b> {panel.googleAdsGuardrail.mensaje} SOEC no pausa por vos: la decisión es tuya.</Callout>
+                  )}
+                </>
+              )}
             </>
           )}
 
@@ -326,12 +354,15 @@ export default function Panel(): React.ReactElement {
             </div>
           )}
 
-          <div style={{ marginTop: 16 }}>
-            <Callout tono="ok" ico="✓">
-              <b>No necesitás decidir nada ahora.</b> SOEC está en modo seguro: observa y te avisará en
-              «Decisiones» cuando haya algo real que aprobar. Nada se publica ni se gasta sin tu confirmación.
-            </Callout>
-          </div>
+          {/* No mostrar "no necesitás decidir nada" si el guardrail financiero exige una decisión (cap alcanzado). */}
+          {!panel?.googleAdsGuardrail?.decisionRequerida && (
+            <div style={{ marginTop: 16 }}>
+              <Callout tono="ok" ico="✓">
+                <b>No necesitás decidir nada ahora.</b> SOEC está en modo seguro: observa y te avisará en
+                «Decisiones» cuando haya algo real que aprobar. Nada se publica ni se gasta sin tu confirmación.
+              </Callout>
+            </div>
+          )}
         </>
       )}
 
@@ -568,11 +599,18 @@ export default function Panel(): React.ReactElement {
       {tab === 'decisiones' && (
         <>
           <div className="section">Necesita tu decisión</div>
+          {panel?.googleAdsGuardrail?.decisionRequerida && (
+            <div className="decisioncard" style={{ marginBottom: 10, borderLeft: '4px solid var(--warn)' }}>
+              <div className="spread"><h3>Presupuesto autorizado alcanzado — {panel.googleAdsGuardrail.campaignName ?? 'campaña'}</h3><Badge tono="warn">Alta prioridad</Badge></div>
+              <p className="dwhy">{panel.googleAdsGuardrail.mensaje}</p>
+              <p className="s muted">Recomendación: pausar y diagnosticar. <b>SOEC no ejecuta la pausa</b>: la decisión y la acción en Google Ads son tuyas.</p>
+            </div>
+          )}
           {tabsBandeja > 0 ? (
             <div className="card"><p className="s">Hay {tabsBandeja} cambio(s) preparados esperando tu aprobación. Revisalos con cuidado antes de autorizar.</p></div>
-          ) : (
+          ) : (!panel?.googleAdsGuardrail?.decisionRequerida && (
             <EmptyState ico="✓" titulo="No necesito que decidas nada ahora" detalle="Cuando SOEC prepare un cambio real (por ejemplo, ajustar una campaña), aparecerá aquí con su porqué, su beneficio y su riesgo, y botones para autorizar o rechazar." />
-          )}
+          ))}
           {!esEcom && plan?.oportunidadesTacticas && plan.oportunidadesTacticas.length > 0 && (
             <>
               <div className="section">Para que lo sepas <span className="hint">oportunidades · no requieren decisión</span></div>

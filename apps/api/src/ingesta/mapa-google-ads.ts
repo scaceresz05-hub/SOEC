@@ -74,7 +74,7 @@ export function gaqlTerminos(desde: string, hasta: string): string {
 // consulta all-time (HTTP 400). El período del acumulado es ALL_TIME con `from` desconocido (null), lo cual es
 // honesto: el snapshot es lifetime "as-of capturedAt", sin fabricar un inicio de campaña.
 export const GAQL_CAMPANIA_SNAPSHOT =
-  'SELECT campaign.id, campaign.name, campaign.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.average_cpc, metrics.ctr FROM campaign';
+  'SELECT campaign.id, campaign.name, campaign.status, campaign_budget.amount_micros, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.average_cpc, metrics.ctr FROM campaign';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Parseo del searchStream (array de batches → results)
@@ -178,6 +178,7 @@ export interface SnapshotAdsActual {
   readonly impressions: number | null;
   readonly clicks: number | null;
   readonly cost: number | null;
+  readonly dailyBudget?: number | null; // GOOGLE_DAILY_BUDGET (campaign_budget.amount_micros) — NO es el cap total humano
   readonly at: string; // instante de sync (ISO) — orden last-wins; también el "as-of" del acumulado all-time
   readonly startDate?: string | null; // inicio de la campaña (campaign.start_date) = "from" del acumulado all-time
   readonly endDate?: string | null; // fin de la campaña (campaign.end_date), si aplica
@@ -189,9 +190,11 @@ export function extraerSnapshotActual(rows: readonly FilaGoogleAds[], at: string
   if (!row) return null;
   const campaign = obj(row.campaign);
   const metrics = obj(row.metrics);
+  const campaignBudget = obj(row.campaignBudget);
   const campaignId = str(campaign.id);
   if (!campaignId) return null;
   const costMicros = num(metrics.costMicros);
+  const budgetMicros = num(campaignBudget.amountMicros);
   return {
     campaignId,
     campaignName: str(campaign.name),
@@ -199,6 +202,7 @@ export function extraerSnapshotActual(rows: readonly FilaGoogleAds[], at: string
     impressions: num(metrics.impressions),
     clicks: num(metrics.clicks),
     cost: costMicros === null ? null : costMicros / 1e6,
+    dailyBudget: budgetMicros === null ? null : budgetMicros / 1e6,
     at,
     startDate: str(campaign.startDate),
     endDate: str(campaign.endDate),

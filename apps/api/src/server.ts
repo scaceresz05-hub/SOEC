@@ -10,6 +10,7 @@ import { crearComposicionMetaOAuth } from './acquisition/meta-runtime';
 import { iniciarMetaScheduler, INTERVALO_SCHEDULER_MS } from './acquisition/meta-scheduler';
 import { randomUUID } from 'node:crypto';
 import { runGoogleAdsMigrationsSeguro, PgGoogleAdsSyncLease } from './acquisition/google-ads-oauth-pg';
+import { budgetAuthorizationMigrations } from './autonomia-ads/budget-authorization-pg';
 import { crearComposicionGoogleAdsOAuth } from './acquisition/google-ads-runtime-oauth';
 import { GoogleAdsScheduler } from './ingesta/google-ads-scheduler';
 import { ejecutarBootstrap } from '@soec/identity';
@@ -69,6 +70,7 @@ async function main(): Promise<void> {
   await runMigrations(pool, metaWriteMigrations); // V2 pre-real: reconciliación del write path (dormante)
   await runMigrations(pool, dataDeletionMigrations); // Meta data deletion callback (App Review)
   await runGoogleAdsMigrationsSeguro(pool); // OAuth Google Ads multi-tenant (google_ads_*) bajo advisory lock (boot concurrente seguro)
+  await runMigrations(pool, budgetAuthorizationMigrations); // P0: autorización de presupuesto TOTAL por humano (guardrail financiero)
   const boot = await ejecutarBootstrap(pool);
   if (boot.ejecutado) console.log(JSON.stringify({ bootstrap: boot }));
 

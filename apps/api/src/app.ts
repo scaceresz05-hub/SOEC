@@ -414,7 +414,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerMarketingRoutes(target, deps.store);
     registerContentRoutes(target, deps.store);
     registerChannelRoutes(target, deps.store);
-    registerMeasurementRoutes(target, deps.store);
+    registerMeasurementRoutes(target, deps.store, deps.pool);
     registerControlRoutes(target, deps.store);
     registerPilotRoutes(target, deps.store);
     registerDirectorWorkspaceRoutes(target, deps.store, clock);
