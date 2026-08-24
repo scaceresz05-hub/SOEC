@@ -190,11 +190,15 @@ export default function Panel(): React.ReactElement {
   const actualizar = useCallback(async (o: string) => {
     setRefrescando(true); setAvisoRefresh(null);
     try {
-      const r = await fetch('/api/medicion/refresh-ads', { method: 'POST', headers: { 'content-type': 'application/json', ...cabecerasOrg(o) }, body: '{}' });
-      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; estado?: string; error?: string | null; nuevos?: number };
-      if (j.estado === 'NOT_CONFIGURED') setAvisoRefresh('Google Ads no está conectado para este negocio.');
-      else if (j.ok) setAvisoRefresh(`Consultado a Google Ads recién${j.nuevos ? ` · ${j.nuevos} dato(s) nuevo(s)` : ' · sin novedades'}.`);
-      else setAvisoRefresh(`Consultamos a Google Ads recién, pero no se pudo actualizar: ${j.error ?? 'error de Google Ads'}. Se muestra el último dato conocido.`);
+      // Refresh manual P1 (token CIFRADO por-tenant). Antes usaba /medicion/refresh-ads (legacy env:GOOGLE_ADS_REFRESH_TOKEN,
+      // ausente en prod) ⇒ fallaba en silencio y no apendía snapshot. Reutiliza el mismo refresh ya construido/certificado.
+      const r = await fetch('/api/google-ads/refresh', { method: 'POST', headers: { 'content-type': 'application/json', ...cabecerasOrg(o) }, body: '{}' });
+      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; datos?: { estado?: string; dataThrough?: string | null; error?: string | null } };
+      const estado = j.datos?.estado;
+      if (r.status === 409 || j.error === 'NOT_CONNECTED') setAvisoRefresh('Google Ads no está conectado para este negocio.');
+      else if (estado === 'OK') setAvisoRefresh(`Consultado a Google Ads recién · datos hasta ${j.datos?.dataThrough ?? '—'}.`);
+      else if (estado === 'NEEDS_REAUTH') setAvisoRefresh('Google Ads necesita reconexión. Tus datos históricos están conservados.');
+      else setAvisoRefresh(`Consultamos a Google Ads recién, pero no se pudo actualizar: ${j.datos?.error ?? j.error ?? 'error de Google Ads'}. Se muestra el último dato conocido.`);
     } catch {
       setAvisoRefresh('No se pudo contactar el servicio para actualizar.');
     } finally {
