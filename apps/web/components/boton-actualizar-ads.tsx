@@ -53,7 +53,7 @@ export function BotonActualizarAds({
   }, [org, onRefreshed, onAviso]);
 
   return (
-    <button className="btn" disabled={refrescando} onClick={() => void actualizar()}>
+    <button type="button" className="btn" disabled={refrescando} onClick={() => void actualizar()}>
       {refrescando ? 'Actualizando…' : 'Actualizar'}
     </button>
   );
