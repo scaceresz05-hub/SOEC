@@ -22,8 +22,10 @@ import { evaluarGuardrail } from './autonomia-ads/guardrail-financiero';
 import { evaluarEstrategiaDirector } from './autonomia-ads/estrategia-director';
 import type { Pool } from 'pg';
 import { LecturaDirectorRealService } from './real-director/lectura-director-real';
-import { PlanAccionDryRunService, type PerfilUsuario } from './autonomia-ads/plan-accion-service';
+import { PlanAccionDryRunService, type PerfilUsuario, type CapLookup } from './autonomia-ads/plan-accion-service';
 import { G2AService } from './autonomia-ads/g2a-service';
+import { CampaignOperatorDryRunService, type EntradaOperador } from './campana/campaign-operator-service';
+import type { CanalId } from './campana/marketing-plan';
 import { contextoDe } from './superficie-auth';
 import {
   bindExperienciaReal,
@@ -257,12 +259,10 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
 
   // PLAN DE ACCIÓN (G1 · ASISTIDO DRY-RUN). GET = plan pura (sin efectos); POST genera y persiste.
   // NADA se ejecuta: AUTONOMOUS_REAL apagado, el Executor sólo simula.
-  const planAccion = new PlanAccionDryRunService(
-    store,
-    budgetRepo
-      ? async (o, campaignId) => (await budgetRepo.obtenerVigente(o, campaignId))?.authorizedTotalAmount ?? null
-      : undefined,
-  );
+  const capLookup: CapLookup | undefined = budgetRepo
+    ? async (o, campaignId) => (await budgetRepo.obtenerVigente(o, campaignId))?.authorizedTotalAmount ?? null
+    : undefined;
+  const planAccion = new PlanAccionDryRunService(store, capLookup);
   app.get('/medicion/plan-accion', async (req, reply) => {
     const { org } = real(req, 'autonomia-ads');
     const plan = await planAccion.leerUltimo(org);
@@ -327,6 +327,25 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       new Date().toISOString(),
     );
     return reply.code(201).send({ ok: true });
+  });
+
+  // CAMPAIGN OPERATOR (DRY-RUN): objetivo + presupuesto + período → MARKETING_PLAN + CAMPAIGN_DRAFTS +
+  // CHANNEL_ALLOCATION + criterios + AUTHORIZED_EXECUTION_ENVELOPE (DRAFT). NADA se gasta ni se escribe:
+  // AUTONOMOUS_REAL=false, envelope en DRAFT. GET = lectura pura del último plan simulado.
+  const campaignOperator = new CampaignOperatorDryRunService(store, capLookup, process.env);
+  app.get('/medicion/campaign-operator', async (req, reply) => {
+    const { org } = real(req, 'autonomia-ads');
+    const ultimo = await campaignOperator.leerUltimo(org);
+    if (!ultimo) return reply.send({ modo: 'DRY_RUN', autonomousReal: false, organizationId: org, plan: null, envelopeDraft: null });
+    return reply.send({ organizationId: org, ...ultimo });
+  });
+  app.post('/medicion/campaign-operator-plan', async (req, reply) => {
+    const { org } = real(req, 'autonomia-ads');
+    const b = (req.body ?? {}) as { objetivo?: string; presupuestoTotal?: number; periodoDias?: number; canales?: CanalId[] };
+    if (!b.objetivo || typeof b.presupuestoTotal !== 'number' || typeof b.periodoDias !== 'number')
+      return reply.code(400).send({ ok: false, error: 'faltan objetivo/presupuestoTotal/periodoDias' });
+    const entrada: EntradaOperador = { objetivo: b.objetivo, presupuestoTotal: b.presupuestoTotal, periodoDias: b.periodoDias, ...(b.canales ? { canales: b.canales } : {}) };
+    return reply.code(201).send({ organizationId: org, ...(await campaignOperator.planificar(org, new Date().toISOString(), entrada)) });
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {

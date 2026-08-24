@@ -7,6 +7,7 @@ const GET_ACCIONES = new Set([
   'lectura-director',
   'plan-accion',
   'g2a-bandeja',
+  'campaign-operator',
 ]);
 const POST_ACCIONES = new Set([
   'preparar',
@@ -15,6 +16,7 @@ const POST_ACCIONES = new Set([
   'g2a-aprobar',
   'g2a-rechazar',
   'refresh-ads',
+  'campaign-operator-plan',
 ]);
 
 /**

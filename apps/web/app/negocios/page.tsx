@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { cabecerasOrg, ETIQUETA_ESTADO_FUENTE, orgActiva } from '../../lib/org-activa';
 import { estadoAds, lineaObjetivoAds, midiendoContactos } from '../../lib/ads-estado';
 import { BotonActualizarAds } from '../../components/boton-actualizar-ads';
+import { CampaignOperator } from '../../components/campaign-operator';
 import { GoogleAdsConexion } from '../../components/google-ads-conexion';
 import {
   Badge, Callout, clp, colorDeNegocio, DirectorCard, EmptyState, Funnel, iniciales, Metric, num,
@@ -679,6 +680,14 @@ export default function Panel(): React.ReactElement {
               ))}
             </>
           )}
+          {/* OPERADOR DE CAMPAÑA (DRY-RUN): objetivo + presupuesto + período → plan + borradores + sobre, sin gastar. */}
+          {!esEcom && (
+            <>
+              <div className="section" style={{ marginTop: 18 }}>Operar una campaña <span className="hint">simulación · SOEC prepara el plan antes de gastar</span></div>
+              <CampaignOperator org={org} />
+            </>
+          )}
+
           <div className="section">Historial</div>
           <div className="card"><p className="s muted" style={{ margin: 0 }}>Todavía no hay decisiones registradas. Cuando autorices o rechaces un cambio, quedará aquí con su fecha y su resultado.</p></div>
         </>
