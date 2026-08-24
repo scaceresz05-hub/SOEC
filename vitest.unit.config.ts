@@ -7,6 +7,9 @@ import { PATRONES_PRUEBAS_PG, PATRONES_TODAS } from './vitest.shared';
  * No necesita base de datos alguna.
  */
 export default defineConfig({
+  // JSX con runtime AUTOMÁTICO (igual que Next): los componentes no importan React. Sólo afecta la
+  // transformación de archivos JSX/TSX en pruebas (los componentes web probados con RTL).
+  esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
   test: {
     include: PATRONES_TODAS,
     exclude: ['**/node_modules/**', '**/dist/**', ...PATRONES_PRUEBAS_PG],

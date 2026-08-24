@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { cabecerasOrg, ETIQUETA_ESTADO_FUENTE, orgActiva } from '../../lib/org-activa';
 import { estadoAds, lineaObjetivoAds, midiendoContactos } from '../../lib/ads-estado';
+import { BotonActualizarAds } from '../../components/boton-actualizar-ads';
 import { GoogleAdsConexion } from '../../components/google-ads-conexion';
 import {
   Badge, Callout, clp, colorDeNegocio, DirectorCard, EmptyState, Funnel, iniciales, Metric, num,
@@ -158,7 +159,6 @@ export default function Panel(): React.ReactElement {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [bandeja, setBandeja] = useState<Bandeja | null>(null);
   const [cargando, setCargando] = useState(false);
-  const [refrescando, setRefrescando] = useState(false);
   const [avisoRefresh, setAvisoRefresh] = useState<string | null>(null);
 
   useEffect(() => { setOrg(orgActiva()); }, []);
@@ -185,27 +185,8 @@ export default function Panel(): React.ReactElement {
     setCargando(false);
   }, []);
 
-  // "Actualizar": dispara un refresh REAL de Google Ads (read-only) y luego re-lee el panel. Hace visible el
-  // resultado del intento (éxito, "sin novedades", o fallo de autorización). NO fabrica frescura.
-  const actualizar = useCallback(async (o: string) => {
-    setRefrescando(true); setAvisoRefresh(null);
-    try {
-      // Refresh manual P1 (token CIFRADO por-tenant). Antes usaba /medicion/refresh-ads (legacy env:GOOGLE_ADS_REFRESH_TOKEN,
-      // ausente en prod) ⇒ fallaba en silencio y no apendía snapshot. Reutiliza el mismo refresh ya construido/certificado.
-      const r = await fetch('/api/google-ads/refresh', { method: 'POST', headers: { 'content-type': 'application/json', ...cabecerasOrg(o) }, body: '{}' });
-      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; datos?: { estado?: string; dataThrough?: string | null; error?: string | null } };
-      const estado = j.datos?.estado;
-      if (r.status === 409 || j.error === 'NOT_CONNECTED') setAvisoRefresh('Google Ads no está conectado para este negocio.');
-      else if (estado === 'OK') setAvisoRefresh(`Consultado a Google Ads recién · datos hasta ${j.datos?.dataThrough ?? '—'}.`);
-      else if (estado === 'NEEDS_REAUTH') setAvisoRefresh('Google Ads necesita reconexión. Tus datos históricos están conservados.');
-      else setAvisoRefresh(`Consultamos a Google Ads recién, pero no se pudo actualizar: ${j.datos?.error ?? j.error ?? 'error de Google Ads'}. Se muestra el último dato conocido.`);
-    } catch {
-      setAvisoRefresh('No se pudo contactar el servicio para actualizar.');
-    } finally {
-      setRefrescando(false);
-      await cargar(o); // re-lee el panel (nuevo snapshot si lo hubo, o el mismo con el intento registrado)
-    }
-  }, [cargar]);
+  // El refresh manual de Google Ads vive en <BotonActualizarAds/> (componente aislado y testeado): dispara el
+  // use-case P1 real, re-lee el panel vía `cargar`, y reporta el resultado en `avisoRefresh` (mostrado abajo).
 
   useEffect(() => { if (org) void cargar(org); }, [org, cargar]);
 
@@ -262,7 +243,9 @@ export default function Panel(): React.ReactElement {
           </div>
           <div className="bhright" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {ver && <><span className="small muted">Estado SOEC:</span> <Badge tono={ver.tono}>{ver.texto}</Badge></>}
-            <button className="btn" disabled={cargando || refrescando} onClick={() => org && actualizar(org)}>{refrescando ? 'Actualizando…' : 'Actualizar'}</button>
+            {/* Botón de refresh manual Google Ads (componente aislado y testeado): dispara el use-case P1 real,
+                se deshabilita sólo mientras refresca, y nunca es un no-op silencioso. */}
+            <BotonActualizarAds org={org} onRefreshed={() => { if (org) return cargar(org); }} onAviso={(t) => setAvisoRefresh(t)} />
           </div>
         </div>
       ) : (
