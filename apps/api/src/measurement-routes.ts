@@ -19,6 +19,7 @@ import { adsSnapshotStreamId, ultimoSnapshotAds, adsRefreshStateStreamId, ultimo
 import { construirIngestaGoogleAds, googleAdsConfigurado } from './ingesta/google-ads-runtime';
 import { PgBudgetAuthorizationRepo } from './autonomia-ads/budget-authorization-pg';
 import { evaluarGuardrail } from './autonomia-ads/guardrail-financiero';
+import { evaluarEstrategiaDirector } from './autonomia-ads/estrategia-director';
 import type { Pool } from 'pg';
 import { LecturaDirectorRealService } from './real-director/lectura-director-real';
 import { PlanAccionDryRunService, type PerfilUsuario } from './autonomia-ads/plan-accion-service';
@@ -165,6 +166,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     // GUARDRAIL FINANCIERO (P0, READ-ONLY): separa el presupuesto DIARIO de Google del cap TOTAL autorizado
     // por el humano. El cap sale del registro de autorizaciones (vacío ⇒ SIN_CAP; NO se inventa un tope).
     let googleAdsGuardrail: Record<string, unknown> | null = null;
+    let estrategiaDirector: ReturnType<typeof evaluarEstrategiaDirector> | null = null;
     if (snapshotActual) {
       const cap = budgetRepo ? (await budgetRepo.obtenerVigente(org, snapshotActual.campaignId))?.authorizedTotalAmount ?? null : null;
       const gf = (panelBase as unknown as { growthFunnel?: { comercial?: Record<string, number> } }).growthFunnel;
@@ -179,6 +181,20 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
         moneda: 'CLP',
         ...evaluarGuardrail({ gastoActual: snapshotActual.cost ?? 0, capAutorizado: cap, contactosReales: contactos, moneda: 'CLP' }),
       };
+
+      // ESTRATEGIA DEL DIRECTOR (READ-ONLY): evidencia del funnel + términos → diagnóstico/hipótesis/decisiones.
+      // Misma evidencia que el guardrail (no una segunda fuente). Ninguna decisión ejecuta nada.
+      const terminos = (panelBase as unknown as { searchTerms?: { termino: string; impresiones: number; clics: number }[] }).searchTerms ?? [];
+      estrategiaDirector = evaluarEstrategiaDirector({
+        impresiones: snapshotActual.impressions ?? 0,
+        clics: snapshotActual.clicks ?? 0,
+        gasto: snapshotActual.cost ?? 0,
+        contactosReales: contactos,
+        capAutorizado: cap,
+        campaignStatus: snapshotActual.status,
+        moneda: 'CLP',
+        terminos,
+      });
     }
 
     return reply.send({
@@ -187,6 +203,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       adsRefresh: lastRefresh, // { queriedAt, ok, estado, ventana, error, dataThrough } | null
       googleAdsConfigured: googleAdsConfigurado(process.env, org),
       googleAdsGuardrail, // { campaignStatus, dailyBudget, gastoAcumulado, capAutorizado, estado, decisionRequerida, ... } | null
+      estrategiaDirector, // { funnelZeroConversion, diagnostico, hipotesis, estrategia, decisiones[], ... } | null
     });
   });
 
@@ -240,7 +257,12 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
 
   // PLAN DE ACCIÓN (G1 · ASISTIDO DRY-RUN). GET = plan pura (sin efectos); POST genera y persiste.
   // NADA se ejecuta: AUTONOMOUS_REAL apagado, el Executor sólo simula.
-  const planAccion = new PlanAccionDryRunService(store);
+  const planAccion = new PlanAccionDryRunService(
+    store,
+    budgetRepo
+      ? async (o, campaignId) => (await budgetRepo.obtenerVigente(o, campaignId))?.authorizedTotalAmount ?? null
+      : undefined,
+  );
   app.get('/medicion/plan-accion', async (req, reply) => {
     const { org } = real(req, 'autonomia-ads');
     const plan = await planAccion.leerUltimo(org);

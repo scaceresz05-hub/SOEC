@@ -74,6 +74,18 @@ export interface InsumosPlan {
   readonly decisionTipo: string | null; // decisión de M9 (esperar_datos/mantener/... )
   readonly terminos: readonly { readonly termino: string; readonly impresiones: number; readonly clics: number }[];
   readonly limites: LimitesAutonomia;
+  /**
+   * EVIDENCIA DEL FUNNEL (misma que alimenta panel / lectura-director / guardrail — no una segunda fuente).
+   * Alimenta la estrategia del Director (FUNNEL_ZERO_CONVERSION, etc.). Opcional por compatibilidad.
+   */
+  readonly funnel?: {
+    readonly impresiones: number;
+    readonly clics: number;
+    readonly gasto: number;
+    readonly contactosReales: number;
+    readonly capAutorizado: number | null;
+    readonly campaignStatus: string | null;
+  };
 }
 
 function idNegativa(termino: string): string {

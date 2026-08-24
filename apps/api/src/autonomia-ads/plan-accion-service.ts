@@ -26,6 +26,14 @@ import { evaluarOportunidadesTacticas, planificarCambios, type IntencionDeCambio
 import type { EvaluacionTermino } from './evaluacion-termino';
 import { evaluarGates, type ContextoGates, type NivelAutonomia, type ResultadoGates } from './gates';
 import { simularEjecucion, type SimulacionEjecucion } from './executor-dryrun';
+import { adsSnapshotStreamId, ultimoSnapshotAds } from '../ingesta/ingesta-google-ads-service';
+import { evaluarEstrategiaDirector, type EstrategiaDirector } from './estrategia-director';
+
+/** Provider/eventName del embudo Growth (mismos que usa el panel; contacto real = lead_created comercial). */
+const GROWTH = 'smileflow-growth';
+const EVENTO_CONTACTO = 'lead_created';
+/** Lookup del cap total autorizado (inyectable). Sin repo ⇒ null (SmileFlow: no hay cap ⇒ se PIDE, no se inventa). */
+export type CapLookup = (org: string, campaignId: string) => Promise<number | null>;
 
 export type PerfilUsuario = 'CONSERVADOR' | 'ASISTIDO' | 'AUTONOMO';
 export const EVENTO_PLAN = 'plan-accion.dryrun';
@@ -69,6 +77,11 @@ export interface PlanAccionDryRun {
    * NO propone excluir — sugiere revisar el mensaje. Distinto de una recomendación estratégica del Director.
    */
   readonly oportunidadesTacticas: readonly EvaluacionTermino[];
+  /**
+   * ESTRATEGIA DEL DIRECTOR (evidencia → diagnóstico → hipótesis → decisiones humanas). Read-only: ninguna
+   * decisión ejecuta nada. Persistida con el plan ⇒ las decisiones de marketing quedan registradas.
+   */
+  readonly estrategia: EstrategiaDirector;
   readonly at: string;
 }
 
@@ -85,7 +98,10 @@ export class PlanAccionDryRunService {
   private readonly observaciones: ObservacionService;
   private readonly lecturaSvc: LecturaDirectorRealService;
 
-  constructor(private readonly store: EventStore) {
+  constructor(
+    private readonly store: EventStore,
+    private readonly capLookup?: CapLookup,
+  ) {
     this.observaciones = new ObservacionService(store, {} as never);
     this.lecturaSvc = new LecturaDirectorRealService(store);
   }
@@ -123,6 +139,20 @@ export class PlanAccionDryRunService {
     return [...map.entries()].map(([termino, v]) => ({ termino, ...v }));
   }
 
+  /** Contactos REALES = eventos `lead_created` comerciales (no diagnóstico) del embudo Growth. Mismo criterio que el panel. */
+  private async contarContactos(ctx: RequestContext): Promise<number> {
+    const ids = await this.observaciones.listarIds(ctx);
+    let n = 0;
+    for (const id of ids) {
+      const st = await this.observaciones.cargar(ctx, id);
+      const d = st.datos;
+      if (!d || d.naturaleza !== 'REAL' || !d.provenanciaReal) continue;
+      const p = d.provenanciaReal;
+      if (p.provider === GROWTH && !p.diagnostico && p.eventName === EVENTO_CONTACTO) n += 1;
+    }
+    return n;
+  }
+
   async generar(
     org: string,
     ahora: string,
@@ -136,6 +166,20 @@ export class PlanAccionDryRunService {
     const lect = await this.lecturaSvc.leerUltima(org);
     const terminos = await this.leerTerminos(ctx);
 
+    // EVIDENCIA DEL FUNNEL — misma que alimenta panel/lectura-director/guardrail (no una segunda fuente):
+    // snapshot acumulado (impresiones/clics/gasto/estado) + contactos reales (Growth) + cap total autorizado.
+    const snap = ultimoSnapshotAds(await this.store.readStream(ctx, adsSnapshotStreamId(org)));
+    const contactosReales = await this.contarContactos(ctx);
+    const capAutorizado = this.capLookup && snap ? await this.capLookup(org, snap.campaignId) : null;
+    const funnel = {
+      impresiones: snap?.impressions ?? 0,
+      clics: snap?.clicks ?? 0,
+      gasto: snap?.cost ?? 0,
+      contactosReales,
+      capAutorizado,
+      campaignStatus: snap?.status ?? null,
+    };
+
     const insumos: InsumosPlan = {
       org,
       customerId: ads.customerId,
@@ -146,7 +190,11 @@ export class PlanAccionDryRunService {
       decisionTipo: null,
       terminos,
       limites: perfilNegocio.limitesAutonomia,
+      funnel,
     };
+
+    // ESTRATEGIA DEL DIRECTOR desde la evidencia del funnel + términos (motor puro, read-only).
+    const estrategia = evaluarEstrategiaDirector({ ...funnel, moneda: 'CLP', terminos });
 
     const intenciones = planificarCambios(insumos);
     const oportunidadesTacticas = evaluarOportunidadesTacticas(insumos);
@@ -194,6 +242,7 @@ export class PlanAccionDryRunService {
       resumenSimple,
       items,
       oportunidadesTacticas,
+      estrategia,
       at: ahora,
     };
 

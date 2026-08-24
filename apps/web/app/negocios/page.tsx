@@ -56,6 +56,19 @@ interface Panel {
     estado: 'SIN_CAP_AUTORIZADO' | 'NORMAL' | 'WARNING' | 'CAP_REACHED';
     ratio: number | null; decisionRequerida: boolean; recomendacion: string; tipoDecision: string | null; mensaje: string;
   } | null;
+  // ESTRATEGIA DEL DIRECTOR (read-only): evidencia → diagnóstico → hipótesis → decisiones humanas.
+  estrategiaDirector?: {
+    generada: boolean; funnelZeroConversion: boolean; continuarGastoRecomendado: boolean; insufficientDataSuppressed: boolean;
+    hechos: string[]; diagnostico: string; hipotesis: string[]; estrategia: string[];
+    decisiones: {
+      tipo: 'FUNNEL_ZERO_CONVERSION' | 'REQUEST_AUTHORIZED_BUDGET' | 'PREPARE_RELAUNCH_EXPERIMENT';
+      prioridad: 'HIGH' | 'MEDIUM' | 'LOW'; decisionRequerida: boolean;
+      titulo: string; diagnostico: string; recomendacion: string; hechos: string[]; hipotesis: string[];
+      experimento?: { estado: string; cambioAProbar: string; criterioExito: string; criterioDetencion: string; requiereCapAutorizado: boolean };
+    }[];
+    siguienteExperimento: { estado: string; cambioAProbar: string; criterioExito: string; criterioDetencion: string; requiereCapAutorizado: boolean } | null;
+    terminosEvidencia: string[];
+  } | null;
 }
 /** Fuente publicitaria de este panel SaaS: Google Ads (solo lectura). Etiqueta única de origen. */
 const FUENTE_ADS = 'Google Ads';
@@ -341,8 +354,48 @@ export default function Panel(): React.ReactElement {
             </div>
           )}
 
-          {/* No mostrar "no necesitás decidir nada" si el guardrail financiero exige una decisión (cap alcanzado). */}
-          {!panel?.googleAdsGuardrail?.decisionRequerida && (
+          {/* ESTRATEGIA DEL DIRECTOR: cuando hay evidencia accionable (p.ej. clics con 0 contactos), SOEC deja
+              de sólo reportar y expone diagnóstico + hipótesis (separadas de los hechos) + estrategia. */}
+          {panel?.estrategiaDirector?.generada && (
+            <div className="card" style={{ marginTop: 22 }}>
+              <div className="spread">
+                <div className="section" style={{ margin: 0 }}>El Director dice</div>
+                {panel.estrategiaDirector.funnelZeroConversion && <Badge tono="warn">Requiere diagnóstico</Badge>}
+              </div>
+              <p className="lede" style={{ marginTop: 8 }}>{panel.estrategiaDirector.diagnostico}</p>
+              <div className="section" style={{ marginTop: 14 }}>Hechos <span className="hint">lo observado</span></div>
+              <ul className="s" style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                {panel.estrategiaDirector.hechos.map((h, i) => <li key={i}>{h}</li>)}
+              </ul>
+              {panel.estrategiaDirector.estrategia.length > 0 && (
+                <>
+                  <div className="section" style={{ marginTop: 14 }}>Estrategia</div>
+                  <ul className="s" style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                    {panel.estrategiaDirector.estrategia.map((e, i) => <li key={i}>{e}</li>)}
+                  </ul>
+                </>
+              )}
+              {panel.estrategiaDirector.hipotesis.length > 0 && (
+                <>
+                  <div className="section" style={{ marginTop: 14 }}>Hipótesis <span className="hint">causas posibles, aún no confirmadas</span></div>
+                  <ul className="s" style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                    {panel.estrategiaDirector.hipotesis.map((h, i) => <li key={i}>{h}</li>)}
+                  </ul>
+                </>
+              )}
+              {panel.estrategiaDirector.siguienteExperimento && (
+                <Callout tono="info" ico="🧪">
+                  <b>Siguiente experimento (propuesto):</b> {panel.estrategiaDirector.siguienteExperimento.cambioAProbar === 'PENDING_DIAGNOSIS'
+                    ? 'el cambio concreto a probar queda pendiente del diagnóstico del funnel — no se inventa una estrategia.'
+                    : panel.estrategiaDirector.siguienteExperimento.cambioAProbar} Requiere definir un presupuesto total autorizado antes de relanzar.
+                </Callout>
+              )}
+              <p className="s" style={{ marginTop: 10 }}>Las decisiones para aprobar están en «Decisiones». SOEC no ejecuta nada por vos.</p>
+            </div>
+          )}
+
+          {/* "No necesitás decidir nada" sólo si NO hay decisión del guardrail NI de la estrategia del Director. */}
+          {!panel?.googleAdsGuardrail?.decisionRequerida && !panel?.estrategiaDirector?.decisiones?.some((d) => d.decisionRequerida) && (
             <div style={{ marginTop: 16 }}>
               <Callout tono="ok" ico="✓">
                 <b>No necesitás decidir nada ahora.</b> SOEC está en modo seguro: observa y te avisará en
@@ -593,9 +646,26 @@ export default function Panel(): React.ReactElement {
               <p className="s muted">Recomendación: pausar y diagnosticar. <b>SOEC no ejecuta la pausa</b>: la decisión y la acción en Google Ads son tuyas.</p>
             </div>
           )}
+          {/* DECISIONES DE MARKETING de la estrategia del Director (planes humanos, no mutaciones de Ads). */}
+          {panel?.estrategiaDirector?.decisiones?.map((d) => {
+            const alta = d.prioridad === 'HIGH';
+            return (
+              <div className="decisioncard" key={d.tipo} style={{ marginBottom: 10, borderLeft: `4px solid var(--${alta ? 'warn' : 'line'})` }}>
+                <div className="spread"><h3>{d.titulo}</h3><Badge tono={alta ? 'warn' : 'info'}>{d.decisionRequerida ? (alta ? 'Alta prioridad' : 'Requiere decisión') : 'Cuando corresponda'}</Badge></div>
+                <p className="dwhy">{d.diagnostico} {d.recomendacion}</p>
+                {d.hipotesis.length > 0 && (
+                  <p className="s muted">Hipótesis a verificar (no son hechos): {d.hipotesis.join(' · ')}.</p>
+                )}
+                {d.experimento && (
+                  <p className="s muted">Éxito: {d.experimento.criterioExito} · Detención: {d.experimento.criterioDetencion}</p>
+                )}
+                <p className="s muted"><b>SOEC no ejecuta nada</b>: reactivar, pausar, cambiar presupuesto o keywords sigue siendo tuyo.</p>
+              </div>
+            );
+          })}
           {tabsBandeja > 0 ? (
             <div className="card"><p className="s">Hay {tabsBandeja} cambio(s) preparados esperando tu aprobación. Revisalos con cuidado antes de autorizar.</p></div>
-          ) : (!panel?.googleAdsGuardrail?.decisionRequerida && (
+          ) : (!panel?.googleAdsGuardrail?.decisionRequerida && !panel?.estrategiaDirector?.decisiones?.length && (
             <EmptyState ico="✓" titulo="No necesito que decidas nada ahora" detalle="Cuando SOEC prepare un cambio real (por ejemplo, ajustar una campaña), aparecerá aquí con su porqué, su beneficio y su riesgo, y botones para autorizar o rechazar." />
           ))}
           {!esEcom && plan?.oportunidadesTacticas && plan.oportunidadesTacticas.length > 0 && (
