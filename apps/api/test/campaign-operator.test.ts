@@ -1,7 +1,6 @@
 /**
- * CAMPAIGN OPERATOR (DRY-RUN) E2E — transición diagnóstico → plan operable. Registrada la READINESS por la
- * vía soportada, el planner deja de exigir diagnóstico y genera un experimento aprobable con la ejecución
- * bloqueada por el gate externo de Google. Nada se ejecuta ni se gasta.
+ * CAMPAIGN OPERATOR (DRY-RUN) E2E — diagnóstico → plan → CAMPAÑA publicable. Con readiness completa (destinos
+ * validados + capacidades reales) el draft queda READY_FOR_APPROVAL con la ejecución bloqueada por gate externo.
  */
 import { describe, expect, it } from 'vitest';
 import { InMemoryEventStore } from '@soec/event-store';
@@ -13,7 +12,7 @@ import { CampaignOperatorDryRunService } from '../src/campana/campaign-operator-
 import { DiagnosisEvidenceService } from '../src/campana/diagnosis-evidence-service';
 import type { MarketingReadiness } from '../src/campana/diagnosis-evidence';
 
-const AHORA = '2026-08-24T12:00:00.000Z';
+const AHORA = '2026-08-25T12:00:00.000Z';
 const ATR: Attribution = { source: 't', purpose: 't', assumptions: [], claimType: 'observational', regime: 'empirical', uncertainty: 'baja' };
 function ctx(org: string): RequestContext {
   const o = OrganizationId(org);
@@ -22,17 +21,9 @@ function ctx(org: string): RequestContext {
 async function seedSnapshot(store: EventStore): Promise<void> {
   const c = ctx(ORG_REAL);
   const ev = await store.readStream(c, adsSnapshotStreamId(ORG_REAL));
-  await store.append(c, adsSnapshotStreamId(ORG_REAL), ev.length, [{
-    type: EVENTO_ADS_SNAPSHOT,
-    payload: { campaignId: '24120966895', campaignName: 'SmileFlow Search Chile', status: 'PAUSED', impressions: 1361, clicks: 50, cost: 30137, at: AHORA },
-    attribution: ATR, occurredAt: AHORA,
-  }]);
+  await store.append(c, adsSnapshotStreamId(ORG_REAL), ev.length, [{ type: EVENTO_ADS_SNAPSHOT, payload: { campaignId: '24120966895', campaignName: 'SmileFlow Search Chile', status: 'PAUSED', impressions: 1361, clicks: 50, cost: 30137, at: AHORA }, attribution: ATR, occurredAt: AHORA }]);
 }
-const term = (t: string, metrica: string, valor: number): EntradaObservacionReal => ({
-  provider: 'google-ads', externalEventId: `google-ads:searchterm:${t}:${metrica}`, eventName: 'ads_search_term',
-  occurredAt: AHORA, kpiId: metrica, metrica, valor, unidad: 'conteo', calidad: 'alta', cobertura: 1,
-  source: 'google-ads', utmContent: t, diagnostico: false,
-});
+const term = (t: string, metrica: string, valor: number): EntradaObservacionReal => ({ provider: 'google-ads', externalEventId: `google-ads:searchterm:${t}:${metrica}`, eventName: 'ads_search_term', occurredAt: AHORA, kpiId: metrica, metrica, valor, unidad: 'conteo', calidad: 'alta', cobertura: 1, source: 'google-ads', utmContent: t, diagnostico: false });
 async function seedTerminos(store: InMemoryEventStore, filas: { t: string; impr: number; clics: number }[]): Promise<void> {
   const svc = new ObservacionService(store, {} as never);
   for (const f of filas) {
@@ -42,66 +33,72 @@ async function seedTerminos(store: InMemoryEventStore, filas: { t: string; impr:
 }
 const READINESS_OK: MarketingReadiness = {
   landing: { status: 'PASS' }, firstPartyTracking: { status: 'PASS' }, googleAdsAttribution: { status: 'ACTIVE' },
-  sitelinks: { status: 'PASS' }, mobile: { status: 'PASS' },
-  diagnosisCompletedAt: AHORA, evidenceSource: 'external-audit',
-  findings: ['26% de clics fuera de intención principal', 'intención competidor presente', '0 contactos first-party'],
+  sitelinks: { status: 'PASS' }, mobile: { status: 'PASS' }, diagnosisCompletedAt: AHORA, evidenceSource: 'external-audit',
+  findings: ['26% de clics fuera de intención principal', 'intención competidor presente'],
+  validatedDestinations: [
+    { url: 'https://smileflowclinic.cl/#plans-trial', intent: 'plans', validated: true, public: true, available: true },
+    { url: 'https://smileflowclinic.cl/#features-how', intent: 'features', validated: true, public: true, available: true },
+  ],
+  valueProps: ['Agenda inteligente para tu clínica', 'Recordatorios automáticos 24h', 'Relleno automático de agenda', 'Prueba 15 días sin cotización'],
+  brandName: 'SmileFlow',
 };
-const ENTRADA = { objetivo: 'Conseguir clínicas dentales interesadas en SmileFlow', presupuestoTotal: 30000, periodoDias: 10, landingUrl: 'https://smileflow/#plans-trial' };
+const ENTRADA = { objetivo: 'Conseguir clínicas dentales interesadas en SmileFlow', presupuestoTotal: 30000, periodoDias: 10 };
 
-async function escenarioResuelto(): Promise<InMemoryEventStore> {
+async function escenario(readiness?: MarketingReadiness): Promise<InMemoryEventStore> {
   const store = new InMemoryEventStore();
   await seedSnapshot(store);
   await seedTerminos(store, [
-    { t: 'software dental', impr: 400, clics: 18 }, { t: 'administracion clinica dental', impr: 300, clics: 12 },
-    { t: 'dentalink', impr: 250, clics: 10 }, { t: 'exocad', impr: 180, clics: 4 }, { t: 'cariogram', impr: 111, clics: 2 },
+    { t: 'administracion clinica dental', impr: 300, clics: 12 }, { t: 'software agenda dental', impr: 220, clics: 9 },
+    { t: 'dentalink', impr: 250, clics: 10 }, { t: 'software dental', impr: 400, clics: 18 },
+    { t: 'archform software', impr: 90, clics: 3 }, { t: 'exocad', impr: 50, clics: 1 },
   ]);
-  await new DiagnosisEvidenceService(store).registrar(ORG_REAL, READINESS_OK, AHORA);
+  if (readiness) await new DiagnosisEvidenceService(store).registrar(ORG_REAL, readiness, AHORA);
   return store;
 }
 
-describe('CampaignOperator · diagnóstico registrado ⇒ plan operable (env sin overrides ⇒ gate por defecto)', () => {
-  it('diagnosis_evidence_can_be_recorded (persistencia auditable, tenant-scoped)', async () => {
+describe('CampaignOperator · campaña publicable', () => {
+  it('diagnosis_evidence_can_be_recorded (tenant-scoped)', async () => {
     const store = new InMemoryEventStore();
     const svc = new DiagnosisEvidenceService(store);
     await svc.registrar(ORG_REAL, READINESS_OK, AHORA);
-    const leido = await svc.leerUltima(ORG_REAL);
-    expect(leido?.diagnosisCompletedAt).toBe(AHORA);
-    expect(leido?.landing.status).toBe('PASS');
-    expect(await svc.leerUltima('org-otra')).toBeNull(); // aislamiento de tenant
+    expect((await svc.leerUltima(ORG_REAL))?.landing.status).toBe('PASS');
+    expect(await svc.leerUltima('org-otra')).toBeNull();
   });
 
-  it('caso real: PLAN=READY_FOR_APPROVAL, EXECUTION=EXTERNAL_GATE_BLOCKED, draft con keywords/negativas', async () => {
-    const store = await escenarioResuelto();
-    const svc = new CampaignOperatorDryRunService(store, undefined, {} as NodeJS.ProcessEnv);
-    const r = await svc.planificar(ORG_REAL, AHORA, ENTRADA);
-
+  it('caso real: STRATEGY READY, CAMPAIGN READY_FOR_APPROVAL, EXECUTION EXTERNAL_GATE_BLOCKED', async () => {
+    const store = await escenario(READINESS_OK);
+    const r = await new CampaignOperatorDryRunService(store, undefined, {} as NodeJS.ProcessEnv).planificar(ORG_REAL, AHORA, ENTRADA);
     expect(r.autonomousReal).toBe(false);
-    expect(r.plan.planStatus).toBe('READY_FOR_APPROVAL');
+    expect(r.plan.strategyStatus).toBe('READY');
+    expect(r.plan.campaignDraftStatus).toBe('READY_FOR_APPROVAL');
     expect(r.plan.executionStatus).toBe('EXTERNAL_GATE_BLOCKED');
-    expect(r.plan.channelExecutionAvailability.find((c) => c.canal === 'google')!.executionGate).toBe('ADVERTISER_VERIFICATION_PENDING');
-    expect(r.plan.selectedHypothesis).not.toBeNull();
-    expect(r.plan.campaigns.length).toBeGreaterThanOrEqual(1);
-    const kw = r.plan.campaigns[0]!.adGroups.reduce((a, g) => a + g.keywords.length, 0);
-    expect(kw).toBeGreaterThan(0);
-    expect(r.plan.campaigns[0]!.negativeKeywords.length).toBeGreaterThan(0);
-    // allocation
-    expect(r.plan.recommendedChannelMix.find((m) => m.canal === 'google')!.presupuesto).toBeGreaterThan(0);
+    // sin placeholders ni destino pendiente, sin UNKNOWN activo
+    expect(r.plan.campaignCompleteness.pendingCopyCount).toBe(0);
+    expect(r.plan.campaignCompleteness.pendingDestination).toBe(false);
+    expect(r.plan.campaignCompleteness.unknownActiveKeywords).toBe(0);
+    // tech clínico excluido, competidor en grupo EXACT
+    expect(r.plan.campaigns[0]!.negativeKeywords.some((n) => n.text === 'exocad')).toBe(true);
+    expect(r.plan.campaigns[0]!.adGroups.find((g) => g.action === 'SEGMENT')!.keywords.every((k) => k.matchType === 'EXACT')).toBe(true);
+    // presupuesto/guardrails
+    expect(r.plan.recommendedChannelMix.find((m) => m.canal === 'google')!.presupuesto).toBeLessThanOrEqual(15000);
     expect(r.plan.recommendedChannelMix.find((m) => m.canal === 'meta')!.presupuesto).toBe(0);
-    expect(r.plan.recommendedChannelMix.reduce((a, m) => a + m.presupuesto, 0)).toBeLessThanOrEqual(30000);
-    // guardrails
-    expect(r.plan.maxSpendWithoutContact.value).toBeGreaterThan(0);
-    expect(r.plan.targetCpa.kind).toBe('UNDEFINED_INSUFFICIENT_EVIDENCE');
+    expect(r.plan.maxSpendWithoutContact.value).toBeLessThanOrEqual(7500);
     // envelope
     expect(r.envelopeDraft.status).toBe('DRAFT');
     expect(r.envelopeDraft.executionEligibleChannels).toEqual([]);
-    expect(r.envelopeDraft.allowedChannelsPlanned).toContain('google');
   });
 
-  it('sin readiness ⇒ el operador aún exige diagnóstico', async () => {
-    const store = new InMemoryEventStore();
-    await seedSnapshot(store);
+  it('sin copy/destino en readiness ⇒ estrategia lista pero campaña INCOMPLETE', async () => {
+    const store = await escenario({ ...READINESS_OK, valueProps: [], validatedDestinations: [] });
     const r = await new CampaignOperatorDryRunService(store, undefined, {} as NodeJS.ProcessEnv).planificar(ORG_REAL, AHORA, ENTRADA);
-    expect(r.plan.planStatus).toBe('DIAGNOSIS_REQUIRED');
+    expect(r.plan.strategyStatus).toBe('READY');
+    expect(r.plan.campaignDraftStatus).toBe('INCOMPLETE');
+  });
+
+  it('sin readiness ⇒ diagnóstico requerido', async () => {
+    const store = await escenario();
+    const r = await new CampaignOperatorDryRunService(store, undefined, {} as NodeJS.ProcessEnv).planificar(ORG_REAL, AHORA, ENTRADA);
+    expect(r.plan.strategyStatus).toBe('DIAGNOSIS_REQUIRED');
     expect(r.plan.campaigns).toEqual([]);
   });
 });

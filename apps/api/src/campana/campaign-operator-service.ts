@@ -20,7 +20,6 @@ import { getRecursoGoogleAds } from '../plataforma';
 import { construirMarketingPlan, type CanalId, type MarketingPlan } from './marketing-plan';
 import { construirEnvelopeDraft, type AuthorizedExecutionEnvelope } from './execution-envelope';
 import { evaluarDisponibilidad, type ChannelAvailability, type ExternalGate } from './channel-availability';
-import { clasificarIntencion } from './intent-classifier';
 import { DiagnosisEvidenceService } from './diagnosis-evidence-service';
 import type { CapLookup } from '../autonomia-ads/plan-accion-service';
 
@@ -116,7 +115,6 @@ export class CampaignOperatorDryRunService {
     const { contactos, terminos } = await this.evidencia(ctx);
     const capAutorizado = this.capLookup && snap ? await this.capLookup(org, snap.campaignId) : null;
     const readiness = await this.readinessSvc.leerUltima(org);
-    const intentSignals = clasificarIntencion(terminos);
 
     const startAt = ahora;
     const endAt = new Date(Date.parse(ahora) + entrada.periodoDias * 24 * 3600_000).toISOString();
@@ -143,8 +141,6 @@ export class CampaignOperatorDryRunService {
         terminos,
       },
       readiness,
-      intentSignals,
-      ...(entrada.landingUrl ? { landingUrl: entrada.landingUrl } : {}),
       historicalCpa: entrada.historicalCpa ?? null,
     });
 

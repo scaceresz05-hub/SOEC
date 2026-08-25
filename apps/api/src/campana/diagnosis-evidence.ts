@@ -14,6 +14,17 @@ export interface Check {
   readonly notes?: string;
 }
 
+/** Destino publicable ya VALIDADO (existente, público, disponible). La readiness confirma sitelinks canónicos. */
+export interface ValidatedDestination {
+  readonly url: string;
+  readonly anchor?: string;
+  /** Intención a la que sirve el destino (p.ej. 'plans', 'features', 'contact'). */
+  readonly intent: string;
+  readonly validated: boolean;
+  readonly public: boolean;
+  readonly available: boolean;
+}
+
 export interface MarketingReadiness {
   readonly landing: Check;
   readonly firstPartyTracking: Check;
@@ -25,6 +36,11 @@ export interface MarketingReadiness {
   readonly evidenceSource: string;
   /** Observaciones estructuradas (EVIDENCIA, no estrategia): p.ej. "26% de clics fuera de intención". */
   readonly findings: readonly string[];
+  /** Destinos publicables ya validados (para el draft; sin ellos el destino queda PENDING). */
+  readonly validatedDestinations?: readonly ValidatedDestination[];
+  /** CAPACIDADES REALES confirmadas del producto (para componer copy sin fabricar claims). */
+  readonly valueProps?: readonly string[];
+  readonly brandName?: string;
 }
 
 export interface ReadinessEvaluada {
