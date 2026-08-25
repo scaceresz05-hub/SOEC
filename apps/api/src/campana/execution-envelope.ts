@@ -30,6 +30,11 @@ export interface AuthorizedExecutionEnvelope {
   readonly currency: string;
   readonly startAt: string | null;
   readonly endAt: string | null;
+  /** Canales PLANIFICADOS (SOEC diseñó la campaña) — puede incluir un canal aún no ejecutable. */
+  readonly allowedChannelsPlanned: readonly CanalId[];
+  /** Canales ELEGIBLES PARA EJECUTAR (gate READY + autonomía real). En DRY-RUN queda vacío. */
+  readonly executionEligibleChannels: readonly CanalId[];
+  /** Alias de compat: los únicos canales sobre los que una acción real podría validar = executionEligibleChannels. */
   readonly allowedChannels: readonly CanalId[];
   readonly allowedCampaignIds: readonly string[];
   readonly allowedActionTypes: readonly AccionTipo[];
@@ -50,7 +55,10 @@ const ACCIONES_PERMITIDAS_DEFECTO: readonly AccionTipo[] = [
  * DIAGNOSIS_REQUIRED no habilita canales de gasto: allowedChannels queda vacío (nada real por autorizar aún).
  */
 export function construirEnvelopeDraft(plan: MarketingPlan, org: string, planId: string): AuthorizedExecutionEnvelope {
-  const canalesConGasto = plan.recommendedChannelMix.filter((m) => m.presupuesto > 0).map((m) => m.canal);
+  // PLANIFICADOS = canales con presupuesto asignado en el experimento (SOEC diseñó su campaña).
+  const planned = plan.recommendedChannelMix.filter((m) => m.presupuesto > 0).map((m) => m.canal);
+  // EJECUTABLES = canales cuya ejecución real está habilitada (gate READY + autonomía). En DRY-RUN ⇒ vacío.
+  const executable = plan.channelExecutionAvailability.filter((c) => c.canExecute).map((c) => c.canal);
   return {
     organization: org,
     planId,
@@ -59,10 +67,12 @@ export function construirEnvelopeDraft(plan: MarketingPlan, org: string, planId:
     currency: plan.currency,
     startAt: plan.period.startAt,
     endAt: plan.period.endAt,
-    allowedChannels: canalesConGasto, // en DIAGNOSIS_REQUIRED ⇒ [] (no hay gasto que autorizar)
+    allowedChannelsPlanned: planned,
+    executionEligibleChannels: executable,
+    allowedChannels: executable, // sólo lo ejecutable puede validar una acción real (fail-closed)
     allowedCampaignIds: [], // se poblará al crear campañas dentro del sobre aprobado
-    allowedActionTypes: canalesConGasto.length > 0 ? ACCIONES_PERMITIDAS_DEFECTO : [],
-    successCriteria: plan.successCriteria,
+    allowedActionTypes: executable.length > 0 ? ACCIONES_PERMITIDAS_DEFECTO : [],
+    successCriteria: [plan.successCriteria.attributionRequirement, `≥ ${plan.successCriteria.minimumRealContacts} contacto(s) real(es)`, `gasto ≤ ${plan.successCriteria.maxSpend} ${plan.currency}`],
     stopCriteria: plan.stopCriteria,
     approvedBy: null,
     approvedAt: null,
@@ -125,27 +135,32 @@ export interface ResultadoStop {
 export function evaluarStopRules(env: AuthorizedExecutionEnvelope, m: MetricasVivas): ResultadoStop {
   const disparadas: StopRule[] = [];
   for (const r of env.stopCriteria) {
+    if (r.enabled === false) continue; // regla deshabilitada (p.ej. CPA sin evidencia) no dispara
     switch (r.tipo) {
       case 'BUDGET':
-        if (m.spend >= env.totalBudget) disparadas.push(r); // SIEMPRE
+        if (m.spend >= (r.threshold ?? env.totalBudget)) disparadas.push(r); // umbral explícito; SIEMPRE presente
         break;
       case 'ZERO_CONVERSION': {
-        const frac = m.zeroConversionFraccion ?? 0.5;
-        if (m.contacts === 0 && m.spend >= env.totalBudget * frac) disparadas.push(r);
+        const umbral = r.threshold ?? env.totalBudget * (m.zeroConversionFraccion ?? 0.5);
+        if (m.contacts === 0 && m.spend >= umbral) disparadas.push(r);
         break;
       }
-      case 'CPA':
-        if (m.cpa != null && m.cpaThreshold != null && m.cpa > m.cpaThreshold) disparadas.push(r);
+      case 'CPA': {
+        const umbral = r.threshold ?? m.cpaThreshold ?? null;
+        if (m.cpa != null && umbral != null && m.cpa > umbral) disparadas.push(r);
         break;
+      }
       case 'TRACKING':
         if (m.trackingHealthy === false) disparadas.push(r);
         break;
       case 'LANDING':
         if (m.landingAvailable === false) disparadas.push(r);
         break;
-      case 'PERIOD':
-        if (m.now != null && env.endAt != null && m.now >= env.endAt) disparadas.push(r);
+      case 'PERIOD': {
+        const fecha = r.date ?? env.endAt;
+        if (m.now != null && fecha != null && m.now >= fecha) disparadas.push(r);
         break;
+      }
     }
   }
   return { stop: disparadas.length > 0, disparadas };

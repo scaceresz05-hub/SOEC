@@ -2,20 +2,26 @@
  * apps/api · campana · CAMPAIGN OPERATOR (DRY-RUN / SIMULACIÓN).
  *
  * Orquesta el ciclo completo SIN gastar ni escribir en ningún proveedor:
- *   OBJETIVO + PRESUPUESTO humano + PERÍODO + evidencia real (snapshot Ads + contactos Growth + términos + cap)
- *     → construirMarketingPlan (puro)      → MARKETING_PLAN (+ CAMPAIGN_DRAFTS + CHANNEL_ALLOCATION)
- *     → construirEnvelopeDraft (puro)      → AUTHORIZED_EXECUTION_ENVELOPE (status DRAFT, sin aprobar)
- *     → persiste (stream `campaign-operator:<org>`, last-wins).
+ *   OBJETIVO + PRESUPUESTO humano + PERÍODO
+ *     + evidencia real (snapshot Ads + contactos Growth + términos + cap)
+ *     + READINESS del diagnóstico (ingesta auditable)
+ *     + disponibilidad por canal (planificación vs ejecución, con gates externos)
+ *   → construirMarketingPlan (puro)   → MARKETING_PLAN (hipótesis, drafts, keywords, guardrails numéricos)
+ *   → construirEnvelopeDraft (puro)   → AUTHORIZED_EXECUTION_ENVELOPE (status DRAFT, sin aprobar)
+ *   → persiste (stream `campaign-operator:<org>`, last-wins).
  *
- * NO habilita escritura real: `SOEC_AUTONOMOUS_REAL` permanece false y el sobre queda en DRAFT. La ejecución
- * real controlada (adapters gobernados por el envelope) es un paso posterior, fuera de este entregable.
+ * NO habilita escritura real: `SOEC_AUTONOMOUS_REAL` permanece false y el sobre queda en DRAFT.
  */
 import { ActorId, OrganizationId, type Attribution, type EventStore, type RequestContext } from '@soec/contracts';
 import { ObservacionService } from '@soec/motor-medicion';
+import { AUTONOMOUS_REAL } from '@soec/cia';
 import { adsSnapshotStreamId, ultimoSnapshotAds } from '../ingesta/ingesta-google-ads-service';
 import { getRecursoGoogleAds } from '../plataforma';
 import { construirMarketingPlan, type CanalId, type MarketingPlan } from './marketing-plan';
 import { construirEnvelopeDraft, type AuthorizedExecutionEnvelope } from './execution-envelope';
+import { evaluarDisponibilidad, type ChannelAvailability, type ExternalGate } from './channel-availability';
+import { clasificarIntencion } from './intent-classifier';
+import { DiagnosisEvidenceService } from './diagnosis-evidence-service';
 import type { CapLookup } from '../autonomia-ads/plan-accion-service';
 
 const GROWTH = 'smileflow-growth';
@@ -39,6 +45,8 @@ export interface EntradaOperador {
   readonly presupuestoTotal: number;
   readonly periodoDias: number;
   readonly canales?: readonly CanalId[];
+  readonly landingUrl?: string;
+  readonly historicalCpa?: number | null;
 }
 
 export interface ResultadoOperador {
@@ -49,13 +57,23 @@ export interface ResultadoOperador {
   readonly at: string;
 }
 
-/** Disponibilidad de canales para PLANIFICAR. Meta queda DORMANT salvo gate externo (META_AVAILABLE=true). */
-export function canalesDisponibles(env: NodeJS.ProcessEnv): Readonly<Record<CanalId, boolean>> {
-  return { google: true, meta: env.META_AVAILABLE === 'true' };
+/**
+ * Disponibilidad de canales para PLANIFICAR y EJECUTAR. Google: siempre PLANIFICABLE; gate de ejecución
+ * configurable (por defecto ADVERTISER_VERIFICATION_PENDING para una cuenta sin verificar). Meta: DORMANT
+ * salvo gate externo (META_AVAILABLE=true). La ejecución real exige además autonomía habilitada (false).
+ */
+export function canalesDisponibles(env: NodeJS.ProcessEnv): ChannelAvailability[] {
+  const googleGate = (env.GOOGLE_ADS_EXECUTION_GATE as ExternalGate | undefined) ?? 'ADVERTISER_VERIFICATION_PENDING';
+  const metaPlaneable = env.META_AVAILABLE === 'true';
+  return [
+    evaluarDisponibilidad({ canal: 'google', planeable: true, gate: googleGate, autonomousReal: AUTONOMOUS_REAL }),
+    evaluarDisponibilidad({ canal: 'meta', planeable: metaPlaneable, gate: metaPlaneable ? 'READY' : 'PROVIDER_NOT_CONNECTED', autonomousReal: AUTONOMOUS_REAL }),
+  ];
 }
 
 export class CampaignOperatorDryRunService {
   private readonly observaciones: ObservacionService;
+  private readonly readinessSvc: DiagnosisEvidenceService;
 
   constructor(
     private readonly store: EventStore,
@@ -63,6 +81,7 @@ export class CampaignOperatorDryRunService {
     private readonly env: NodeJS.ProcessEnv = process.env,
   ) {
     this.observaciones = new ObservacionService(store, {} as never);
+    this.readinessSvc = new DiagnosisEvidenceService(store);
   }
 
   private ctx(org: string): RequestContext {
@@ -96,6 +115,8 @@ export class CampaignOperatorDryRunService {
     const snap = ultimoSnapshotAds(await this.store.readStream(ctx, adsSnapshotStreamId(org)));
     const { contactos, terminos } = await this.evidencia(ctx);
     const capAutorizado = this.capLookup && snap ? await this.capLookup(org, snap.campaignId) : null;
+    const readiness = await this.readinessSvc.leerUltima(org);
+    const intentSignals = clasificarIntencion(terminos);
 
     const startAt = ahora;
     const endAt = new Date(Date.parse(ahora) + entrada.periodoDias * 24 * 3600_000).toISOString();
@@ -121,12 +142,15 @@ export class CampaignOperatorDryRunService {
         moneda: 'CLP',
         terminos,
       },
+      readiness,
+      intentSignals,
+      ...(entrada.landingUrl ? { landingUrl: entrada.landingUrl } : {}),
+      historicalCpa: entrada.historicalCpa ?? null,
     });
 
     const planId = `plan:${org}:${ahora}`;
     const envelopeDraft = construirEnvelopeDraft(plan, org, planId);
     const resultado: ResultadoOperador = { modo: 'DRY_RUN', autonomousReal: false, plan, envelopeDraft, at: ahora };
-    // Referencia registrada, sin escritura de proveedor: sólo persiste el plan/sobre (event-sourced, last-wins).
     void ads;
     await this.persistir(ctx, resultado);
     return resultado;

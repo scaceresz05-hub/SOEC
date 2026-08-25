@@ -26,6 +26,8 @@ import { PlanAccionDryRunService, type PerfilUsuario, type CapLookup } from './a
 import { G2AService } from './autonomia-ads/g2a-service';
 import { CampaignOperatorDryRunService, type EntradaOperador } from './campana/campaign-operator-service';
 import type { CanalId } from './campana/marketing-plan';
+import { DiagnosisEvidenceService } from './campana/diagnosis-evidence-service';
+import type { MarketingReadiness } from './campana/diagnosis-evidence';
 import { contextoDe } from './superficie-auth';
 import {
   bindExperienciaReal,
@@ -341,11 +343,33 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
   });
   app.post('/medicion/campaign-operator-plan', async (req, reply) => {
     const { org } = real(req, 'autonomia-ads');
-    const b = (req.body ?? {}) as { objetivo?: string; presupuestoTotal?: number; periodoDias?: number; canales?: CanalId[] };
+    const b = (req.body ?? {}) as { objetivo?: string; presupuestoTotal?: number; periodoDias?: number; canales?: CanalId[]; landingUrl?: string; historicalCpa?: number | null };
     if (!b.objetivo || typeof b.presupuestoTotal !== 'number' || typeof b.periodoDias !== 'number')
       return reply.code(400).send({ ok: false, error: 'faltan objetivo/presupuestoTotal/periodoDias' });
-    const entrada: EntradaOperador = { objetivo: b.objetivo, presupuestoTotal: b.presupuestoTotal, periodoDias: b.periodoDias, ...(b.canales ? { canales: b.canales } : {}) };
+    const entrada: EntradaOperador = { objetivo: b.objetivo, presupuestoTotal: b.presupuestoTotal, periodoDias: b.periodoDias, ...(b.canales ? { canales: b.canales } : {}), ...(b.landingUrl ? { landingUrl: b.landingUrl } : {}), ...(b.historicalCpa != null ? { historicalCpa: b.historicalCpa } : {}) };
     return reply.code(201).send({ organizationId: org, ...(await campaignOperator.planificar(org, new Date().toISOString(), entrada)) });
+  });
+
+  // INGESTA de EVIDENCIA DE DIAGNÓSTICO (readiness del funnel). GET = lectura; POST = registrar (auditable).
+  // El diagnóstico se hace FUERA de SOEC; esta vía lo incorpora para que el planner no vuelva a exigirlo.
+  const diagnosisEvidence = new DiagnosisEvidenceService(store);
+  app.get('/medicion/diagnosis-evidence', async (req, reply) => {
+    const { org } = real(req, 'autonomia-ads');
+    return reply.send({ organizationId: org, readiness: await diagnosisEvidence.leerUltima(org) });
+  });
+  app.post('/medicion/diagnosis-evidence', async (req, reply) => {
+    const { org } = real(req, 'autonomia-ads');
+    const b = req.body as Partial<MarketingReadiness> | undefined;
+    if (!b || !b.landing || !b.firstPartyTracking || !b.googleAdsAttribution || !b.mobile || !b.sitelinks)
+      return reply.code(400).send({ ok: false, error: 'readiness incompleta (landing/firstPartyTracking/googleAdsAttribution/sitelinks/mobile requeridos)' });
+    const readiness: MarketingReadiness = {
+      landing: b.landing, firstPartyTracking: b.firstPartyTracking, googleAdsAttribution: b.googleAdsAttribution,
+      sitelinks: b.sitelinks, mobile: b.mobile,
+      diagnosisCompletedAt: b.diagnosisCompletedAt ?? new Date().toISOString(),
+      evidenceSource: b.evidenceSource ?? 'external-diagnosis',
+      findings: Array.isArray(b.findings) ? b.findings : [],
+    };
+    return reply.code(201).send({ organizationId: org, readiness: await diagnosisEvidence.registrar(org, readiness, new Date().toISOString()) });
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {
