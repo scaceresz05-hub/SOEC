@@ -39,7 +39,10 @@ const READINESS_OK: MarketingReadiness = {
     { url: 'https://smileflowclinic.cl/#plans-trial', intent: 'plans', validated: true, public: true, available: true },
     { url: 'https://smileflowclinic.cl/#features-how', intent: 'features', validated: true, public: true, available: true },
   ],
-  valueProps: ['Agenda inteligente para tu clínica', 'Recordatorios automáticos 24h', 'Relleno automático de agenda', 'Prueba 15 días sin cotización'],
+  valueProps: [
+    { id: 'vp1', capability: 'Agenda inteligente para tu clínica' }, { id: 'vp2', capability: 'Recordatorios automáticos 24h' },
+    { id: 'vp3', capability: 'Relleno automático de agenda' }, { id: 'vp4', capability: 'Prueba 15 días sin cotización' },
+  ],
   brandName: 'SmileFlow',
 };
 const ENTRADA = { objetivo: 'Conseguir clínicas dentales interesadas en SmileFlow', presupuestoTotal: 30000, periodoDias: 10 };
@@ -49,8 +52,8 @@ async function escenario(readiness?: MarketingReadiness): Promise<InMemoryEventS
   await seedSnapshot(store);
   await seedTerminos(store, [
     { t: 'administracion clinica dental', impr: 300, clics: 12 }, { t: 'software agenda dental', impr: 220, clics: 9 },
-    { t: 'dentalink', impr: 250, clics: 10 }, { t: 'software dental', impr: 400, clics: 18 },
-    { t: 'archform software', impr: 90, clics: 3 }, { t: 'exocad', impr: 50, clics: 1 },
+    { t: 'dentalink precios', impr: 180, clics: 9 }, { t: 'dentalink ingreso', impr: 90, clics: 5 },
+    { t: 'software dental', impr: 400, clics: 18 }, { t: 'archform software', impr: 90, clics: 3 }, { t: 'exocad', impr: 50, clics: 1 },
   ]);
   if (readiness) await new DiagnosisEvidenceService(store).registrar(ORG_REAL, readiness, AHORA);
   return store;

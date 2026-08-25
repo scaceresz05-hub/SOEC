@@ -27,7 +27,7 @@ import { G2AService } from './autonomia-ads/g2a-service';
 import { CampaignOperatorDryRunService, type EntradaOperador } from './campana/campaign-operator-service';
 import type { CanalId } from './campana/marketing-plan';
 import { DiagnosisEvidenceService } from './campana/diagnosis-evidence-service';
-import type { MarketingReadiness } from './campana/diagnosis-evidence';
+import { normalizarReadinessInput } from './campana/diagnosis-evidence';
 import { contextoDe } from './superficie-auth';
 import {
   bindExperienciaReal,
@@ -359,17 +359,10 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
   });
   app.post('/medicion/diagnosis-evidence', async (req, reply) => {
     const { org } = real(req, 'autonomia-ads');
-    const b = req.body as Partial<MarketingReadiness> | undefined;
-    if (!b || !b.landing || !b.firstPartyTracking || !b.googleAdsAttribution || !b.mobile || !b.sitelinks)
-      return reply.code(400).send({ ok: false, error: 'readiness incompleta (landing/firstPartyTracking/googleAdsAttribution/sitelinks/mobile requeridos)' });
-    const readiness: MarketingReadiness = {
-      landing: b.landing, firstPartyTracking: b.firstPartyTracking, googleAdsAttribution: b.googleAdsAttribution,
-      sitelinks: b.sitelinks, mobile: b.mobile,
-      diagnosisCompletedAt: b.diagnosisCompletedAt ?? new Date().toISOString(),
-      evidenceSource: b.evidenceSource ?? 'external-diagnosis',
-      findings: Array.isArray(b.findings) ? b.findings : [],
-    };
-    return reply.code(201).send({ organizationId: org, readiness: await diagnosisEvidence.registrar(org, readiness, new Date().toISOString()) });
+    // Writer↔reader alineados: valueProps y validatedDestinations se aceptan en primer nivel y se PRESERVAN.
+    const norm = normalizarReadinessInput(req.body, new Date().toISOString());
+    if (!norm.ok) return reply.code(400).send({ ok: false, error: norm.error });
+    return reply.code(201).send({ organizationId: org, readiness: await diagnosisEvidence.registrar(org, norm.readiness, new Date().toISOString()) });
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {

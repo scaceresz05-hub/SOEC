@@ -1,20 +1,24 @@
 /**
  * apps/api · campana · CLASIFICADOR DE INTENCIÓN de términos de búsqueda (composición, heurístico).
  *
- * Convierte términos REALES en categorías de INTENCIÓN, para que el planner opere la evidencia y decida qué
- * keyword se activa (recibe gasto) y cuál no. REGLA CONCEPTUAL clave: contener "software"/"dental" NO implica
- * intención de GESTIÓN de clínica; el software clínico/técnico (alineadores, imaging, CAD/CAM, ortodoncia) es
- * otra categoría y NO entra al grupo de gestión. Los léxicos son GENÉRICOS de la industria dental (no la
- * identidad de ninguna organización) y OVERRIDABLES por-org. No decide la acción: eso es del planner.
+ * Reglas conceptuales REUTILIZABLES (no listas exclusivas ni identidad de ninguna organización):
+ *  - Contener "software"/"dental" NO implica GESTIÓN; y "software para dentistas" NO es intención de PACIENTE.
+ *  - Una marca de competidor NO implica intención COMPRADORA: se sub-clasifica por señales (comprador vs
+ *    navegacional vs institucional/educativo vs desconocido). Sólo el comprador puede recibir gasto.
+ *  - Lo desconocido NO se paga por descubrir.
+ * Léxicos genéricos de la industria dental + señales de intención, OVERRIDABLES por-org.
  */
 
 export type IntentCategory =
-  | 'CLINIC_MANAGEMENT_INTENT'      // software de GESTIÓN/administración de la clínica (comprador objetivo)
-  | 'COMPETITOR_MANAGEMENT_INTENT'  // marcas de software de gestión de la competencia (comparando)
-  | 'CLINICAL_TECH_SOFTWARE'        // software clínico/técnico (alineadores, imaging, CAD/CAM, ortodoncia) — NO gestión
-  | 'PATIENT_INTENT'                // intención de PACIENTE buscando atención (audiencia equivocada)
-  | 'EDUCATIONAL'                   // intención informativa/educativa (no comprador)
-  | 'UNKNOWN';                      // no clasificable con la evidencia (genérico ambiguo)
+  | 'CLINIC_MANAGEMENT_INTENT'
+  | 'COMPETITOR_BUYER_INTENT'
+  | 'COMPETITOR_NAVIGATIONAL'
+  | 'COMPETITOR_EDUCATIONAL_OR_INSTITUTIONAL'
+  | 'COMPETITOR_UNKNOWN'
+  | 'CLINICAL_TECH_SOFTWARE'
+  | 'PATIENT_INTENT'
+  | 'EDUCATIONAL'
+  | 'UNKNOWN';
 
 export type Confidence = 'LOW' | 'MEDIUM' | 'HIGH';
 
@@ -24,8 +28,12 @@ export interface IntentLexicon {
   readonly clinicalTechTokens: readonly string[];
   readonly managementTokens: readonly string[];
   readonly genericSoftwareTokens: readonly string[];
+  readonly professionalDentalTokens: readonly string[];
   readonly patientServiceTokens: readonly string[];
   readonly educationalTokens: readonly string[];
+  readonly buyerSignals: readonly string[];
+  readonly navigationalSignals: readonly string[];
+  readonly institutionalSignals: readonly string[];
 }
 
 /** Léxico por defecto de la industria dental (genérico, no específico de ninguna organización). */
@@ -34,14 +42,20 @@ export const LEXICO_DENTAL_POR_DEFECTO: IntentLexicon = {
   clinicalTechBrands: ['exocad', 'cariogram', 'cerec', '3shape', 'planmeca', 'dentidesk', 'archform', 'cs imaging', 'nemo studio', 'nemostudio', 'nemocast', 'invisalign', 'romexis', 'dolphin imaging'],
   clinicalTechTokens: ['alineador', 'aligner', 'imaging', 'imagen', 'radiografia', 'radiografico', 'cad', 'cam', 'ortodoncia', 'escaner', 'intraoral', 'cbct', 'diseno de sonrisa', 'setup ortodoncia'],
   managementTokens: ['gestion', 'administracion', 'administrativo', 'agenda', 'agendamiento', 'ficha clinica', 'recordatorio', 'cobranza'],
-  genericSoftwareTokens: ['software', 'sistema', 'programa', 'app', 'aplicacion'],
-  patientServiceTokens: ['dentista', 'urgencia', 'blanqueamiento', 'implante', 'extraccion', 'dolor de muela', 'tapadura'],
-  educationalTokens: ['que es', 'como', 'curso', 'significado', 'ejemplos', 'pdf', 'gratis'],
+  genericSoftwareTokens: ['software', 'sistema', 'programa', 'app', 'aplicacion', 'plataforma'],
+  // Sustantivos de AUDIENCIA profesional (no el adjetivo genérico "dental"): "software para dentistas" = gestión,
+  // pero "software dental" (sólo adjetivo) queda ambiguo (UNKNOWN, sin gasto).
+  professionalDentalTokens: ['clinica', 'odontolog', 'dentista', 'dentistas', 'consulta dental'],
+  patientServiceTokens: ['urgencia', 'blanqueamiento', 'implante', 'extraccion', 'dolor de muela', 'tapadura', 'ortodoncista cerca', 'hora dentista'],
+  educationalTokens: ['que es', 'como', 'curso', 'significado', 'ejemplos', 'pdf', 'gratis', 'tutorial', 'manual'],
+  buyerSignals: ['precio', 'precios', 'plan', 'planes', 'demo', 'software', 'alternativa', 'alternativas', 'comparar', 'comparacion', 'vs', 'como funciona', 'opiniones', 'reseñas', 'reviews', 'cotizacion', 'contratar'],
+  navigationalSignals: ['login', 'ingreso', 'iniciar sesion', 'inicio sesion', 'usuario', 'www', '.cl', '.com', 'acceso', 'portal', 'entrar', 'descargar app'],
+  institutionalSignals: ['universidad', 'instituto', 'institucion', 'campus', 'facultad', 'uchile', 'uach', 'inacap', 'duoc', 'ucn', 'udec', 'usach', 'puc', 'u de', 'sede'],
 };
 
 const norm = (s: string): string => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const tieneMarca = (t: string, marcas: readonly string[]): boolean => marcas.some((m) => t.includes(norm(m)));
-const tieneToken = (t: string, tokens: readonly string[]): boolean => tokens.some((k) => new RegExp(`(^|\\s)${norm(k).replace(/\s+/g, '\\s')}`).test(t));
+const tieneToken = (t: string, tokens: readonly string[]): boolean => tokens.some((k) => { const n = norm(k); return n.startsWith('.') ? t.includes(n) : new RegExp(`(^|\\s)${n.replace(/\s+/g, '\\s')}`).test(t); });
 
 export interface ClassifiedTerm {
   readonly termino: string;
@@ -51,24 +65,36 @@ export interface ClassifiedTerm {
   readonly confidence: Confidence;
 }
 
+/** Sub-clasifica una consulta que menciona una marca de competidor por su INTENCIÓN (no toda marca es comprador). */
+function subClasificarCompetidor(t: string, lex: IntentLexicon): { category: IntentCategory; confidence: Confidence } {
+  if (tieneToken(t, lex.institutionalSignals)) return { category: 'COMPETITOR_EDUCATIONAL_OR_INSTITUTIONAL', confidence: 'MEDIUM' };
+  if (tieneToken(t, lex.navigationalSignals)) return { category: 'COMPETITOR_NAVIGATIONAL', confidence: 'MEDIUM' };
+  if (tieneToken(t, lex.buyerSignals)) return { category: 'COMPETITOR_BUYER_INTENT', confidence: 'HIGH' };
+  return { category: 'COMPETITOR_UNKNOWN', confidence: 'LOW' }; // marca sola / sin señal ⇒ no se paga por descubrir
+}
+
 /**
- * Clasifica UN término. Precedencia (de más específica a más genérica): tech clínico → competidor →
- * gestión → paciente → educativo → genérico ambiguo (UNKNOWN). Un token genérico ("software") NO basta
- * para inferir gestión.
+ * Clasifica UN término. Precedencia: tech clínico → competidor(sub) → gestión → software-para-profesional →
+ * paciente → educativo → genérico ambiguo (UNKNOWN). Un token genérico ("software") NO infiere gestión, y la
+ * intención de PACIENTE se descarta si la consulta menciona software/sistema (los pacientes no buscan software).
  */
 export function clasificarTermino(termino: string, lex: IntentLexicon = LEXICO_DENTAL_POR_DEFECTO): { category: IntentCategory; confidence: Confidence } {
   const t = norm(termino);
   if (!t.trim()) return { category: 'UNKNOWN', confidence: 'LOW' };
   if (tieneMarca(t, lex.clinicalTechBrands)) return { category: 'CLINICAL_TECH_SOFTWARE', confidence: 'HIGH' };
   if (tieneToken(t, lex.clinicalTechTokens)) return { category: 'CLINICAL_TECH_SOFTWARE', confidence: 'MEDIUM' };
-  if (tieneMarca(t, lex.managementSoftwareBrands)) return { category: 'COMPETITOR_MANAGEMENT_INTENT', confidence: 'HIGH' };
+  if (tieneMarca(t, lex.managementSoftwareBrands)) return subClasificarCompetidor(t, lex);
   if (tieneToken(t, lex.managementTokens)) {
     const fuerte = /clinic|dental|odonto/.test(t);
     return { category: 'CLINIC_MANAGEMENT_INTENT', confidence: fuerte ? 'HIGH' : 'MEDIUM' };
   }
-  if (tieneToken(t, lex.patientServiceTokens)) return { category: 'PATIENT_INTENT', confidence: 'MEDIUM' };
+  const tieneSoftware = tieneToken(t, lex.genericSoftwareTokens);
+  const contextoProfesional = tieneToken(t, lex.professionalDentalTokens);
+  // "software para dentistas/clínica" ⇒ software PARA el profesional = gestión (baja confianza), NUNCA paciente.
+  if (tieneSoftware && contextoProfesional) return { category: 'CLINIC_MANAGEMENT_INTENT', confidence: 'LOW' };
+  // Paciente sólo si NO hay señal de software (los pacientes no buscan "software").
+  if (!tieneSoftware && tieneToken(t, lex.patientServiceTokens)) return { category: 'PATIENT_INTENT', confidence: 'MEDIUM' };
   if (tieneToken(t, lex.educationalTokens)) return { category: 'EDUCATIONAL', confidence: 'MEDIUM' };
-  // Sólo software/dental genérico ⇒ ambiguo: NO se asume gestión. UNKNOWN (no gasta por defecto).
   return { category: 'UNKNOWN', confidence: 'LOW' };
 }
 
@@ -86,7 +112,6 @@ export interface IntentSignal {
   readonly shareImpresiones: number;
 }
 
-/** Agrega términos clasificados en señales por categoría (para selección de hipótesis). */
 export function agregarSenales(clasificados: readonly ClassifiedTerm[]): IntentSignal[] {
   const totalImpr = clasificados.reduce((a, t) => a + t.impresiones, 0) || 1;
   const map = new Map<IntentCategory, { examples: string[]; impresiones: number; clics: number }>();

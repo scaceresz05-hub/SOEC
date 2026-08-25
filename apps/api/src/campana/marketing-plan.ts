@@ -14,7 +14,7 @@
  *  - No inventa TARGET_CPA sin evidencia. Nunca excede el tope humano. No hardcodea ninguna organización.
  */
 import { evaluarEstrategiaDirector, type EntradaEstrategia } from '../autonomia-ads/estrategia-director';
-import { evaluarReadiness, type MarketingReadiness, type ValidatedDestination } from './diagnosis-evidence';
+import { evaluarReadiness, type MarketingReadiness, type ValidatedDestination, type ValueProp } from './diagnosis-evidence';
 import type { ChannelAvailability } from './channel-availability';
 import { clasificarTerminos, agregarSenales, type ClassifiedTerm, type IntentCategory, type IntentSignal, type Confidence } from './intent-classifier';
 
@@ -169,8 +169,8 @@ function seleccionarHipotesis(readiness: MarketingReadiness | null, signals: rea
   const landingOk = readiness?.landing.status === 'PASS';
   const trackingOk = readiness?.firstPartyTracking.status === 'PASS';
   const mobileOk = readiness?.mobile.status === 'PASS';
-  const noComprador = signals.filter((s) => ['CLINICAL_TECH_SOFTWARE', 'PATIENT_INTENT', 'EDUCATIONAL', 'UNKNOWN'].includes(s.category)).reduce((a, s) => a + s.shareImpresiones, 0);
-  const hayCompetidorOGestion = signals.some((s) => s.category === 'COMPETITOR_MANAGEMENT_INTENT' || s.category === 'CLINIC_MANAGEMENT_INTENT');
+  const noComprador = signals.filter((s) => ['CLINICAL_TECH_SOFTWARE', 'PATIENT_INTENT', 'EDUCATIONAL', 'UNKNOWN', 'COMPETITOR_NAVIGATIONAL', 'COMPETITOR_EDUCATIONAL_OR_INSTITUTIONAL', 'COMPETITOR_UNKNOWN'].includes(s.category)).reduce((a, s) => a + s.shareImpresiones, 0);
+  const hayCompetidorOGestion = signals.some((s) => s.category === 'COMPETITOR_BUYER_INTENT' || s.category === 'CLINIC_MANAGEMENT_INTENT');
   const targetingStrength: Nivel = noComprador >= 0.2 || hayCompetidorOGestion ? 'HIGH' : signals.length > 0 ? 'MEDIUM' : 'LOW';
 
   const cand: Omit<Hypothesis, 'score'>[] = [
@@ -188,15 +188,18 @@ function seleccionarHipotesis(readiness: MarketingReadiness | null, signals: rea
 /** Política determinista por categoría: acción + matchType. Opera la evidencia (no "pagar por descubrir"). */
 const POLITICA: Record<IntentCategory, { action: KeywordAction; matchType: MatchType | null; reason: string }> = {
   CLINIC_MANAGEMENT_INTENT: { action: 'TARGET', matchType: 'PHRASE', reason: 'Intención de compra de software de gestión de clínica: keyword activa (grupo core).' },
-  COMPETITOR_MANAGEMENT_INTENT: { action: 'SEGMENT', matchType: 'EXACT', reason: 'Comprador comparando software de gestión: grupo SEPARADO, EXACT, presupuesto/riesgo acotado.' },
+  COMPETITOR_BUYER_INTENT: { action: 'SEGMENT', matchType: 'EXACT', reason: 'Comprador comparando software de gestión (precio/planes/demo/alternativa): grupo SEPARADO, EXACT, riesgo acotado.' },
+  COMPETITOR_NAVIGATIONAL: { action: 'OBSERVE_NO_SPEND', matchType: null, reason: 'Consulta navegacional del competidor (login/ingreso/acceso): usuario existente, no comprador. Sin gasto.' },
+  COMPETITOR_EDUCATIONAL_OR_INSTITUTIONAL: { action: 'OBSERVE_NO_SPEND', matchType: null, reason: 'Consulta institucional/educativa del competidor: no comprador comercial. Sin gasto.' },
+  COMPETITOR_UNKNOWN: { action: 'OBSERVE_NO_SPEND', matchType: null, reason: 'Marca de competidor sin señal de intención: NO se paga por descubrir. Observar como evidencia.' },
   CLINICAL_TECH_SOFTWARE: { action: 'EXCLUDE', matchType: 'PHRASE', reason: 'Software clínico/técnico (alineadores/imaging/CAD/ortodoncia): NO compra gestión. Excluir.' },
   PATIENT_INTENT: { action: 'EXCLUDE', matchType: 'PHRASE', reason: 'Intención de paciente: audiencia equivocada para software. Excluir.' },
   EDUCATIONAL: { action: 'OBSERVE_NO_SPEND', matchType: null, reason: 'Intención informativa/educativa: no comprador. Mantener como evidencia, sin gasto.' },
   UNKNOWN: { action: 'OBSERVE_NO_SPEND', matchType: null, reason: 'Intención no clasificable (genérico ambiguo): NO se paga por descubrir. Observar como evidencia.' },
 };
 
-function componerAnuncio(valueProps: readonly string[], brand: string | undefined): AdDraft {
-  const props = valueProps.filter((p) => p && p.trim());
+function componerAnuncio(valueProps: readonly ValueProp[], brand: string | undefined): AdDraft {
+  const props = valueProps.map((v) => v.capability).filter((c) => c && c.trim());
   const headlines: string[] = [];
   if (brand && brand.trim()) headlines.push(corta(brand, 30));
   for (const p of props) { if (headlines.length >= 8) break; headlines.push(corta(p, 30)); }
@@ -298,7 +301,7 @@ export function construirMarketingPlan(e: EntradaMarketingPlan): MarketingPlan {
   const grupos: AdGroupDraft[] = [];
   const porAccion: Array<{ action: 'TARGET' | 'SEGMENT'; label: string; intent: IntentCategory; destIntent: string }> = [
     { action: 'TARGET', label: 'Gestión clínica (core)', intent: 'CLINIC_MANAGEMENT_INTENT', destIntent: 'plans' },
-    { action: 'SEGMENT', label: 'Competidores (test acotado)', intent: 'COMPETITOR_MANAGEMENT_INTENT', destIntent: 'features' },
+    { action: 'SEGMENT', label: 'Competidores · comprador (test acotado)', intent: 'COMPETITOR_BUYER_INTENT', destIntent: 'features' },
   ];
   for (const g of porAccion) {
     const kws = activeKeywords.filter((k) => k.action === g.action);

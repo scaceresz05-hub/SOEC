@@ -392,7 +392,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return reply.code(500).send({ error: 'InternalError' });
   });
 
-  app.get('/health', async () => ({ status: 'ok' }));
+  // Observabilidad de build: SHA/versión tomados del ENTORNO (no se inventan). Trivial cuando el entorno no los
+  // trae (dev/test ⇒ { status: 'ok' }); en producción Railway aporta RAILWAY_GIT_COMMIT_SHA/RAILWAY_DEPLOYMENT_ID.
+  app.get('/health', async () => { const b = process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA ?? process.env.SOURCE_COMMIT ?? null; const d = process.env.RAILWAY_DEPLOYMENT_ID ?? null; return (b || d) ? { status: 'ok', buildSha: b, deploymentVersion: d } : { status: 'ok' }; });
 
   // Registra TODA la superficie vertical/experiencia sobre un destino (app raíz o ámbito del
   // gateway). El contexto lo derivan las rutas de las cabeceras `x-organization-id/-actor-id/-scope`,
