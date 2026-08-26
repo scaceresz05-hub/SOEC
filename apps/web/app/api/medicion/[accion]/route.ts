@@ -9,6 +9,8 @@ const GET_ACCIONES = new Set([
   'g2a-bandeja',
   'campaign-operator',
   'diagnosis-evidence',
+  'envelope',
+  'envelope-audit',
 ]);
 const POST_ACCIONES = new Set([
   'preparar',
@@ -19,6 +21,9 @@ const POST_ACCIONES = new Set([
   'refresh-ads',
   'campaign-operator-plan',
   'diagnosis-evidence',
+  'envelope',
+  'envelope-approve',
+  'envelope-revoke',
 ]);
 
 /**

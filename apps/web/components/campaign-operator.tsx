@@ -8,6 +8,7 @@
 import { useCallback, useState } from 'react';
 import { cabecerasOrg } from '../lib/org-activa';
 import { Badge, Callout } from './ui';
+import { AutorizacionSobre } from './autorizacion-sobre';
 
 interface AsignacionCanal { canal: string; presupuesto: number; motivo: string }
 interface StopRule { id: string; descripcion: string; enabled: boolean; reason?: string }
@@ -116,6 +117,8 @@ export function CampaignOperator({ org }: { org: string | null | undefined }): R
 
               <div className="section" style={{ marginTop: 14 }}>Reglas de detención <span className="hint">umbrales ejecutables</span></div>
               <ul className="s" style={{ margin: '4px 0 0', paddingLeft: 18 }}>{plan.stopCriteria.map((s) => <li key={s.id}>{s.enabled ? '' : '(desactivada) '}{s.descripcion}{s.reason ? ` [${s.reason}]` : ''}</li>)}</ul>
+
+              {plan.campaignDraftStatus === 'READY_FOR_APPROVAL' && <AutorizacionSobre org={org} />}
             </>
           )}
 

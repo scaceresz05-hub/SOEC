@@ -28,6 +28,10 @@ import { CampaignOperatorDryRunService, type EntradaOperador } from './campana/c
 import type { CanalId } from './campana/marketing-plan';
 import { DiagnosisEvidenceService } from './campana/diagnosis-evidence-service';
 import { normalizarReadinessInput } from './campana/diagnosis-evidence';
+import { EnvelopeService } from './campana/envelope-service';
+import { flagsEjecucion, validateAuthorizedExecution, type ProviderState, type FinancialState } from './campana/authorized-execution-envelope';
+import { canalesDisponibles } from './campana/campaign-operator-service';
+import { AUTONOMOUS_REAL } from '@soec/cia';
 import { contextoDe } from './superficie-auth';
 import {
   bindExperienciaReal,
@@ -363,6 +367,61 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const norm = normalizarReadinessInput(req.body, new Date().toISOString());
     if (!norm.ok) return reply.code(400).send({ ok: false, error: norm.error });
     return reply.code(201).send({ organizationId: org, readiness: await diagnosisEvidence.registrar(org, norm.readiness, new Date().toISOString()) });
+  });
+
+  // AUTHORIZED EXECUTION ENVELOPE (soberanía financiera humana). Crear/leer/aprobar(HUMANO)/revocar. NADA se
+  // ejecuta: SOEC_SUPERVISED_REAL y SOEC_AUTONOMOUS_REAL en false ⇒ validateAuthorizedExecution DENIEGA siempre.
+  const envelopeSvc = new EnvelopeService(store);
+  const providerYFinancieroDe = (org: string): { prov: ProviderState; fin: FinancialState } => {
+    const disp = canalesDisponibles(process.env);
+    const executionEligibleChannels = disp.filter((d) => d.canExecute).map((d) => d.canal);
+    return {
+      prov: { executionEligibleChannels, providerConnected: executionEligibleChannels.length > 0, trackingValid: true, landingAvailable: true, now: new Date().toISOString(), contacts: 0 },
+      fin: { historicalSpend: 0, envelopeSpend: 0, committedSpend: 0 }, // histórico NO cuenta en el envelope
+    };
+  };
+  app.get('/medicion/envelope', async (req, reply) => {
+    const { org } = real(req, 'autonomia-ads');
+    const envelope = await envelopeSvc.leerUltimo(org);
+    const plan = (await campaignOperator.leerUltimo(org))?.plan ?? null;
+    let executionAllowed: { decision: string; reasonCode: string | null } = { decision: 'DENY', reasonCode: 'ENVELOPE_NOT_APPROVED' };
+    if (envelope && plan) {
+      const { prov, fin } = providerYFinancieroDe(org);
+      const r = validateAuthorizedExecution(envelope, plan, prov, fin, { canal: 'google', tipo: 'CREATE_CAMPAIGN' }, flagsEjecucion(process.env, AUTONOMOUS_REAL));
+      executionAllowed = { decision: r.decision, reasonCode: r.reasonCode };
+    }
+    return reply.send({ organizationId: org, envelope, executionAllowed, autonomousReal: AUTONOMOUS_REAL, supervisedReal: process.env.SOEC_SUPERVISED_REAL === 'true' });
+  });
+  app.get('/medicion/envelope-audit', async (req, reply) => {
+    const { org } = real(req, 'autonomia-ads');
+    return reply.send({ organizationId: org, audit: await envelopeSvc.auditoria(org) });
+  });
+  app.post('/medicion/envelope', async (req, reply) => {
+    const { org } = real(req, 'autonomia-ads');
+    const ultimo = await campaignOperator.leerUltimo(org);
+    if (!ultimo?.plan) return reply.code(409).send({ ok: false, error: 'no hay plan de campaña; generá el plan primero' });
+    const envelope = await envelopeSvc.crearDesdePlan(org, ultimo.plan, `plan:${org}:${ultimo.at}`, new Date().toISOString());
+    return reply.code(201).send({ organizationId: org, envelope });
+  });
+  // APROBACIÓN HUMANA (financiera). La ejecuta la PERSONA desde la UI; su identidad queda registrada.
+  app.post('/medicion/envelope-approve', async (req, reply) => {
+    const { org } = real(req, 'autonomia-ads');
+    const plan = (await campaignOperator.leerUltimo(org))?.plan;
+    if (!plan) return reply.code(409).send({ ok: false, error: 'no hay plan vigente' });
+    const actor = String((req as unknown as { user?: { sub?: string } }).user?.sub ?? 'humano');
+    const { prov } = providerYFinancieroDe(org);
+    try {
+      const r = await envelopeSvc.aprobar(org, actor, plan, new Date().toISOString(), prov.executionEligibleChannels);
+      return reply.code(201).send({ organizationId: org, ...r });
+    } catch (e) { return reply.code(400).send({ ok: false, error: e instanceof Error ? e.message : String(e) }); }
+  });
+  app.post('/medicion/envelope-revoke', async (req, reply) => {
+    const { org } = real(req, 'autonomia-ads');
+    const actor = String((req as unknown as { user?: { sub?: string } }).user?.sub ?? 'humano');
+    try {
+      const r = await envelopeSvc.revocar(org, actor, new Date().toISOString());
+      return reply.code(201).send({ organizationId: org, ...r });
+    } catch (e) { return reply.code(400).send({ ok: false, error: e instanceof Error ? e.message : String(e) }); }
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {
