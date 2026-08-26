@@ -64,6 +64,23 @@ describe('AutorizacionSobre · hidratación', () => {
     expect(soloGET(fn)).toBe(true);
   });
 
+  it('legacy_ui_cannot_authorize_current_policy (envelope incompatible ⇒ fail-closed, sin botón)', async () => {
+    // Envelope del schema anterior: status READY pero SIN authorizedDurationDays; execution-plan lo marca incompatible.
+    const legacy = { ...envelope('READY_FOR_HUMAN_APPROVAL') } as Record<string, unknown>;
+    delete legacy.authorizedDurationDays;
+    const fn = vi.fn(async (url: string) => {
+      if (String(url).includes('/execution-plan')) return { ok: true, json: async () => ({ shadowPlanCreated: false, mode: 'SHADOW', summary: null, realExecutionDecision: 'DENY', realExecutionReason: 'ENVELOPE_MATERIAL_REFRESH_REQUIRED', providerMutateCalls: 0, envelopeCompatibility: { compatible: false, reasonCode: 'ENVELOPE_MATERIAL_REFRESH_REQUIRED' }, intents: [] }) };
+      return { ok: true, json: async () => ({ envelope: legacy, financial: { historicalSpend: 30137, envelopeSpend: 0, committedSpend: 0, remainingCap: 30000 }, executionAllowed: { decision: 'DENY', reasonCode: 'ENVELOPE_NOT_APPROVED' }, autonomousReal: false, supervisedReal: false }) };
+    });
+    vi.stubGlobal('fetch', fn);
+    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
+    await waitFor(() => expect(screen.getByText(/requiere actualización antes de poder autorizarse/)).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /AUTORIZAR SOBRE DE EJECUCIÓN/ })).toBeNull(); // AUTHORIZATION_BUTTON_ENABLED=false
+    expect(screen.queryByText(/TIPO DE PRESUPUESTO GOOGLE:/)).toBeNull();       // no presenta CAMPAIGN_TOTAL
+    expect(screen.queryByText(/días desde la activación/)).toBeNull();          // no presenta la duración nueva
+    expect(soloGET(fn)).toBe(true);                                            // read-only, no muta
+  });
+
   it('tenant_change_clears_previous_envelope_state + refresh_does_not_change_id_or_hash', async () => {
     stub('READY_FOR_HUMAN_APPROVAL');
     const { rerender } = render(h(AutorizacionSobre, { org: 'org-a', nonce: 0 }));

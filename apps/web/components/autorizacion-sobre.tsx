@@ -21,7 +21,7 @@ interface Envelope {
 interface Financial { historicalSpend: number; envelopeSpend: number; committedSpend: number; remainingCap: number }
 interface Resp { envelope: Envelope | null; financial: Financial; executionAllowed: { decision: string; reasonCode: string | null }; autonomousReal: boolean; supervisedReal: boolean }
 interface IntentDetalle { id: string; actionType: string; materialEntityFingerprint: string; idempotencyKey: string; status: string; validation: { decision: string; reasonCode: string | null }; parent: { materialFingerprint: string; logicalName?: string } | null; materialBinding: { approved: boolean }; financialImpact: { scope: string; projectedCommitment: number }; providerPayload: { operation?: string } | null }
-interface ExecPlan { shadowPlanCreated: boolean; mode?: string; summary?: { executionActionCount: number; byType: Record<string, number>; entitiesAffected: number }; realExecutionDecision?: string; realExecutionReason?: string | null; providerMutateCalls?: number; providerBindings?: { count: number; fabricatedIds: number }; intents?: IntentDetalle[] }
+interface ExecPlan { shadowPlanCreated: boolean; mode?: string; summary?: { executionActionCount: number; byType: Record<string, number>; entitiesAffected: number } | null; realExecutionDecision?: string; realExecutionReason?: string | null; providerMutateCalls?: number; providerBindings?: { count: number; fabricatedIds: number }; intents?: IntentDetalle[]; envelopeCompatibility?: { compatible: boolean; reasonCode: string | null } }
 
 const clp = (n: number): string => `$${Math.round(n).toLocaleString('es-CL')}`;
 const nombreCanal = (c: string): string => (c === 'google' ? 'Google Ads' : c === 'meta' ? 'Meta Ads' : c);
@@ -78,6 +78,11 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
   const env = resp?.envelope;
   const st = env ? (ESTADO[env.status] ?? { txt: env.status, tono: 'info' as const }) : null;
   const aprobado = env ? ['APPROVED_WAITING_EXTERNAL_GATE', 'APPROVED_READY_TO_ACTIVATE', 'ACTIVE'].includes(env.status) : false;
+  // FAIL-CLOSED de UI: un envelope del schema ANTERIOR (incompatible con CAMPAIGN_TOTAL) NO puede presentar
+  // consentimiento financiero ni habilitar la autorización. Se detecta por el execution-plan (envelopeCompatibility)
+  // o, aún antes de cargarlo, por la ausencia del campo material `authorizedDurationDays`.
+  const compat = exec?.envelopeCompatibility;
+  const incompatible = !!env && (compat ? compat.compatible === false : typeof env.authorizedDurationDays !== 'number');
 
   return (
     <div className="card" style={{ marginTop: 12, borderLeft: '4px solid var(--line-strong, #cbd5e1)' }}>
@@ -95,7 +100,17 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
         </div>
       )}
 
-      {!cargandoInicial && env && (
+      {/* FAIL-CLOSED: envelope del schema anterior ⇒ no se presenta CAMPAIGN_TOTAL/duración/9 acciones ni botón. */}
+      {!cargandoInicial && env && incompatible && (
+        <div style={{ marginTop: 10 }}>
+          <ul className="s" style={{ margin: 0, paddingLeft: 18 }}>
+            <li><b>Sobre / Plan:</b> <code>{env.id}</code></li>
+          </ul>
+          <Callout tono="warn" ico="⚠">Este plan requiere actualización antes de poder autorizarse. Volvé a generar el plan para producir la revisión vigente; el sobre anterior no puede autorizarse.</Callout>
+        </div>
+      )}
+
+      {!cargandoInicial && env && !incompatible && (
         <div style={{ marginTop: 10 }}>
           <ul className="s" style={{ margin: 0, paddingLeft: 18 }}>
             <li><b>Objetivo:</b> {env.objective}</li>
