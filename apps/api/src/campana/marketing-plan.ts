@@ -66,6 +66,7 @@ export interface CampaignCompleteness {
   readonly pendingCopyCount: number;
   readonly pendingDestination: boolean;
   readonly unknownActiveKeywords: number;
+  readonly unsupportedCopyClaims: number;
   readonly issues: readonly string[];
 }
 
@@ -173,6 +174,32 @@ function fraseCortaCompleta(texto: string, max: number): string | null {
   return best;
 }
 
+// ── FACTUAL SUPPORT ─────────────────────────────────────────────────────────
+// Un claim del copy NO puede introducir contenido semántico (tiempos, cantidades, %, resultados, procedencia,
+// integraciones, condiciones, calificativos) que no esté respaldado por capability/evidence. Se permite acortar/
+// reordenar/eliminar y CTAs neutros (Conoce/Prueba/Evalúa <marca>). No exige literalidad: sólo que cada token de
+// CONTENIDO provenga del corpus verificado (capability+evidence) o sea marca / palabra función / CTA neutro.
+const STOP_FACTUAL = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'unos', 'unas', 'y', 'e', 'o', 'u', 'con', 'para', 'por', 'en', 'a', 'al', 'que', 'tu', 'su', 'sus', 'mas', 'lo', 'se', 'como', 'tus', 'sus']);
+const CTA_NEUTRAS = new Set(['conoce', 'prueba', 'evalua', 'descubre']);
+const normFactual = (s: string): string => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const tokensDe = (s: string): string[] => normFactual(s).replace(/[^a-z0-9ñ ]/g, ' ').split(/\s+/).filter(Boolean);
+
+/** Devuelve los fragmentos con claims NO respaldados por capability/evidence (para el gate factual). */
+export function claimsNoRespaldados(ad: AdDraft, valueProps: readonly ValueProp[], brand?: string): string[] {
+  const corpus = new Set<string>();
+  for (const vp of valueProps) { for (const t of tokensDe(vp.capability)) corpus.add(t); if (vp.evidence) for (const t of tokensDe(vp.evidence)) corpus.add(t); }
+  const marcaTokens = new Set(brand ? tokensDe(brand) : []);
+  const problemas: string[] = [];
+  const revisar = (piece: string): void => {
+    if (/PENDING/i.test(piece)) return;
+    const noSop = tokensDe(piece).filter((t) => t.length > 1 && !STOP_FACTUAL.has(t) && !CTA_NEUTRAS.has(t) && !marcaTokens.has(t) && !corpus.has(t));
+    if (noSop.length > 0) problemas.push(`UNSUPPORTED_COPY_CLAIM: "${piece}" (${noSop.join(', ')})`);
+  };
+  ad.headlines.forEach(revisar);
+  ad.descriptions.forEach(revisar);
+  return problemas;
+}
+
 /** Valida un anuncio ya compuesto: headlines ≤30 completos, descriptions ≤90 completas, sin placeholder.
  *  El nombre de MARCA (1 palabra, nombre propio) es un headline válido y queda EXENTO de la regla de ≥2 palabras. */
 export function validarCopyAnuncio(ad: AdDraft, brand?: string): string[] {
@@ -253,7 +280,7 @@ function componerAnuncio(valueProps: readonly ValueProp[], brand: string | undef
   // 1) Marca (headline válido de 1 palabra permitido por ser nombre propio).
   if (marca && marca.length <= 30 && !/PENDING/i.test(marca) && !arr1Colgante(marca)) headlines.push(marca);
   // 2) Variante de evaluación SÓLO en el grupo de competidor-comprador (invita a probar la PROPIA marca; sin claims del competidor).
-  if (grupo === 'SEGMENT' && marca) { agregar(`Evalúa ${marca}`, headlines, 30); agregar(`Compara y prueba ${marca}`, headlines, 30); }
+  if (grupo === 'SEGMENT' && marca) { agregar(`Evalúa ${marca}`, headlines, 30); agregar(`Prueba ${marca}`, headlines, 30); agregar(`Conoce ${marca}`, headlines, 30); }
   // 3) Capabilities como frases completas ≤30 (cláusula líder si hace falta). Diversidad por dedupe.
   for (const c of caps) { if (headlines.length >= 12) break; agregar(fraseCortaCompleta(c, 30), headlines, 30); }
 
@@ -295,7 +322,7 @@ export function construirMarketingPlan(e: EntradaMarketingPlan): MarketingPlan {
 
   const diagnosisRequired = (estrategia.funnelZeroConversion && !readinessEval.diagnosisCompleted) || readinessEval.hardFunnelBlocker;
 
-  const vacio = (status: CampaignDraftStatus, issues: string[]): CampaignCompleteness => ({ status, pendingCopyCount: 0, pendingDestination: false, unknownActiveKeywords: 0, issues });
+  const vacio = (status: CampaignDraftStatus, issues: string[]): CampaignCompleteness => ({ status, pendingCopyCount: 0, pendingDestination: false, unknownActiveKeywords: 0, unsupportedCopyClaims: 0, issues });
 
   if (diagnosisRequired) {
     const mix: AsignacionCanal[] = canales.map((c) => ({ canal: c, disponible: disp(c, e.disponibilidad).canPlan, presupuesto: 0, motivo: 'Diagnóstico del funnel requerido antes de autorizar gasto.' }));
@@ -381,6 +408,7 @@ export function construirMarketingPlan(e: EntradaMarketingPlan): MarketingPlan {
   const allCopy = campaigns.flatMap((c) => c.adGroups.flatMap((g) => g.ads.flatMap((a) => [...a.headlines, ...a.descriptions])));
   const pendingCopyCount = allCopy.filter((h) => /PENDING/i.test(h)).length;
   const copyIssues = campaigns.flatMap((c) => c.adGroups.flatMap((g) => g.ads.flatMap((a) => validarCopyAnuncio(a, brand))));
+  const copyFactualIssues = campaigns.flatMap((c) => c.adGroups.flatMap((g) => g.ads.flatMap((a) => claimsNoRespaldados(a, valueProps, brand))));
   const pendingDestination = campaigns.some((c) => c.adGroups.some((g) => g.finalDestination === 'PENDING_DESTINATION'));
   const unknownActive = activeKeywords.filter((k) => k.intentClassification === 'UNKNOWN').length;
   const activasCompletas = activeKeywords.every((k) => k.text && k.intentClassification && k.confidence && k.action && k.matchType && k.rationale);
@@ -389,12 +417,13 @@ export function construirMarketingPlan(e: EntradaMarketingPlan): MarketingPlan {
   if (campaigns.length === 0) issues.push('No se generó ninguna campaña (sin keywords activas defendibles).');
   if (pendingCopyCount > 0) issues.push(`Copy incompleto: ${pendingCopyCount} placeholder(s). Falta cargar capacidades reales (valueProps) en la readiness.`);
   if (copyIssues.length > 0) issues.push(`Copy no publicable: ${copyIssues.slice(0, 3).join(' · ')}${copyIssues.length > 3 ? '…' : ''}`);
+  if (copyFactualIssues.length > 0) issues.push(copyFactualIssues.slice(0, 3).join(' · ') + (copyFactualIssues.length > 3 ? '…' : ''));
   if (pendingDestination) issues.push('Destino sin validar: cargar destinos validados en la readiness.');
   if (!activasCompletas) issues.push('Alguna keyword activa no está completamente tipada.');
   if (!negativasCompletas) issues.push('Alguna negativa no declara matchType/rationale.');
   if (unknownActive > 0) issues.push(`${unknownActive} keyword(s) UNKNOWN activadas (no debería recibir gasto).`);
   const campaignDraftStatus: CampaignDraftStatus = issues.length === 0 && activeKeywords.length > 0 ? 'READY_FOR_APPROVAL' : 'INCOMPLETE';
-  const campaignCompleteness: CampaignCompleteness = { status: campaignDraftStatus, pendingCopyCount, pendingDestination, unknownActiveKeywords: unknownActive, issues };
+  const campaignCompleteness: CampaignCompleteness = { status: campaignDraftStatus, pendingCopyCount, pendingDestination, unknownActiveKeywords: unknownActive, unsupportedCopyClaims: copyFactualIssues.length, issues };
 
   return {
     objective: e.objetivo, totalAuthorizedBudget: cap, currency: moneda, period: { dias: e.periodoDias, startAt: e.startAt, endAt: e.endAt },

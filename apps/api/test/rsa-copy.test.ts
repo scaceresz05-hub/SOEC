@@ -3,7 +3,7 @@
  * sin placeholders, respaldadas por valueProps verificadas; variante diferenciada en el grupo de competidor.
  */
 import { describe, expect, it } from 'vitest';
-import { construirMarketingPlan, esFraseCompleta, validarCopyAnuncio, type EntradaMarketingPlan, type CanalId } from '../src/campana/marketing-plan';
+import { construirMarketingPlan, esFraseCompleta, validarCopyAnuncio, claimsNoRespaldados, type EntradaMarketingPlan, type CanalId } from '../src/campana/marketing-plan';
 import type { ChannelAvailability } from '../src/campana/channel-availability';
 import type { MarketingReadiness } from '../src/campana/diagnosis-evidence';
 
@@ -78,7 +78,7 @@ describe('copy RSA generado', () => {
   it('COPY_FACTUALLY_SUPPORTED: cada headline deriva de la marca, un CTA de evaluación o una valueProp', () => {
     const capsLow = CAPS.map((c) => c.toLowerCase());
     for (const h of heads.filter((x) => !/PENDING/i.test(x))) {
-      const supported = h === 'SmileFlow' || /^(evalúa|compara)/i.test(h) || capsLow.some((c) => c.startsWith(h.toLowerCase()));
+      const supported = h === 'SmileFlow' || /^(evalúa|prueba|conoce)\s+smileflow$/i.test(h) || capsLow.some((c) => c.startsWith(h.toLowerCase()));
       expect(supported, `no respaldado: "${h}"`).toBe(true);
     }
   });
@@ -93,6 +93,28 @@ describe('copy RSA generado', () => {
     expect(plan.recommendedChannelMix.find((m) => m.canal === 'google')!.presupuesto).toBe(15000);
     expect(plan.recommendedChannelMix.find((m) => m.canal === 'meta')!.presupuesto).toBe(0);
     expect(plan.maxSpendWithoutContact.value).toBe(7500);
+  });
+});
+
+describe('FACTUAL SUPPORT (no introducir claims no respaldados)', () => {
+  it('COPY_FACTUALLY_SUPPORTED: el copy generado no agrega contenido no respaldado', () => {
+    expect(plan.campaignCompleteness.unsupportedCopyClaims).toBe(0);
+    for (const a of ads) expect(claimsNoRespaldados(a, READINESS.valueProps!, 'SmileFlow')).toEqual([]);
+  });
+  it('el gate CAPTURA un claim inventado (24h/porcentaje/procedencia no respaldados)', () => {
+    const vp = [{ id: 'r', capability: 'Recordatorios automáticos de citas' }];
+    expect(claimsNoRespaldados({ headlines: ['Recordatorios automáticos 24h antes'], descriptions: ['x y'] }, vp, 'SmileFlow').length).toBeGreaterThan(0);
+    expect(claimsNoRespaldados({ headlines: ['Aumenta 30% tus ingresos'], descriptions: ['x y'] }, vp, 'SmileFlow').length).toBeGreaterThan(0);
+  });
+  it('el generador NO inventa frecuencia: capability sin "24h" ⇒ copy sin "24h"', () => {
+    const p = construirMarketingPlan({ ...ENTRADA, readiness: { ...READINESS, valueProps: [
+      { id: '1', capability: 'Recordatorios automáticos de citas' }, { id: '2', capability: 'Agenda dental inteligente' },
+      { id: '3', capability: 'Relleno automático de agenda' }, { id: '4', capability: 'Ficha e historial clínico' },
+    ] } });
+    const todo = p.campaigns[0]!.adGroups.flatMap((g) => g.ads.flatMap((a) => [...a.headlines, ...a.descriptions]));
+    expect(todo.some((t) => /24h|24 h/i.test(t))).toBe(false);
+    expect(p.campaignCompleteness.unsupportedCopyClaims).toBe(0);
+    expect(p.campaignDraftStatus).toBe('READY_FOR_APPROVAL');
   });
 });
 
