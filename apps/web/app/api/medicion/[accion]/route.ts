@@ -46,9 +46,12 @@ async function proxiar(
   method: 'GET' | 'POST',
   headers: Record<string, string>,
   body?: unknown,
+  search = '',
 ): Promise<Response> {
   try {
-    const res = await fetch(`${API_BASE}/medicion/${path}`, {
+    // Se PRESERVA el query string (p.ej. ?detail=intents): sin esto la API recibe la ruta sin parámetros y
+    // la rama de detalle nunca se ejecuta (bug productivo de Fase 2A inspeccionable).
+    const res = await fetch(`${API_BASE}/medicion/${path}${search}`, {
       method,
       headers,
       cache: 'no-store',
@@ -69,7 +72,7 @@ export async function GET(
 ): Promise<Response> {
   const { accion } = await ctx.params;
   if (!GET_ACCIONES.has(accion)) return Response.json({ error: 'NotFound' }, { status: 404 });
-  return proxiar(accion, 'GET', cabecerasDe(req));
+  return proxiar(accion, 'GET', cabecerasDe(req), undefined, new URL(req.url).search);
 }
 export async function POST(
   req: Request,
