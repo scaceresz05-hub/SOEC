@@ -14,7 +14,7 @@ interface Envelope {
   totalCap: number; experimentBudget: number; maxSpendWithoutContact: number;
   startsAt: string | null; expiresAt: string | null;
   plannedChannels: string[]; authorizedChannels: string[]; authorizedActionTypes: string[];
-  stopRules: { id: string; enabled: boolean; threshold?: number | null; date?: string | null; reason?: string }[];
+  stopRules: { id: string; tipo?: string; enabled: boolean; threshold?: number | null; date?: string | null; condition?: string; reason?: string }[];
   planVersion: string; planHash: string; approvedBy: string | null; approvedAt: string | null;
 }
 interface Financial { historicalSpend: number; envelopeSpend: number; committedSpend: number; remainingCap: number }
@@ -22,6 +22,15 @@ interface Resp { envelope: Envelope | null; financial: Financial; executionAllow
 
 const clp = (n: number): string => `$${Math.round(n).toLocaleString('es-CL')}`;
 const nombreCanal = (c: string): string => (c === 'google' ? 'Google Ads' : c === 'meta' ? 'Meta Ads' : c);
+/** Texto material de una stop rule (valores completos, no sólo el tipo). */
+function stopTxt(s: { id: string; enabled: boolean; threshold?: number | null; date?: string | null; condition?: string; reason?: string }): string {
+  if (!s.enabled) return `DESACTIVADO${s.reason ? ` (${s.reason})` : ''}`;
+  if (s.id === 'STOP_BUDGET') return clp(s.threshold ?? 0);
+  if (s.id === 'STOP_ZERO_CONVERSION') return `${clp(s.threshold ?? 0)} sin contacto`;
+  if (s.id === 'STOP_CPA') return s.threshold != null ? `CPA > ${clp(s.threshold)}` : 'DESACTIVADO';
+  if (s.id === 'STOP_PERIOD') return `hasta ${s.date?.slice(0, 10) ?? '—'}`;
+  return s.condition ?? '—';
+}
 const ESTADO: Record<string, { txt: string; tono: 'ok' | 'warn' | 'info' }> = {
   DRAFT: { txt: 'Borrador', tono: 'info' }, READY_FOR_HUMAN_APPROVAL: { txt: 'Lista para tu autorización', tono: 'warn' },
   APPROVED_WAITING_EXTERNAL_GATE: { txt: 'Autorizada · esperando a Google', tono: 'ok' }, APPROVED_READY_TO_ACTIVATE: { txt: 'Autorizada · lista para activar', tono: 'ok' },
@@ -75,7 +84,11 @@ export function AutorizacionSobre({ org }: { org: string | null | undefined }): 
             <li style={{ marginTop: 4 }}><b>Período:</b> {env.startsAt?.slice(0, 10)} → {env.expiresAt?.slice(0, 10)}</li>
             <li><b>Canal(es):</b> {env.plannedChannels.map(nombreCanal).join(', ') || '—'}</li>
             <li><b>Acciones autorizadas:</b> {env.authorizedActionTypes.join(', ')}</li>
-            <li><b>Reglas de detención:</b> {env.stopRules.filter((s) => s.enabled).map((s) => s.id.replace('STOP_', '')).join(', ')}</li>
+            <li><b>Reglas de detención:</b>
+              <ul style={{ margin: '2px 0 0', paddingLeft: 16 }}>
+                {env.stopRules.map((s) => <li key={s.id}>{s.id}: {stopTxt(s)}</li>)}
+              </ul>
+            </li>
             <li><b>Plan (versión/hash):</b> <code>{env.planVersion}</code></li>
           </ul>
 

@@ -92,6 +92,41 @@ describe('envelope wiring productivo', () => {
     const audit = await svc.auditoria(ORG);
     expect(audit.some((e) => e.type === 'ENVELOPE_READY_FOR_APPROVAL')).toBe(true);
   });
+  it('same_canonical_hash_reuses_existing_envelope + retry_does_not_duplicate_created/ready_audit (doble corrida)', async () => {
+    const { plan, env, svc } = await correr();
+    const e2 = await svc.crearDesdePlan(ORG, plan, 'plan:otro-request', '2026-08-25T00:01:42.000Z'); // ~102 s después
+    expect(e2.id).toBe(env.id);           // ENVELOPE_ID_RUN_1 == ENVELOPE_ID_RUN_2
+    expect(e2.planHash).toBe(env.planHash); // PLAN_HASH_RUN_1 == PLAN_HASH_RUN_2
+    const audit = await svc.auditoria(ORG);
+    expect(audit.filter((a) => a.type === 'ENVELOPE_CREATED')).toHaveLength(1); // AUDIT_CREATED_COUNT = 1
+    expect(audit.filter((a) => a.type === 'ENVELOPE_READY_FOR_APPROVAL')).toHaveLength(1); // AUDIT_READY_COUNT = 1
+  });
+  it('envelope_created_event_exists + envelope_ready_event_exists', async () => {
+    const { svc } = await correr();
+    const audit = await svc.auditoria(ORG);
+    expect(audit.some((a) => a.type === 'ENVELOPE_CREATED')).toBe(true);
+    expect(audit.some((a) => a.type === 'ENVELOPE_READY_FOR_APPROVAL')).toBe(true);
+  });
+  it('material_change_creates_new_revision + preapproval_old_is_superseded + superseded_event_links_old_and_new', async () => {
+    const { plan, env, svc } = await correr();
+    const p2 = JSON.parse(JSON.stringify(plan)); p2.totalAuthorizedBudget = 20000; // cambio material
+    const e3 = await svc.crearDesdePlan(ORG, p2, 'plan:rev2', '2026-08-25T01:00:00.000Z');
+    expect(e3.id).not.toBe(env.id);
+    expect(e3.status).toBe('READY_FOR_HUMAN_APPROVAL');
+    const sup = (await svc.auditoria(ORG)).find((a) => a.type === 'ENVELOPE_SUPERSEDED');
+    expect(sup?.previousEnvelopeId).toBe(env.id);
+    expect(sup?.newEnvelopeId).toBe(e3.id);
+    expect(sup?.reason).toBe('MATERIAL_PLAN_CHANGED');
+  });
+  it('approved_envelope_is_never_mutated_in_place + new_material_plan_after_approval_requires_new_approval', async () => {
+    const { plan, svc } = await correr();
+    const ap = await svc.aprobar(ORG, 'humano', plan, '2026-08-25T02:00:00.000Z', []);
+    expect(ap.envelope.approvedBy).toBe('humano');
+    const p2 = JSON.parse(JSON.stringify(plan)); p2.totalAuthorizedBudget = 25000;
+    const rev = await svc.crearDesdePlan(ORG, p2, 'plan:rev3', '2026-08-25T03:00:00.000Z');
+    expect(rev.status).toBe('READY_FOR_HUMAN_APPROVAL'); // nueva revisión
+    expect(rev.approvedBy).toBeNull();                    // NO hereda la aprobación
+  });
   it('external_gate_remains_blocked + flags false + no_provider_mutation', async () => {
     const { env, plan } = await correr();
     const prov = { executionEligibleChannels: [] as never[], providerConnected: false, trackingValid: true, landingAvailable: true, now: AHORA, contacts: 0 };

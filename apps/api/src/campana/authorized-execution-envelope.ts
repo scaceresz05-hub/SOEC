@@ -13,7 +13,9 @@
  */
 import type { MarketingPlan } from './marketing-plan';
 import { hashPlan } from './plan-hash';
+import { politicaAccionesDe, ACCIONES_EXPERIMENTO_BUSQUEDA, ACCIONES_AUTORIZABLES_DEFECTO, type AccionAutorizable } from './acciones';
 
+export { ACCIONES_EXPERIMENTO_BUSQUEDA, ACCIONES_AUTORIZABLES_DEFECTO, type AccionAutorizable };
 export type CanalId = 'google' | 'meta';
 
 export type EnvelopeStatus =
@@ -26,26 +28,8 @@ export type EnvelopeStatus =
   | 'STOPPED'
   | 'EXPIRED'
   | 'REVOKED'
+  | 'SUPERSEDED'
   | 'FAILED_SAFE';
-
-export type AccionAutorizable =
-  | 'CREATE_CAMPAIGN' | 'CREATE_AD_GROUP' | 'CREATE_AD' | 'ADD_KEYWORD' | 'ADD_NEGATIVE_KEYWORD'
-  | 'PAUSE_CAMPAIGN' | 'RESUME_CAMPAIGN' | 'ADJUST_DAILY_BUDGET' | 'PAUSE_AD_GROUP' | 'PAUSE_KEYWORD' | 'STOP_CAMPAIGN';
-
-export const ACCIONES_AUTORIZABLES_DEFECTO: readonly AccionAutorizable[] = [
-  'CREATE_CAMPAIGN', 'CREATE_AD_GROUP', 'CREATE_AD', 'ADD_KEYWORD', 'ADD_NEGATIVE_KEYWORD',
-  'PAUSE_CAMPAIGN', 'RESUME_CAMPAIGN', 'ADJUST_DAILY_BUDGET', 'PAUSE_AD_GROUP', 'PAUSE_KEYWORD', 'STOP_CAMPAIGN',
-];
-
-/**
- * Acciones DELIBERADAMENTE autorizadas para un experimento de búsqueda (NO "todo"): construir + controlar +
- * detener. Se EXCLUYE `RESUME_CAMPAIGN` a propósito (una campaña detenida no se reanuda sin revisión humana).
- * El humano ve exactamente este conjunto antes de autorizar.
- */
-export const ACCIONES_EXPERIMENTO_BUSQUEDA: readonly AccionAutorizable[] = [
-  'CREATE_CAMPAIGN', 'CREATE_AD_GROUP', 'CREATE_AD', 'ADD_KEYWORD', 'ADD_NEGATIVE_KEYWORD',
-  'ADJUST_DAILY_BUDGET', 'PAUSE_CAMPAIGN', 'PAUSE_AD_GROUP', 'PAUSE_KEYWORD', 'STOP_CAMPAIGN',
-];
 
 export interface EnvelopeStopRule { readonly id: string; readonly tipo: string; readonly enabled: boolean; readonly threshold?: number | null; readonly date?: string | null; readonly condition?: string; readonly reason?: string }
 
@@ -93,6 +77,11 @@ export interface AuditEvent {
   readonly reason?: string;
   readonly before?: EnvelopeStatus;
   readonly after?: EnvelopeStatus;
+  // Enlace de supersesión (revisión por cambio material).
+  readonly previousEnvelopeId?: string;
+  readonly newEnvelopeId?: string;
+  readonly oldPlanHash?: string;
+  readonly newPlanHash?: string;
 }
 
 export interface FlagsEjecucion { readonly autonomousReal: boolean; readonly supervisedReal: boolean }
@@ -111,13 +100,13 @@ const ESTADOS_APROBADOS: ReadonlySet<EnvelopeStatus> = new Set(['APPROVED_WAITIN
 
 /** Transiciones permitidas (state machine explícita; no se permiten saltos arbitrarios). */
 const TRANSICIONES: Record<EnvelopeStatus, readonly EnvelopeStatus[]> = {
-  DRAFT: ['READY_FOR_HUMAN_APPROVAL', 'REVOKED', 'EXPIRED'],
-  READY_FOR_HUMAN_APPROVAL: ['APPROVED_WAITING_EXTERNAL_GATE', 'APPROVED_READY_TO_ACTIVATE', 'REVOKED', 'EXPIRED'],
-  APPROVED_WAITING_EXTERNAL_GATE: ['APPROVED_READY_TO_ACTIVATE', 'REVOKED', 'EXPIRED', 'FAILED_SAFE'],
-  APPROVED_READY_TO_ACTIVATE: ['ACTIVE', 'REVOKED', 'EXPIRED', 'FAILED_SAFE', 'APPROVED_WAITING_EXTERNAL_GATE'],
+  DRAFT: ['READY_FOR_HUMAN_APPROVAL', 'REVOKED', 'EXPIRED', 'SUPERSEDED'],
+  READY_FOR_HUMAN_APPROVAL: ['APPROVED_WAITING_EXTERNAL_GATE', 'APPROVED_READY_TO_ACTIVATE', 'REVOKED', 'EXPIRED', 'SUPERSEDED'],
+  APPROVED_WAITING_EXTERNAL_GATE: ['APPROVED_READY_TO_ACTIVATE', 'REVOKED', 'EXPIRED', 'FAILED_SAFE', 'SUPERSEDED'],
+  APPROVED_READY_TO_ACTIVATE: ['ACTIVE', 'REVOKED', 'EXPIRED', 'FAILED_SAFE', 'APPROVED_WAITING_EXTERNAL_GATE', 'SUPERSEDED'],
   ACTIVE: ['PAUSED_BY_GUARDRAIL', 'STOPPED', 'EXPIRED', 'REVOKED'],
   PAUSED_BY_GUARDRAIL: ['ACTIVE', 'STOPPED', 'REVOKED', 'EXPIRED'],
-  STOPPED: [], EXPIRED: [], REVOKED: [], FAILED_SAFE: ['READY_FOR_HUMAN_APPROVAL'],
+  STOPPED: [], EXPIRED: [], REVOKED: [], SUPERSEDED: [], FAILED_SAFE: ['READY_FOR_HUMAN_APPROVAL'],
 };
 export function puedeTransicionar(from: EnvelopeStatus, to: EnvelopeStatus): boolean {
   return (TRANSICIONES[from] ?? []).includes(to);
@@ -127,21 +116,39 @@ function audit(type: string, e: AuthorizedExecutionEnvelope, actor: string, at: 
   return { type, organizationId: e.organizationId, envelopeId: e.id, planId: e.planId, actor, at, ...(reason ? { reason } : {}), ...(before ? { before } : {}), ...(after ? { after } : {}) };
 }
 
-/** Construye el sobre desde un plan LISTO. status READY_FOR_HUMAN_APPROVAL si el draft está completo; si no, DRAFT. */
-export function construirEnvelope(plan: MarketingPlan, org: string, planId: string, ahora: string): { envelope: AuthorizedExecutionEnvelope; audit: AuditEvent } {
+/**
+ * Construye el sobre desde un plan. El id es CONTENT-ADDRESSED (deriva del hash canónico), no del planId
+ * efímero ⇒ un plan materialmente idéntico produce el MISMO id/hash. Emite el ciclo de vida completo:
+ * ENVELOPE_CREATED y, si está listo, ENVELOPE_READY_FOR_APPROVAL.
+ */
+export function construirEnvelope(plan: MarketingPlan, org: string, planId: string, ahora: string): { envelope: AuthorizedExecutionEnvelope; audits: AuditEvent[] } {
   const planned = plan.recommendedChannelMix.filter((m) => m.presupuesto > 0).map((m) => m.canal);
   const authorized = planned.filter((c) => (plan.channelPlanningAvailability.find((p) => p.canal === c)?.canPlan) ?? false);
-  const status: EnvelopeStatus = plan.campaignDraftStatus === 'READY_FOR_APPROVAL' ? 'READY_FOR_HUMAN_APPROVAL' : 'DRAFT';
+  const ready = plan.campaignDraftStatus === 'READY_FOR_APPROVAL';
+  const status: EnvelopeStatus = ready ? 'READY_FOR_HUMAN_APPROVAL' : 'DRAFT';
   const hash = hashPlan(plan);
   const e: AuthorizedExecutionEnvelope = {
-    id: `env:${org}:${planId}`, organizationId: org, objective: plan.objective, planId, planHash: hash, planVersion: hash.slice(0, 8),
+    id: `env:${org}:${hash}`, organizationId: org, objective: plan.objective, planId, planHash: hash, planVersion: hash.slice(0, 8),
     currency: plan.currency, totalCap: plan.totalAuthorizedBudget, experimentBudget: plan.totalSpendRecommended, maxSpendWithoutContact: plan.maxSpendWithoutContact.value,
     startsAt: plan.period.startAt, expiresAt: plan.period.endAt, plannedChannels: planned, authorizedChannels: authorized,
-    authorizedActionTypes: ACCIONES_EXPERIMENTO_BUSQUEDA,
+    authorizedActionTypes: politicaAccionesDe(),
     stopRules: plan.stopCriteria.map((s) => ({ id: s.id, tipo: s.tipo, enabled: s.enabled, threshold: s.threshold ?? null, date: s.date ?? null, ...(s.condition ? { condition: s.condition } : {}), ...(s.reason ? { reason: s.reason } : {}) })),
     trackingRequirements: plan.requiredTracking, status, approvedBy: null, approvedAt: null, activatedAt: null, stoppedAt: null, revokedAt: null, createdAt: ahora, updatedAt: ahora,
   };
-  return { envelope: e, audit: audit(status === 'READY_FOR_HUMAN_APPROVAL' ? 'ENVELOPE_READY_FOR_APPROVAL' : 'ENVELOPE_CREATED', e, 'soec', ahora, undefined, undefined, status) };
+  const audits: AuditEvent[] = [audit('ENVELOPE_CREATED', e, 'soec', ahora, undefined, undefined, 'DRAFT')];
+  if (ready) audits.push(audit('ENVELOPE_READY_FOR_APPROVAL', e, 'soec', ahora, undefined, 'DRAFT', 'READY_FOR_HUMAN_APPROVAL'));
+  return { envelope: e, audits };
+}
+
+/** Marca un sobre previo como SUPERSEDED por una nueva revisión (cambio material del plan). */
+export function superseder(prev: AuthorizedExecutionEnvelope, nuevoId: string, nuevoHash: string, at: string): { envelope: AuthorizedExecutionEnvelope; audit: AuditEvent } {
+  const ne: AuthorizedExecutionEnvelope = { ...prev, status: 'SUPERSEDED', updatedAt: at };
+  const ev: AuditEvent = {
+    type: 'ENVELOPE_SUPERSEDED', organizationId: prev.organizationId, envelopeId: prev.id, planId: prev.planId, actor: 'soec', at,
+    reason: 'MATERIAL_PLAN_CHANGED', before: prev.status, after: 'SUPERSEDED',
+    previousEnvelopeId: prev.id, newEnvelopeId: nuevoId, oldPlanHash: prev.planHash, newPlanHash: nuevoHash,
+  };
+  return { envelope: ne, audit: ev };
 }
 
 /** Verifica que el sobre siga ligado al plan vigente (invalida aprobación ante cambio material). */

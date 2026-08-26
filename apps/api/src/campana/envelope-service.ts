@@ -8,9 +8,11 @@
 import { ActorId, OrganizationId, type Attribution, type EventStore, type RequestContext } from '@soec/contracts';
 import type { MarketingPlan } from './marketing-plan';
 import {
-  construirEnvelope, aprobar as aprobarPuro, revocar as revocarPuro,
+  construirEnvelope, aprobar as aprobarPuro, revocar as revocarPuro, superseder, puedeTransicionar,
   type AuthorizedExecutionEnvelope, type AuditEvent, type CanalId,
 } from './authorized-execution-envelope';
+
+const ESTADOS_REUTILIZABLES = new Set(['DRAFT', 'READY_FOR_HUMAN_APPROVAL', 'APPROVED_WAITING_EXTERNAL_GATE', 'APPROVED_READY_TO_ACTIVATE', 'ACTIVE']);
 
 export const EVENTO_ENVELOPE = 'execution-envelope.estado';
 export const EVENTO_ENVELOPE_AUDIT = 'execution-envelope.audit';
@@ -27,11 +29,11 @@ export class EnvelopeService {
     return { organizationId: o, actor: ActorId('execution-envelope'), scope: { organizationId: o, permissions: ['events:append', 'events:read'] }, correlationId: `envelope-${org}` };
   }
 
-  private async persistir(ctx: RequestContext, e: AuthorizedExecutionEnvelope, ev?: AuditEvent): Promise<void> {
+  private async persistir(ctx: RequestContext, e: AuthorizedExecutionEnvelope, evs: readonly AuditEvent[] = []): Promise<void> {
     const sid = envelopeStreamId(String(ctx.organizationId));
     const prev = await this.store.readStream(ctx, sid);
     await this.store.append(ctx, sid, prev.length, [{ type: EVENTO_ENVELOPE, payload: e, attribution: ATRIB, occurredAt: e.updatedAt }]).catch(() => undefined);
-    if (ev) await this.auditar(ctx, ev);
+    for (const ev of evs) await this.auditar(ctx, ev);
   }
 
   private async auditar(ctx: RequestContext, ev: AuditEvent): Promise<void> {
@@ -57,12 +59,18 @@ export class EnvelopeService {
   /** Crea (o regenera) el sobre desde el plan vigente. Idempotente por planHash: si ya existe el mismo, no duplica. */
   async crearDesdePlan(org: string, plan: MarketingPlan, planId: string, ahora: string): Promise<AuthorizedExecutionEnvelope> {
     const ctx = this.ctx(org);
-    const { envelope, audit } = construirEnvelope(plan, org, planId, ahora);
+    const { envelope, audits } = construirEnvelope(plan, org, planId, ahora);
     const prev = await this.leerUltimo(org);
-    // IDEMPOTENCIA: mismo planHash + misma org ⇒ NO se crea un envelope duplicado (refresh/retry devuelven el mismo).
-    // Un planHash distinto es un cambio MATERIAL ⇒ nueva revisión (el aprobado previo queda invalidado por hash).
-    if (prev && prev.planHash === envelope.planHash) return prev;
-    await this.persistir(ctx, envelope, audit);
+    // IDEMPOTENCIA por (org + canonicalPlanHash): mismo material ⇒ NO se crea otro envelope (refresh/retry/re-
+    // simulación idéntica devuelven el mismo, sin nuevos eventos CREATED/READY).
+    if (prev && prev.planHash === envelope.planHash && ESTADOS_REUTILIZABLES.has(prev.status)) return prev;
+    // Cambio MATERIAL (hash distinto) con un sobre previo no terminal ⇒ se SUPERSEDE (audit que enlaza old→new).
+    // Un aprobado NO se muta in-place: la nueva revisión nace en READY_FOR_HUMAN_APPROVAL y requiere nueva aprobación.
+    if (prev && prev.planHash !== envelope.planHash && puedeTransicionar(prev.status, 'SUPERSEDED')) {
+      const sup = superseder(prev, envelope.id, envelope.planHash, ahora);
+      await this.persistir(ctx, sup.envelope, [sup.audit]);
+    }
+    await this.persistir(ctx, envelope, audits);
     return envelope;
   }
 
@@ -71,7 +79,7 @@ export class EnvelopeService {
     const actual = await this.leerUltimo(org);
     if (!actual) throw new Error('no hay sobre para aprobar');
     const r = aprobarPuro(actual, plan, actor, ahora, executionEligibleChannels);
-    if (r.changed) await this.persistir(ctx, r.envelope, r.audit);
+    if (r.changed) await this.persistir(ctx, r.envelope, r.audit ? [r.audit] : []);
     return { envelope: r.envelope, changed: r.changed };
   }
 
@@ -80,7 +88,7 @@ export class EnvelopeService {
     const actual = await this.leerUltimo(org);
     if (!actual) throw new Error('no hay sobre para revocar');
     const r = revocarPuro(actual, actor, ahora);
-    if (r.changed) await this.persistir(ctx, r.envelope, r.audit);
+    if (r.changed) await this.persistir(ctx, r.envelope, r.audit ? [r.audit] : []);
     return { envelope: r.envelope, changed: r.changed };
   }
 }
