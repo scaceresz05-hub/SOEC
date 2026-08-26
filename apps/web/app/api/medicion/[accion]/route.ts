@@ -11,6 +11,7 @@ const GET_ACCIONES = new Set([
   'diagnosis-evidence',
   'envelope',
   'envelope-audit',
+  'execution-plan',
 ]);
 const POST_ACCIONES = new Set([
   'preparar',

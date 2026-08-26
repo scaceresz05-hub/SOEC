@@ -31,6 +31,10 @@ import { normalizarReadinessInput } from './campana/diagnosis-evidence';
 import { EnvelopeService } from './campana/envelope-service';
 import { flagsEjecucion, validateAuthorizedExecution, type ProviderState, type FinancialState } from './campana/authorized-execution-envelope';
 import { canalesDisponibles } from './campana/campaign-operator-service';
+import { correrShadow } from './campana/execution-engine';
+import { ledgerCero } from './campana/financial-ledger';
+import { ResourceBindingService } from './campana/resource-binding';
+import { getRecursoGoogleAds } from './plataforma';
 import { AUTONOMOUS_REAL } from '@soec/cia';
 import { contextoDe } from './superficie-auth';
 import {
@@ -435,6 +439,29 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       const r = await envelopeSvc.revocar(org, actor, new Date().toISOString());
       return reply.code(201).send({ organizationId: org, ...r });
     } catch (e) { return reply.code(400).send({ ok: false, error: e instanceof Error ? e.message : String(e) }); }
+  });
+
+  // EXECUTION PLAN (SHADOW, read-only): traduce el plan aprobado + envelope a intents Google, valida por el
+  // pipeline único y calcula impacto financiero SIN llamar a la red. Reporta dónde se frenaría la ejecución real.
+  const bindingSvc = new ResourceBindingService(store);
+  app.get('/medicion/execution-plan', async (req, reply) => {
+    const { ctx: c, org } = real(req, 'autonomia-ads');
+    const envelope = await envelopeSvc.leerUltimo(org);
+    const plan = (await campaignOperator.leerUltimo(org))?.plan ?? null;
+    if (!envelope || !plan) return reply.send({ organizationId: org, shadowPlanCreated: false, mode: 'SHADOW', providerMutateCalls: 0 });
+    const snap = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(org)));
+    const ledger = ledgerCero(envelope.totalCap, envelope.experimentBudget, snap?.cost ?? 0);
+    const { prov } = providerYFinancieroDe(org);
+    const flags = flagsEjecucion(process.env, AUTONOMOUS_REAL);
+    let customerId = 'PENDING';
+    try { customerId = getRecursoGoogleAds(org).customerId; } catch { /* org sin recurso: customerId placeholder, no afecta SHADOW */ }
+    const bindings = await bindingSvc.listar(org);
+    const r = correrShadow(plan, envelope, customerId, ledger, prov, flags, new Date().toISOString(), bindings);
+    return reply.send({
+      organizationId: org, shadowPlanCreated: true, mode: r.mode, summary: r.summary,
+      realExecutionDecision: r.realExecutionDecision, realExecutionReason: r.realExecutionReason,
+      providerMutateCalls: r.providerMutateCalls, ledger,
+    });
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {

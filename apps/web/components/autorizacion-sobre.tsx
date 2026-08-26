@@ -19,6 +19,7 @@ interface Envelope {
 }
 interface Financial { historicalSpend: number; envelopeSpend: number; committedSpend: number; remainingCap: number }
 interface Resp { envelope: Envelope | null; financial: Financial; executionAllowed: { decision: string; reasonCode: string | null }; autonomousReal: boolean; supervisedReal: boolean }
+interface ExecPlan { shadowPlanCreated: boolean; mode?: string; summary?: { executionActionCount: number; byType: Record<string, number>; entitiesAffected: number }; realExecutionDecision?: string; realExecutionReason?: string | null; providerMutateCalls?: number }
 
 const clp = (n: number): string => `$${Math.round(n).toLocaleString('es-CL')}`;
 const nombreCanal = (c: string): string => (c === 'google' ? 'Google Ads' : c === 'meta' ? 'Meta Ads' : c);
@@ -40,11 +41,13 @@ const ESTADO: Record<string, { txt: string; tono: 'ok' | 'warn' | 'info' }> = {
 
 export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | undefined; nonce?: number }): React.ReactElement {
   const [resp, setResp] = useState<Resp | null>(null);
+  const [exec, setExec] = useState<ExecPlan | null>(null);
   const [cargando, setCargando] = useState(false);
   const [cargandoInicial, setCargandoInicial] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // HIDRATACIÓN read-only: al montar / cambiar de tenant / re-simular, se lee el envelope PERSISTIDO (GET).
+  // HIDRATACIÓN read-only: al montar / cambiar de tenant / re-simular, se lee el envelope PERSISTIDO (GET) y el
+  // PLAN DE EJECUCIÓN en SHADOW (GET). Ninguna escritura ni acción de proveedor.
   const cargar = useCallback(async () => {
     if (!org) { setCargandoInicial(false); return; }
     setError(null);
@@ -52,6 +55,8 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
       const r = await fetch('/api/medicion/envelope', { headers: cabecerasOrg(org), cache: 'no-store' });
       if (!r.ok) { setError('No pudimos leer el estado del sobre.'); return; }
       setResp((await r.json()) as Resp);
+      const e = await fetch('/api/medicion/execution-plan', { headers: cabecerasOrg(org), cache: 'no-store' });
+      if (e.ok) setExec((await e.json()) as ExecPlan);
     } catch { setError('No pudimos contactar el servicio.'); }
     finally { setCargandoInicial(false); }
   }, [org]);
@@ -117,6 +122,18 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
               </div>
               <p className="s muted" style={{ marginTop: 8 }}>Ejecución real: <b>{resp.executionAllowed.decision === 'ALLOW' ? 'permitida' : 'bloqueada'}</b>{resp.executionAllowed.reasonCode ? ` (${resp.executionAllowed.reasonCode})` : ''} · supervisedReal={String(resp.supervisedReal)} · autonomousReal={String(resp.autonomousReal)}. SOEC no ejecuta ni gasta nada todavía.</p>
             </>
+          )}
+
+          {exec?.shadowPlanCreated && exec.summary && (
+            <div style={{ marginTop: 12 }}>
+              <div className="section">Plan de ejecución <span className="hint">SHADOW · sólo lectura · sin escrituras reales</span></div>
+              <ul className="s" style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                <li><b>Acciones:</b> {exec.summary.executionActionCount} · <b>Entidades:</b> {exec.summary.entitiesAffected} · <b>Proveedor:</b> Google Ads</li>
+                <li><b>Por tipo:</b> {Object.entries(exec.summary.byType).map(([t, n]) => `${t}×${n}`).join(' · ')}</li>
+                <li><b>Ejecución real:</b> {exec.realExecutionDecision === 'ALLOW' ? 'permitida' : 'bloqueada'}{exec.realExecutionReason ? ` (${exec.realExecutionReason})` : ''} · <b>mutate calls:</b> {exec.providerMutateCalls ?? 0}</li>
+              </ul>
+              <Callout tono="info" ico="🛰">Plan de ejecución preparado (SHADOW). La ejecución real está bloqueada; SOEC no escribe en Google Ads ni gasta.</Callout>
+            </div>
           )}
 
           {env.status === 'READY_FOR_HUMAN_APPROVAL' && (
