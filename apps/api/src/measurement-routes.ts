@@ -31,7 +31,7 @@ import { normalizarReadinessInput } from './campana/diagnosis-evidence';
 import { EnvelopeService } from './campana/envelope-service';
 import { flagsEjecucion, type ProviderState, type FinancialState } from './campana/authorized-execution-envelope';
 import { canalesDisponibles } from './campana/campaign-operator-service';
-import { correrShadow, evaluarGateEnvelope, detalleIntent, auditoriaShadowDerivada } from './campana/execution-engine';
+import { correrShadow, evaluarGateEnvelope, evaluarCompatibilidadMaterial, detalleIntent, auditoriaShadowDerivada } from './campana/execution-engine';
 import { fingerprintsDelPlan } from './campana/material-fingerprint';
 import { ledgerCero } from './campana/financial-ledger';
 import { ResourceBindingService } from './campana/resource-binding';
@@ -384,7 +384,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
   // AUTHORIZED EXECUTION ENVELOPE (soberanía financiera humana). Crear/leer/aprobar(HUMANO)/revocar. NADA se
   // ejecuta: SOEC_SUPERVISED_REAL y SOEC_AUTONOMOUS_REAL en false ⇒ validateAuthorizedExecution DENIEGA siempre.
   const envelopeSvc = new EnvelopeService(store);
-  const providerYFinancieroDe = (org: string): { prov: ProviderState; fin: FinancialState } => {
+  const providerYFinancieroDe = (_org: string): { prov: ProviderState; fin: FinancialState } => {
     const disp = canalesDisponibles(process.env);
     const executionEligibleChannels = disp.filter((d) => d.canExecute).map((d) => d.canal);
     return {
@@ -455,15 +455,30 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     let customerId = 'PENDING';
     try { customerId = getRecursoGoogleAds(org).customerId; } catch { /* org sin recurso: customerId placeholder, no afecta SHADOW */ }
     const bindings = await bindingSvc.listar(org);
-    const r = correrShadow(plan, envelope, customerId, ledger, prov, flags, new Date().toISOString(), bindings);
     const providerBindings = { count: bindings.length, fabricatedIds: bindings.filter((b) => b.providerResourceId != null).length };
+    const detail = (req.query as { detail?: string } | undefined)?.detail;
+    // COMPATIBILIDAD MATERIAL (fail-closed, sin efectos): un envelope/plan del schema anterior (sin budgetPolicy /
+    // sin authorizedDurationDays / con ADJUST_DAILY_BUDGET) NO se ejecuta ni se reinterpreta como CAMPAIGN_TOTAL.
+    // El GET NO muta el envelope legacy (ni supersede/aprueba/regenera): sólo reporta que requiere refresh material.
+    const compat = evaluarCompatibilidadMaterial(envelope, plan);
+    if (!compat.compatible) {
+      const baseIncompat = {
+        organizationId: org, shadowPlanCreated: false, mode: 'SHADOW' as const, summary: null,
+        realExecutionDecision: 'DENY' as const, realExecutionReason: compat.reasonCode,
+        providerMutateCalls: 0 as const, ledger, providerBindings,
+        envelopeCompatibility: { compatible: false, reasonCode: compat.reasonCode },
+      };
+      if (detail === 'intents') return reply.send({ ...baseIncompat, intents: [], shadowAudit: [] });
+      return reply.send(baseIncompat);
+    }
+    const r = correrShadow(plan, envelope, customerId, ledger, prov, flags, new Date().toISOString(), bindings);
     const base = {
       organizationId: org, shadowPlanCreated: true, mode: r.mode, summary: r.summary,
       realExecutionDecision: r.realExecutionDecision, realExecutionReason: r.realExecutionReason,
       providerMutateCalls: r.providerMutateCalls, ledger, providerBindings,
+      envelopeCompatibility: { compatible: true, reasonCode: null },
     };
     // detail=intents ⇒ intents completos (sanitizados) + auditoría SHADOW derivada. GET siempre side-effect free.
-    const detail = (req.query as { detail?: string } | undefined)?.detail;
     if (detail === 'intents') {
       const fps = fingerprintsDelPlan(plan);
       return reply.send({ ...base, intents: r.intents.map((it) => detalleIntent(it, fps, envelope.currency)), shadowAudit: auditoriaShadowDerivada(r) });

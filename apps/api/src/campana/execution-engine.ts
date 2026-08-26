@@ -19,7 +19,27 @@ export type ExecReason =
   | 'CHANNEL_NOT_AUTHORIZED' | 'ACTION_NOT_AUTHORIZED' | 'PLAN_MATERIAL_CHANGE_REQUIRES_REAPPROVAL'
   | 'RESOURCE_NOT_OWNED_BY_ENVELOPE' | 'EXPERIMENT_CAP_WOULD_BE_EXCEEDED' | 'TOTAL_CAP_WOULD_BE_EXCEEDED'
   | 'PARENT_RESOURCE_NOT_IN_APPROVED_PLAN' | 'PARENT_PROVIDER_RESOURCE_NOT_BOUND'
+  | 'ENVELOPE_MATERIAL_REFRESH_REQUIRED'
   | 'EXTERNAL_GATE_BLOCKED' | 'TRACKING_INVALID' | 'LANDING_INVALID' | 'SUPERVISED_REAL_DISABLED' | 'AUTONOMOUS_REAL_DISABLED';
+
+export interface CompatibilidadMaterial { readonly compatible: boolean; readonly reasonCode: 'ENVELOPE_MATERIAL_REFRESH_REQUIRED' | null }
+
+/**
+ * ¿El envelope + plan pertenecen al MODELO EJECUTABLE VIGENTE? El modelo actual exige CAMPAIGN TOTAL BUDGET
+ * (`budgetPolicy.type === 'CAMPAIGN_TOTAL'`), duración de ejecución material (`authorizedDurationDays`) y una
+ * política de acciones sin `ADJUST_DAILY_BUDGET`. Un envelope/plan del SCHEMA ANTERIOR (sin budgetPolicy / sin
+ * authorizedDurationDays / con ADJUST_DAILY_BUDGET) es INCOMPATIBLE: se FALLA CERRADO con
+ * ENVELOPE_MATERIAL_REFRESH_REQUIRED. NUNCA se reinterpreta como CAMPAIGN_TOTAL ni se le infiere duración: el
+ * humano nunca revisó ese material. PURA: no muta nada, no infiere, no supersede.
+ */
+export function evaluarCompatibilidadMaterial(env: AuthorizedExecutionEnvelope, plan: MarketingPlan): CompatibilidadMaterial {
+  const bp = plan.campaigns[0]?.budgetPolicy as { type?: unknown; totalAmount?: unknown; durationDays?: unknown } | undefined;
+  const planActual = bp?.type === 'CAMPAIGN_TOTAL' && typeof bp.totalAmount === 'number' && typeof bp.durationDays === 'number';
+  const duracionActual = typeof (env as { authorizedDurationDays?: unknown }).authorizedDurationDays === 'number';
+  const accionesActuales = !(env.authorizedActionTypes as readonly string[]).includes('ADJUST_DAILY_BUDGET');
+  const compatible = planActual && duracionActual && accionesActuales;
+  return compatible ? { compatible: true, reasonCode: null } : { compatible: false, reasonCode: 'ENVELOPE_MATERIAL_REFRESH_REQUIRED' };
+}
 
 export interface ResultadoBarrera { readonly decision: 'ALLOW' | 'DENY'; readonly reasonCode: ExecReason | null }
 
