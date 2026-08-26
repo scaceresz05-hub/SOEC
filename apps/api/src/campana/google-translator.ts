@@ -20,8 +20,12 @@ export interface GoogleMutationPayload {
   readonly customerId: string;
   readonly operation: string; // p.ej. 'campaign.create'
   readonly resourceType: string; // campaign | ad_group | ad_group_ad | ad_group_criterion | campaign_criterion | campaign_budget
-  /** Target lógico del padre (AD GROUP) por fingerprint material. En SHADOW NO hay providerResourceId (Fase 2B). */
-  readonly parentAdGroup?: { readonly materialFingerprint: string; readonly logicalName?: string };
+  /**
+   * Target lógico del padre (AD GROUP) por fingerprint material. En SHADOW NO hay providerResourceId. En REAL
+   * (Fase 2B) el ejecutor RESUELVE `providerResourceId` desde el binding del padre creado por ESTE envelope antes
+   * de mutar; nunca se inventa antes de la respuesta de Google.
+   */
+  readonly parentAdGroup?: { readonly materialFingerprint: string; readonly logicalName?: string; readonly providerResourceId?: string };
   readonly fields: Readonly<Record<string, unknown>>;
 }
 

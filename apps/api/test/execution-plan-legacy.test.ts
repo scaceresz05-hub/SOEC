@@ -54,7 +54,7 @@ async function seed(store: EventStore, legacy: boolean): Promise<AuthorizedExecu
   let env: AuthorizedExecutionEnvelope = clone(envActual);
   if (legacy) {
     delete (plan.campaigns[0] as { budgetPolicy?: unknown }).budgetPolicy; // plan del schema anterior
-    const legacyEnv = clone(envActual) as Record<string, unknown>;
+    const legacyEnv = clone(envActual) as unknown as Record<string, unknown>;
     delete legacyEnv.authorizedDurationDays;
     legacyEnv.startsAt = T; legacyEnv.expiresAt = '2026-09-04T00:00:00.000Z'; // fechas absolutas legacy
     legacyEnv.authorizedActionTypes = ['CREATE_CAMPAIGN', 'CREATE_AD_GROUP', 'CREATE_AD', 'ADD_KEYWORD', 'ADD_NEGATIVE_KEYWORD', 'PAUSE_CAMPAIGN', 'RESUME_CAMPAIGN', 'ADJUST_DAILY_BUDGET', 'PAUSE_AD_GROUP', 'PAUSE_KEYWORD', 'STOP_CAMPAIGN'];
@@ -113,7 +113,7 @@ describe('GET /medicion/execution-plan · envelope LEGACY (hotfix P0)', () => {
     expect((await store.readStream(ctx(ORG), envelopeAuditStreamId(ORG))).filter((e) => e.type === EVENTO_ENVELOPE_AUDIT).length).toBe(auditAntes);
     expect(ultimo.id).toBe(env0.id);
     expect(ultimo.planHash).toBe(env0.planHash);
-    expect((ultimo as Record<string, unknown>).authorizedDurationDays).toBeUndefined(); // sigue legacy, no migrado on-read
+    expect((ultimo as unknown as Record<string, unknown>).authorizedDurationDays).toBeUndefined(); // sigue legacy, no migrado on-read
     expect(ultimo.authorizedActionTypes).toContain('ADJUST_DAILY_BUDGET'); // no se le quitó in-memory
     expect(env0.status).toBe('READY_FOR_HUMAN_APPROVAL');
     await app.close();
