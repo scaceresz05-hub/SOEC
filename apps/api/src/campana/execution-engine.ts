@@ -9,7 +9,7 @@
  */
 import type { MarketingPlan } from './marketing-plan';
 import { aprobacionVigente, type AuthorizedExecutionEnvelope, type ProviderState, type FlagsEjecucion } from './authorized-execution-envelope';
-import { fingerprintsDelPlan } from './material-fingerprint';
+import { fingerprintsDelPlan, type PlanFingerprints } from './material-fingerprint';
 import { construirActionPlan, type ExecutionActionIntent } from './execution-intent';
 import { validarPropiedad, type ProviderResourceBinding } from './resource-binding';
 import type { FinancialLedger } from './financial-ledger';
@@ -18,6 +18,7 @@ export type ExecReason =
   | 'ENVELOPE_NOT_APPROVED' | 'ENVELOPE_EXPIRED' | 'ENVELOPE_REVOKED' | 'PLAN_HASH_MISMATCH'
   | 'CHANNEL_NOT_AUTHORIZED' | 'ACTION_NOT_AUTHORIZED' | 'PLAN_MATERIAL_CHANGE_REQUIRES_REAPPROVAL'
   | 'RESOURCE_NOT_OWNED_BY_ENVELOPE' | 'EXPERIMENT_CAP_WOULD_BE_EXCEEDED' | 'TOTAL_CAP_WOULD_BE_EXCEEDED'
+  | 'PARENT_RESOURCE_NOT_IN_APPROVED_PLAN' | 'PARENT_PROVIDER_RESOURCE_NOT_BOUND'
   | 'EXTERNAL_GATE_BLOCKED' | 'TRACKING_INVALID' | 'LANDING_INVALID' | 'SUPERVISED_REAL_DISABLED' | 'AUTONOMOUS_REAL_DISABLED';
 
 export interface ResultadoBarrera { readonly decision: 'ALLOW' | 'DENY'; readonly reasonCode: ExecReason | null }
@@ -54,8 +55,10 @@ export function evaluarBarreras(
   // 3) CANAL / ACCIÓN autorizados
   if (!env.authorizedChannels.includes(intent.channel)) return deny('CHANNEL_NOT_AUTHORIZED');
   if (!(env.authorizedActionTypes as readonly string[]).includes(intent.actionType)) return deny('ACTION_NOT_AUTHORIZED');
-  // 4) MATERIAL
-  if (!validateActionAgainstApprovedPlan(intent, fingerprintsDelPlan(plan).all).ok) return deny('PLAN_MATERIAL_CHANGE_REQUIRES_REAPPROVAL');
+  // 4) MATERIAL (entidad ∈ plan aprobado; y su AD GROUP padre ∈ ad groups aprobados — fail-closed)
+  const fps = fingerprintsDelPlan(plan);
+  if (!validateActionAgainstApprovedPlan(intent, fps.all).ok) return deny('PLAN_MATERIAL_CHANGE_REQUIRES_REAPPROVAL');
+  if (intent.parent && !fps.adGroupSet.has(intent.parent.materialFingerprint)) return deny('PARENT_RESOURCE_NOT_IN_APPROVED_PLAN');
   // 5) OWNERSHIP (mutaciones no-creación exigen binding del mismo envelope/tenant)
   if (!validarPropiedad(intent.actionType, binding, env.organizationId, env.id).ok) return deny('RESOURCE_NOT_OWNED_BY_ENVELOPE');
   // 6) FINANCIERO
@@ -94,7 +97,7 @@ export function evaluarGateEnvelope(
   return { decision: 'ALLOW', reasonCode: null };
 }
 
-const CLAVES_PAYLOAD_PERMITIDAS = new Set(['customerId', 'operation', 'resourceType', 'fields']);
+const CLAVES_PAYLOAD_PERMITIDAS = new Set(['customerId', 'operation', 'resourceType', 'fields', 'parentAdGroup']);
 const CLAVES_PROHIBIDAS = /token|secret|authorization|cookie|password|bearer|developer|refresh|access|session/i;
 
 /** Sanea un providerPayload: whitelist de claves + defensa ante cualquier clave sensible. Nunca expone secretos. */
@@ -114,20 +117,26 @@ export interface IntentDetalle {
   readonly channel: string; readonly actionType: string;
   readonly materialEntityFingerprint: string; readonly idempotencyKey: string;
   readonly status: string; readonly validation: { decision: string; reasonCode: string | null };
+  readonly parent: { readonly entityType: string; readonly materialFingerprint: string; readonly logicalName?: string } | null;
+  readonly dependsOn: readonly { readonly actionType: string; readonly materialFingerprint: string }[];
   readonly materialBinding: { readonly approved: boolean; readonly planEntityFingerprint: string; readonly requestedFingerprint: string };
+  readonly parentMaterialBinding: { readonly approved: boolean; readonly materialFingerprint: string } | null;
   readonly financialImpact: { readonly scope: string; readonly currency: string; readonly projectedCommitment: number; readonly experimentCapImpact: number; readonly envelopeCapImpact: number };
   readonly providerPayload: Record<string, unknown> | null;
 }
 
-/** Proyecta un intent a su detalle READ-ONLY, auditable y sin secretos. */
-export function detalleIntent(intent: ExecutionActionIntent, fpAll: ReadonlySet<string>, currency: string): IntentDetalle {
+/** Proyecta un intent a su detalle READ-ONLY, auditable y sin secretos (incluye padre y dependencias). */
+export function detalleIntent(intent: ExecutionActionIntent, fps: PlanFingerprints, currency: string): IntentDetalle {
   const c = intent.financialImpact.commitment;
   return {
     id: intent.id, organizationId: intent.organizationId, envelopeId: intent.envelopeId, planHash: intent.planHash,
     channel: intent.channel, actionType: intent.actionType,
     materialEntityFingerprint: intent.materialEntityFingerprint, idempotencyKey: intent.idempotencyKey,
     status: intent.status, validation: intent.validation,
-    materialBinding: { approved: fpAll.has(intent.materialEntityFingerprint), planEntityFingerprint: intent.materialEntityFingerprint, requestedFingerprint: intent.materialEntityFingerprint },
+    parent: intent.parent ? { entityType: intent.parent.entityType, materialFingerprint: intent.parent.materialFingerprint, ...(intent.parent.logicalName ? { logicalName: intent.parent.logicalName } : {}) } : null,
+    dependsOn: intent.dependsOn,
+    materialBinding: { approved: fps.all.has(intent.materialEntityFingerprint), planEntityFingerprint: intent.materialEntityFingerprint, requestedFingerprint: intent.materialEntityFingerprint },
+    parentMaterialBinding: intent.parent ? { approved: fps.adGroupSet.has(intent.parent.materialFingerprint), materialFingerprint: intent.parent.materialFingerprint } : null,
     financialImpact: { scope: intent.financialImpact.scope, currency, projectedCommitment: c, experimentCapImpact: intent.financialImpact.scope === 'EXPERIMENT' ? c : 0, envelopeCapImpact: c },
     providerPayload: sanitizarPayload(intent.providerPayload),
   };

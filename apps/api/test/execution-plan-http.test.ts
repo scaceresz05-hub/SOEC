@@ -64,6 +64,17 @@ describe('GET /medicion/execution-plan HTTP', () => {
     // sin secretos en la RESPUESTA SERIALIZADA + campaña histórica no referenciada
     expect(/token|secret|authorization|bearer|refresh|developer|cookie|password/i.test(res.body)).toBe(false);
     expect(res.body.includes('SmileFlow Search Chile')).toBe(false);
+    // UNICIDAD tras serializar: ids/fingerprints/idempotencyKeys todos distintos (sin colisión de los 2 ads).
+    const n = b.intents.length;
+    expect(new Set(b.intents.map((i: { id: string }) => i.id)).size).toBe(n);
+    expect(new Set(b.intents.map((i: { materialEntityFingerprint: string }) => i.materialEntityFingerprint)).size).toBe(n);
+    expect(new Set(b.intents.map((i: { idempotencyKey: string }) => i.idempotencyKey)).size).toBe(n);
+    // Parent binding serializado: cada CREATE_AD y ADD_KEYWORD referencia su AD GROUP padre.
+    const ads = b.intents.filter((i: { actionType: string }) => i.actionType === 'CREATE_AD');
+    expect(ads.every((a: { parent?: { materialFingerprint?: string } }) => !!a.parent?.materialFingerprint)).toBe(true);
+    expect(new Set(ads.map((a: { parent: { materialFingerprint: string } }) => a.parent.materialFingerprint)).size).toBe(ads.length); // padres distintos
+    const kws = b.intents.filter((i: { actionType: string }) => i.actionType === 'ADD_KEYWORD');
+    expect(kws.every((k: { parent?: { materialFingerprint?: string } }) => !!k.parent?.materialFingerprint)).toBe(true);
     await app.close();
   });
 

@@ -9,6 +9,8 @@ export interface GoogleMutationPayload {
   readonly customerId: string;
   readonly operation: string; // p.ej. 'campaign.create'
   readonly resourceType: string; // campaign | ad_group | ad_group_ad | ad_group_criterion | campaign_criterion | campaign_budget
+  /** Target lógico del padre (AD GROUP) por fingerprint material. En SHADOW NO hay providerResourceId (Fase 2B). */
+  readonly parentAdGroup?: { readonly materialFingerprint: string; readonly logicalName?: string };
   readonly fields: Readonly<Record<string, unknown>>;
 }
 
@@ -17,6 +19,7 @@ export interface EntradaTraduccion {
   readonly customerId: string;
   readonly currency: string;
   readonly material: Readonly<Record<string, unknown>>;
+  readonly parentAdGroup?: { readonly materialFingerprint: string; readonly logicalName?: string };
 }
 
 const OP: Partial<Record<AccionAutorizable, { operation: string; resourceType: string }>> = {
@@ -36,7 +39,7 @@ const OP: Partial<Record<AccionAutorizable, { operation: string; resourceType: s
 export function traducir(e: EntradaTraduccion): GoogleMutationPayload | null {
   const op = OP[e.actionType];
   if (!op) return null;
-  return { customerId: e.customerId, operation: op.operation, resourceType: op.resourceType, fields: e.material };
+  return { customerId: e.customerId, operation: op.operation, resourceType: op.resourceType, ...(e.parentAdGroup ? { parentAdGroup: e.parentAdGroup } : {}), fields: e.material };
 }
 
 /** Puerto de mutación real (Google Ads). En Fase 2A NO se invoca por ningún camino productivo. */

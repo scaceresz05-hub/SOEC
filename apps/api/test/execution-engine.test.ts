@@ -9,7 +9,7 @@ import { construirMarketingPlan, type EntradaMarketingPlan, type CanalId } from 
 import type { ChannelAvailability } from '../src/campana/channel-availability';
 import type { MarketingReadiness } from '../src/campana/diagnosis-evidence';
 import { construirEnvelope, aprobar, type ProviderState, type FlagsEjecucion } from '../src/campana/authorized-execution-envelope';
-import { fingerprint, fingerprintsDelPlan } from '../src/campana/material-fingerprint';
+import { fingerprint, fingerprintsDelPlan, adGroupFingerprint, keywordFingerprint } from '../src/campana/material-fingerprint';
 import { construirActionPlan, idempotencyKey, type ExecutionActionIntent } from '../src/campana/execution-intent';
 import { evaluarBarreras, validateActionFinancialImpact, correrShadow, evaluarGateEnvelope, detalleIntent, sanitizarPayload } from '../src/campana/execution-engine';
 import { ledgerCero, construirLedger } from '../src/campana/financial-ledger';
@@ -139,8 +139,8 @@ describe('gates (tres barreras independientes)', () => {
 
 describe('execution detail inspeccionable + sanitización', () => {
   const shadow = correrShadow(PLAN, ENV_READY, 'CUST-1', LED, provGate, SUP(false), T0);
-  const fpAll = fingerprintsDelPlan(PLAN).all;
-  const detalles = shadow.intents.map((it) => detalleIntent(it, fpAll, ENV_READY.currency));
+  const fps = fingerprintsDelPlan(PLAN);
+  const detalles = shadow.intents.map((it) => detalleIntent(it, fps, ENV_READY.currency));
 
   it('execution_detail_exposes_all_intents con schema completo', () => {
     expect(detalles.length).toBe(shadow.intents.length);
@@ -182,8 +182,8 @@ describe('execution detail inspeccionable + sanitización', () => {
     expect(blob.includes('SmileFlow Search Chile')).toBe(false);
   });
   it('execution_detail_get_is_side_effect_free + retry byte-stable', () => {
-    const a = correrShadow(PLAN, ENV_READY, 'CUST-1', LED, provGate, SUP(false), T0).intents.map((it) => detalleIntent(it, fpAll, 'CLP'));
-    const b = correrShadow(PLAN, ENV_READY, 'CUST-1', LED, provGate, SUP(false), T0).intents.map((it) => detalleIntent(it, fpAll, 'CLP'));
+    const a = correrShadow(PLAN, ENV_READY, 'CUST-1', LED, provGate, SUP(false), T0).intents.map((it) => detalleIntent(it, fps, 'CLP'));
+    const b = correrShadow(PLAN, ENV_READY, 'CUST-1', LED, provGate, SUP(false), T0).intents.map((it) => detalleIntent(it, fps, 'CLP'));
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 });
@@ -198,6 +198,50 @@ describe('gate unificado', () => {
   it('approved_google_pending / approved_google_ready_supervised_false (precedencia unificada)', () => {
     expect(evaluarGateEnvelope(ENV_APP_WAIT, PLAN, provGate, SUP(true)).reasonCode).toBe('EXTERNAL_GATE_BLOCKED');
     expect(evaluarGateEnvelope(ENV_APP_READY, PLAN, provOk, SUP(false)).reasonCode).toBe('SUPERVISED_REAL_DISABLED');
+  });
+});
+
+describe('parent resource binding (ad group → ad / keyword)', () => {
+  const ads = INTENTS.filter((i) => i.actionType === 'CREATE_AD');
+  const kws = INTENTS.filter((i) => i.actionType === 'ADD_KEYWORD');
+  it('same_copy_same_destination_different_adgroups_have_different_fingerprints/ids/idempotency_keys', () => {
+    expect(ads.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(ads.map((a) => a.materialEntityFingerprint)).size).toBe(ads.length);
+    expect(new Set(ads.map((a) => a.id)).size).toBe(ads.length);
+    expect(new Set(ads.map((a) => a.idempotencyKey)).size).toBe(ads.length);
+  });
+  it('create_ad_contains_parent_adgroup_fingerprint + payload_reference + dependency', () => {
+    for (const a of ads) {
+      expect(a.parent?.entityType).toBe('AD_GROUP');
+      expect(a.parent?.materialFingerprint).toBeTruthy();
+      expect(fingerprintsDelPlan(PLAN).adGroupSet.has(a.parent!.materialFingerprint)).toBe(true);
+      expect((a.providerPayload as { parentAdGroup?: { materialFingerprint: string } }).parentAdGroup?.materialFingerprint).toBe(a.parent!.materialFingerprint);
+      expect(a.dependsOn.some((d) => d.actionType === 'CREATE_AD_GROUP' && d.materialFingerprint === a.parent!.materialFingerprint)).toBe(true);
+    }
+  });
+  it('keyword_contains_parent_adgroup_fingerprint + reference + dependency; parent points to correct group', () => {
+    for (const k of kws) {
+      expect(k.parent?.materialFingerprint).toBeTruthy();
+      const g = PLAN.campaigns[0]!.adGroups.find((x) => x.name === k.parent!.logicalName)!;
+      expect(adGroupFingerprint(g)).toBe(k.parent!.materialFingerprint); // parent correcto por grupo
+      expect((k.providerPayload as { parentAdGroup?: { materialFingerprint: string } }).parentAdGroup?.materialFingerprint).toBe(k.parent!.materialFingerprint);
+    }
+  });
+  it('same_keyword_same_matchtype_different_adgroups_have_different_fingerprints/keys', () => {
+    const fpA = 'ADGROUP_A'; const fpB = 'ADGROUP_B';
+    const k = { text: 'software dental', matchType: 'PHRASE' } as never;
+    expect(keywordFingerprint(fpA, k)).not.toBe(keywordFingerprint(fpB, k));
+  });
+  it('missing_adgroup_parent_denies_ad_and_keyword (fail-closed)', () => {
+    const adBadParent = { ...ads[0]!, parent: { entityType: 'AD_GROUP' as const, materialFingerprint: 'FP_INEXISTENTE' } };
+    expect(rc(adBadParent)).toBe('PARENT_RESOURCE_NOT_IN_APPROVED_PLAN');
+    const kwBadParent = { ...kws[0]!, parent: { entityType: 'AD_GROUP' as const, materialFingerprint: 'FP_INEXISTENTE' } };
+    expect(rc(kwBadParent)).toBe('PARENT_RESOURCE_NOT_IN_APPROVED_PLAN');
+  });
+  it('todos los intents con fingerprint/id/idempotencyKey ÚNICOS (sin colisión)', () => {
+    expect(new Set(INTENTS.map((i) => i.materialEntityFingerprint)).size).toBe(INTENTS.length);
+    expect(new Set(INTENTS.map((i) => i.id)).size).toBe(INTENTS.length);
+    expect(new Set(INTENTS.map((i) => i.idempotencyKey)).size).toBe(INTENTS.length);
   });
 });
 

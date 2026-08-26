@@ -19,7 +19,7 @@ interface Envelope {
 }
 interface Financial { historicalSpend: number; envelopeSpend: number; committedSpend: number; remainingCap: number }
 interface Resp { envelope: Envelope | null; financial: Financial; executionAllowed: { decision: string; reasonCode: string | null }; autonomousReal: boolean; supervisedReal: boolean }
-interface IntentDetalle { id: string; actionType: string; materialEntityFingerprint: string; idempotencyKey: string; status: string; validation: { decision: string; reasonCode: string | null }; materialBinding: { approved: boolean }; financialImpact: { scope: string; projectedCommitment: number }; providerPayload: { operation?: string } | null }
+interface IntentDetalle { id: string; actionType: string; materialEntityFingerprint: string; idempotencyKey: string; status: string; validation: { decision: string; reasonCode: string | null }; parent: { materialFingerprint: string; logicalName?: string } | null; materialBinding: { approved: boolean }; financialImpact: { scope: string; projectedCommitment: number }; providerPayload: { operation?: string } | null }
 interface ExecPlan { shadowPlanCreated: boolean; mode?: string; summary?: { executionActionCount: number; byType: Record<string, number>; entitiesAffected: number }; realExecutionDecision?: string; realExecutionReason?: string | null; providerMutateCalls?: number; providerBindings?: { count: number; fabricatedIds: number }; intents?: IntentDetalle[] }
 
 const clp = (n: number): string => `$${Math.round(n).toLocaleString('es-CL')}`;
@@ -139,7 +139,7 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
                   <ul className="s" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
                     {exec.intents.map((it) => (
                       <li key={it.id}>
-                        <b>{it.actionType}</b> · fp <code>{it.materialEntityFingerprint.slice(0, 8)}</code> · {it.materialBinding.approved ? 'material aprobado' : 'MATERIAL NO APROBADO'} · {it.status}{it.validation.reasonCode ? ` (${it.validation.reasonCode})` : ''} · {it.financialImpact.scope} ${Math.round(it.financialImpact.projectedCommitment).toLocaleString('es-CL')} · {it.providerPayload?.operation ?? '—'}
+                        <b>{it.actionType}</b> · fp <code>{it.materialEntityFingerprint.slice(0, 8)}</code>{it.parent ? <> · grupo <b>{it.parent.logicalName ?? it.parent.materialFingerprint.slice(0, 8)}</b></> : null} · ik <code>{it.idempotencyKey.slice(0, 8)}</code> · {it.materialBinding.approved ? 'material aprobado' : 'MATERIAL NO APROBADO'} · {it.status}{it.validation.reasonCode ? ` (${it.validation.reasonCode})` : ''} · {it.financialImpact.scope} ${Math.round(it.financialImpact.projectedCommitment).toLocaleString('es-CL')} · {it.providerPayload?.operation ?? '—'}
                       </li>
                     ))}
                   </ul>

@@ -465,8 +465,8 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     // detail=intents ⇒ intents completos (sanitizados) + auditoría SHADOW derivada. GET siempre side-effect free.
     const detail = (req.query as { detail?: string } | undefined)?.detail;
     if (detail === 'intents') {
-      const fpAll = fingerprintsDelPlan(plan).all;
-      return reply.send({ ...base, intents: r.intents.map((it) => detalleIntent(it, fpAll, envelope.currency)), shadowAudit: auditoriaShadowDerivada(r) });
+      const fps = fingerprintsDelPlan(plan);
+      return reply.send({ ...base, intents: r.intents.map((it) => detalleIntent(it, fps, envelope.currency)), shadowAudit: auditoriaShadowDerivada(r) });
     }
     return reply.send(base);
   });
