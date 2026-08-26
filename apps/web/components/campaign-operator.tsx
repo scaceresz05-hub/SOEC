@@ -122,7 +122,6 @@ export function CampaignOperator({ org }: { org: string | null | undefined }): R
             </>
           )}
 
-          <Callout tono="info" ico="🔒">Sobre de ejecución: <b>{res?.envelopeDraft?.status ?? 'DRAFT'}</b> (sin aprobar). Planificado: {res?.envelopeDraft?.allowedChannelsPlanned?.map(nombreCanal).join(', ') || '—'} · Ejecutable ahora: {res?.envelopeDraft?.executionEligibleChannels?.length ? res.envelopeDraft.executionEligibleChannels.map(nombreCanal).join(', ') : 'ninguno'}. La autorización global y la ejecución real son un paso posterior, tuyo.</Callout>
         </div>
       )}
     </div>

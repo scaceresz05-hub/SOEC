@@ -37,6 +37,16 @@ export const ACCIONES_AUTORIZABLES_DEFECTO: readonly AccionAutorizable[] = [
   'PAUSE_CAMPAIGN', 'RESUME_CAMPAIGN', 'ADJUST_DAILY_BUDGET', 'PAUSE_AD_GROUP', 'PAUSE_KEYWORD', 'STOP_CAMPAIGN',
 ];
 
+/**
+ * Acciones DELIBERADAMENTE autorizadas para un experimento de búsqueda (NO "todo"): construir + controlar +
+ * detener. Se EXCLUYE `RESUME_CAMPAIGN` a propósito (una campaña detenida no se reanuda sin revisión humana).
+ * El humano ve exactamente este conjunto antes de autorizar.
+ */
+export const ACCIONES_EXPERIMENTO_BUSQUEDA: readonly AccionAutorizable[] = [
+  'CREATE_CAMPAIGN', 'CREATE_AD_GROUP', 'CREATE_AD', 'ADD_KEYWORD', 'ADD_NEGATIVE_KEYWORD',
+  'ADJUST_DAILY_BUDGET', 'PAUSE_CAMPAIGN', 'PAUSE_AD_GROUP', 'PAUSE_KEYWORD', 'STOP_CAMPAIGN',
+];
+
 export interface EnvelopeStopRule { readonly id: string; readonly tipo: string; readonly enabled: boolean; readonly threshold?: number | null; readonly date?: string | null; readonly condition?: string; readonly reason?: string }
 
 export interface AuthorizedExecutionEnvelope {
@@ -126,7 +136,8 @@ export function construirEnvelope(plan: MarketingPlan, org: string, planId: stri
   const e: AuthorizedExecutionEnvelope = {
     id: `env:${org}:${planId}`, organizationId: org, objective: plan.objective, planId, planHash: hash, planVersion: hash.slice(0, 8),
     currency: plan.currency, totalCap: plan.totalAuthorizedBudget, experimentBudget: plan.totalSpendRecommended, maxSpendWithoutContact: plan.maxSpendWithoutContact.value,
-    startsAt: plan.period.startAt, expiresAt: plan.period.endAt, plannedChannels: planned, authorizedChannels: authorized, authorizedActionTypes: ACCIONES_AUTORIZABLES_DEFECTO,
+    startsAt: plan.period.startAt, expiresAt: plan.period.endAt, plannedChannels: planned, authorizedChannels: authorized,
+    authorizedActionTypes: ACCIONES_EXPERIMENTO_BUSQUEDA,
     stopRules: plan.stopCriteria.map((s) => ({ id: s.id, tipo: s.tipo, enabled: s.enabled, threshold: s.threshold ?? null, date: s.date ?? null, ...(s.condition ? { condition: s.condition } : {}), ...(s.reason ? { reason: s.reason } : {}) })),
     trackingRequirements: plan.requiredTracking, status, approvedBy: null, approvedAt: null, activatedAt: null, stoppedAt: null, revokedAt: null, createdAt: ahora, updatedAt: ahora,
   };

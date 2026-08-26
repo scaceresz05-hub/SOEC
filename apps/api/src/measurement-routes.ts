@@ -351,7 +351,14 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     if (!b.objetivo || typeof b.presupuestoTotal !== 'number' || typeof b.periodoDias !== 'number')
       return reply.code(400).send({ ok: false, error: 'faltan objetivo/presupuestoTotal/periodoDias' });
     const entrada: EntradaOperador = { objetivo: b.objetivo, presupuestoTotal: b.presupuestoTotal, periodoDias: b.periodoDias, ...(b.canales ? { canales: b.canales } : {}), ...(b.landingUrl ? { landingUrl: b.landingUrl } : {}), ...(b.historicalCpa != null ? { historicalCpa: b.historicalCpa } : {}) };
-    return reply.code(201).send({ organizationId: org, ...(await campaignOperator.planificar(org, new Date().toISOString(), entrada)) });
+    const resultado = await campaignOperator.planificar(org, new Date().toISOString(), entrada);
+    // MATERIALIZACIÓN SERVER-SIDE del sobre: si el draft está listo para revisión humana, se persiste el
+    // AuthorizedExecutionEnvelope (idempotente por planHash) para que GET /medicion/envelope lo devuelva.
+    let envelope = null;
+    if (resultado.plan.campaignDraftStatus === 'READY_FOR_APPROVAL') {
+      envelope = await envelopeSvc.crearDesdePlan(org, resultado.plan, `plan:${org}:${resultado.at}`, new Date().toISOString());
+    }
+    return reply.code(201).send({ organizationId: org, ...resultado, envelope });
   });
 
   // INGESTA de EVIDENCIA DE DIAGNÓSTICO (readiness del funnel). GET = lectura; POST = registrar (auditable).
@@ -381,16 +388,22 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     };
   };
   app.get('/medicion/envelope', async (req, reply) => {
-    const { org } = real(req, 'autonomia-ads');
+    const { ctx: c, org } = real(req, 'autonomia-ads');
     const envelope = await envelopeSvc.leerUltimo(org);
     const plan = (await campaignOperator.leerUltimo(org))?.plan ?? null;
+    // Contadores financieros: histórico ≠ gasto del envelope. El histórico NUNCA descuenta remainingCap.
+    const snap = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(org)));
+    const historicalSpend = snap?.cost ?? 0;
+    const envelopeSpend = 0; // gasto generado por acciones del envelope tras activación (aún ninguna)
+    const committedSpend = 0; // gasto comprometido por acciones pendientes (aún ninguna)
+    const remainingCap = envelope ? envelope.totalCap - envelopeSpend - committedSpend : 0;
     let executionAllowed: { decision: string; reasonCode: string | null } = { decision: 'DENY', reasonCode: 'ENVELOPE_NOT_APPROVED' };
     if (envelope && plan) {
-      const { prov, fin } = providerYFinancieroDe(org);
-      const r = validateAuthorizedExecution(envelope, plan, prov, fin, { canal: 'google', tipo: 'CREATE_CAMPAIGN' }, flagsEjecucion(process.env, AUTONOMOUS_REAL));
+      const { prov } = providerYFinancieroDe(org);
+      const r = validateAuthorizedExecution(envelope, plan, prov, { historicalSpend, envelopeSpend, committedSpend }, { canal: 'google', tipo: 'CREATE_CAMPAIGN' }, flagsEjecucion(process.env, AUTONOMOUS_REAL));
       executionAllowed = { decision: r.decision, reasonCode: r.reasonCode };
     }
-    return reply.send({ organizationId: org, envelope, executionAllowed, autonomousReal: AUTONOMOUS_REAL, supervisedReal: process.env.SOEC_SUPERVISED_REAL === 'true' });
+    return reply.send({ organizationId: org, envelope, financial: { historicalSpend, envelopeSpend, committedSpend, remainingCap }, executionAllowed, autonomousReal: AUTONOMOUS_REAL, supervisedReal: process.env.SOEC_SUPERVISED_REAL === 'true' });
   });
   app.get('/medicion/envelope-audit', async (req, reply) => {
     const { org } = real(req, 'autonomia-ads');

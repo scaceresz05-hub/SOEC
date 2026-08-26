@@ -59,8 +59,9 @@ export class EnvelopeService {
     const ctx = this.ctx(org);
     const { envelope, audit } = construirEnvelope(plan, org, planId, ahora);
     const prev = await this.leerUltimo(org);
-    // Si ya hay un sobre APROBADO con el mismo planHash, no lo pisamos (inmutabilidad del aprobado).
-    if (prev && prev.planHash === envelope.planHash && (prev.status === 'APPROVED_WAITING_EXTERNAL_GATE' || prev.status === 'APPROVED_READY_TO_ACTIVATE')) return prev;
+    // IDEMPOTENCIA: mismo planHash + misma org ⇒ NO se crea un envelope duplicado (refresh/retry devuelven el mismo).
+    // Un planHash distinto es un cambio MATERIAL ⇒ nueva revisión (el aprobado previo queda invalidado por hash).
+    if (prev && prev.planHash === envelope.planHash) return prev;
     await this.persistir(ctx, envelope, audit);
     return envelope;
   }
