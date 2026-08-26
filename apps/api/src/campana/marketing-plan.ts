@@ -138,14 +138,51 @@ const N: Record<Nivel, number> = { LOW: 1, MEDIUM: 2, HIGH: 3 };
 const fmt = (moneda: string, n: number): string => `${moneda} ${Math.round(n)}`;
 const REQUIRED_TRACKING = ['Evento de contacto (lead_created) verificado y disparándose antes de invertir.', 'Atribución del contacto a la campaña/canal de origen (utm/gclid).'];
 
-/** Recorta a n caracteres respetando palabras; marca PENDING_COPY sólo si no hay material real. */
-function corta(s: string, n: number): string {
+// ── QUALITY GATE de copy RSA ────────────────────────────────────────────────
+// Prohíbe truncar mecánicamente: un headline nunca puede terminar en conjunción/preposición/coma ni quedar
+// sintácticamente incompleto. Se PREFIERE una reformulación corta (cláusula líder completa) antes que cortar.
+const PALABRAS_COLGANTES = new Set(['y', 'e', 'o', 'u', 'de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'con', 'para', 'por', 'en', 'a', 'al', 'que', 'sin', 'su', 'tu', 'más', 'ademas', 'además', 'como', 'segun', 'según']);
+
+/** ¿Es una frase COMPLETA y publicable? (no vacía, sin placeholder, ≥2 palabras, sin coma/colgante final). */
+export function esFraseCompleta(s: string): boolean {
   const t = (s ?? '').trim();
-  if (!t) return 'PENDING_COPY';
-  if (t.length <= n) return t;
-  const cut = t.slice(0, n);
-  const sp = cut.lastIndexOf(' ');
-  return (sp > 10 ? cut.slice(0, sp) : cut).trim();
+  if (!t || /PENDING/i.test(t)) return false;
+  if (/[,;:·\-–]$/.test(t)) return false;
+  const words = t.split(/\s+/);
+  if (words.length < 2) return false;
+  const last = words[words.length - 1]!.toLowerCase().replace(/[.,;:!?]+$/, '');
+  return !PALABRAS_COLGANTES.has(last);
+}
+
+/** Devuelve la capability o una CLÁUSULA LÍDER completa que quepa en ≤max; null si no se logra sin truncar. */
+function fraseCortaCompleta(texto: string, max: number): string | null {
+  const t = (texto ?? '').trim();
+  if (!t) return null;
+  if (t.length <= max && esFraseCompleta(t)) return t;
+  const seps = [' y ', ' e ', ', ', ' con ', ' para ', ' que ', ' además ', '; ', ' — ', ' – ', ' de ', ' en '];
+  let best: string | null = null;
+  const low = t.toLowerCase();
+  for (const sep of seps) {
+    const idx = low.indexOf(sep);
+    if (idx > 0) {
+      const head = t.slice(0, idx).trim();
+      // Se rechazan fragmentos de lista (coma interna): preferimos una cláusula limpia y completa.
+      if (head.length <= max && !head.includes(',') && esFraseCompleta(head) && (!best || head.length > best.length)) best = head;
+    }
+  }
+  return best;
+}
+
+/** Valida un anuncio ya compuesto: headlines ≤30 completos, descriptions ≤90 completas, sin placeholder.
+ *  El nombre de MARCA (1 palabra, nombre propio) es un headline válido y queda EXENTO de la regla de ≥2 palabras. */
+export function validarCopyAnuncio(ad: AdDraft, brand?: string): string[] {
+  const issues: string[] = [];
+  const marca = brand?.trim().toLowerCase();
+  ad.headlines.forEach((h) => { if (marca && h.trim().toLowerCase() === marca) { if (h.length > 30) issues.push(`headline >30: "${h}"`); return; } if (/PENDING/i.test(h)) issues.push(`headline placeholder: "${h}"`); else if (h.length > 30) issues.push(`headline >30: "${h}"`); else if (!esFraseCompleta(h)) issues.push(`headline incompleto: "${h}"`); });
+  ad.descriptions.forEach((d) => { if (/PENDING/i.test(d)) issues.push(`description placeholder: "${d}"`); else if (d.length > 90) issues.push(`description >90: "${d}"`); else if (!esFraseCompleta(d)) issues.push(`description incompleta: "${d}"`); });
+  if (ad.headlines.filter((h) => !/PENDING/i.test(h)).length < 3) issues.push('menos de 3 headlines válidos');
+  if (ad.descriptions.filter((d) => !/PENDING/i.test(d)).length < 2) issues.push('menos de 2 descriptions válidas');
+  return issues;
 }
 
 function disp(canal: CanalId, ds: readonly ChannelAvailability[]): ChannelAvailability {
@@ -198,16 +235,40 @@ const POLITICA: Record<IntentCategory, { action: KeywordAction; matchType: Match
   UNKNOWN: { action: 'OBSERVE_NO_SPEND', matchType: null, reason: 'Intención no clasificable (genérico ambiguo): NO se paga por descubrir. Observar como evidencia.' },
 };
 
-function componerAnuncio(valueProps: readonly ValueProp[], brand: string | undefined): AdDraft {
-  const props = valueProps.map((v) => v.capability).filter((c) => c && c.trim());
+/**
+ * Compone un RSA SIN truncar: cada headline es una frase completa ≤30 (la capability entera o su cláusula
+ * líder), derivada SÓLO de valueProps verificadas + el nombre de marca. Las value props cortas/comerciales
+ * compiten por reglas generales (completitud, longitud, diversidad), no por hardcode. El grupo de competidor
+ * agrega una variante de EVALUACIÓN de la propia marca (sin afirmar nada del competidor). Si no hay material
+ * suficiente para 3 headlines / 2 descriptions completas ⇒ marca PENDING_COPY (⇒ draft INCOMPLETE).
+ */
+function componerAnuncio(valueProps: readonly ValueProp[], brand: string | undefined, grupo: 'TARGET' | 'SEGMENT'): AdDraft {
+  const caps = valueProps.map((v) => v.capability).filter((c) => c && c.trim());
   const headlines: string[] = [];
-  if (brand && brand.trim()) headlines.push(corta(brand, 30));
-  for (const p of props) { if (headlines.length >= 8) break; headlines.push(corta(p, 30)); }
-  while (headlines.length < 3) headlines.push('PENDING_COPY');
+  const agregar = (s: string | null | undefined, arr: string[], max: number): void => {
+    if (!s) return; const n = s.trim();
+    if (n.length <= max && esFraseCompleta(n) && !arr.some((x) => x.toLowerCase() === n.toLowerCase())) arr.push(n);
+  };
+  const marca = brand?.trim();
+  // 1) Marca (headline válido de 1 palabra permitido por ser nombre propio).
+  if (marca && marca.length <= 30 && !/PENDING/i.test(marca) && !arr1Colgante(marca)) headlines.push(marca);
+  // 2) Variante de evaluación SÓLO en el grupo de competidor-comprador (invita a probar la PROPIA marca; sin claims del competidor).
+  if (grupo === 'SEGMENT' && marca) { agregar(`Evalúa ${marca}`, headlines, 30); agregar(`Compara y prueba ${marca}`, headlines, 30); }
+  // 3) Capabilities como frases completas ≤30 (cláusula líder si hace falta). Diversidad por dedupe.
+  for (const c of caps) { if (headlines.length >= 12) break; agregar(fraseCortaCompleta(c, 30), headlines, 30); }
+
   const descriptions: string[] = [];
-  for (const p of props) { if (descriptions.length >= 4) break; descriptions.push(corta(p, 90)); }
-  while (descriptions.length < 2) descriptions.push('PENDING_COPY');
+  for (const c of caps) { if (descriptions.length >= 4) break; agregar(fraseCortaCompleta(c, 90), descriptions, 90); }
+
+  // Mínimos RSA. Si no se alcanzan con material completo, PENDING_COPY ⇒ INCOMPLETE (no se fabrica ni se trunca).
+  if (headlines.length < 3) headlines.push('PENDING_COPY');
+  if (descriptions.length < 2) descriptions.push('PENDING_COPY');
   return { headlines, descriptions };
+}
+/** La marca puede ser 1 palabra (nombre propio); sólo se rechaza si termina en colgante. */
+function arr1Colgante(s: string): boolean {
+  const last = s.trim().split(/\s+/).slice(-1)[0]!.toLowerCase().replace(/[.,;:!?]+$/, '');
+  return PALABRAS_COLGANTES.has(last);
 }
 
 function elegirDestino(intentPreferido: string, destinos: readonly ValidatedDestination[]): { finalDestination: string; rationale: string } {
@@ -307,7 +368,7 @@ export function construirMarketingPlan(e: EntradaMarketingPlan): MarketingPlan {
     const kws = activeKeywords.filter((k) => k.action === g.action);
     if (kws.length === 0) continue;
     const dest = elegirDestino(g.destIntent, destinos);
-    grupos.push({ name: g.label, intent: g.intent, action: g.action, keywords: kws, ads: [componerAnuncio(valueProps, brand)], finalDestination: dest.finalDestination, destinationRationale: dest.rationale });
+    grupos.push({ name: g.label, intent: g.intent, action: g.action, keywords: kws, ads: [componerAnuncio(valueProps, brand, g.action)], finalDestination: dest.finalDestination, destinationRationale: dest.rationale });
   }
 
   const campaigns: CampaignDraft[] = totalSpendRecommended > 0 && grupos.length > 0 ? [{
@@ -316,9 +377,10 @@ export function construirMarketingPlan(e: EntradaMarketingPlan): MarketingPlan {
     durationDays: e.periodoDias, trackingRequirements: [...REQUIRED_TRACKING], successCriteria, stopCriteria: stops,
   }] : [];
 
-  // COMPLETITUD del draft.
-  const allHeadlines = campaigns.flatMap((c) => c.adGroups.flatMap((g) => g.ads.flatMap((a) => [...a.headlines, ...a.descriptions])));
-  const pendingCopyCount = allHeadlines.filter((h) => /PENDING/i.test(h)).length;
+  // COMPLETITUD del draft (incluye QUALITY GATE de copy: sin placeholder, ≤30/≤90, gramaticalmente completo).
+  const allCopy = campaigns.flatMap((c) => c.adGroups.flatMap((g) => g.ads.flatMap((a) => [...a.headlines, ...a.descriptions])));
+  const pendingCopyCount = allCopy.filter((h) => /PENDING/i.test(h)).length;
+  const copyIssues = campaigns.flatMap((c) => c.adGroups.flatMap((g) => g.ads.flatMap((a) => validarCopyAnuncio(a, brand))));
   const pendingDestination = campaigns.some((c) => c.adGroups.some((g) => g.finalDestination === 'PENDING_DESTINATION'));
   const unknownActive = activeKeywords.filter((k) => k.intentClassification === 'UNKNOWN').length;
   const activasCompletas = activeKeywords.every((k) => k.text && k.intentClassification && k.confidence && k.action && k.matchType && k.rationale);
@@ -326,6 +388,7 @@ export function construirMarketingPlan(e: EntradaMarketingPlan): MarketingPlan {
   const issues: string[] = [];
   if (campaigns.length === 0) issues.push('No se generó ninguna campaña (sin keywords activas defendibles).');
   if (pendingCopyCount > 0) issues.push(`Copy incompleto: ${pendingCopyCount} placeholder(s). Falta cargar capacidades reales (valueProps) en la readiness.`);
+  if (copyIssues.length > 0) issues.push(`Copy no publicable: ${copyIssues.slice(0, 3).join(' · ')}${copyIssues.length > 3 ? '…' : ''}`);
   if (pendingDestination) issues.push('Destino sin validar: cargar destinos validados en la readiness.');
   if (!activasCompletas) issues.push('Alguna keyword activa no está completamente tipada.');
   if (!negativasCompletas) issues.push('Alguna negativa no declara matchType/rationale.');
