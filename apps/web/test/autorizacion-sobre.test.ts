@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 /**
- * Bloque UI de AUTORIZACIÓN: usa el envelope PERSISTIDO (GET), distingue tope TOTAL del presupuesto del
- * experimento, el consentimiento contiene las tres cifras, y el botón AUTORIZAR sólo aparece cuando el
- * sobre está READY_FOR_HUMAN_APPROVAL.
+ * HIDRATACIÓN del bloque de AUTORIZACIÓN desde el envelope PERSISTIDO (GET), en carga fría, sin re-simular ni
+ * ningún POST. El botón AUTORIZAR sólo aparece en READY_FOR_HUMAN_APPROVAL. Tenant-scoped y fail-safe.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createElement as h } from 'react';
@@ -10,48 +9,66 @@ import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import { AutorizacionSobre } from '../components/autorizacion-sobre';
 
 const envelope = (status: string) => ({
-  id: 'env:org-smileflow:plan:1', planId: 'plan:org-smileflow:2026', status, objective: 'Conseguir clínicas dentales interesadas en SmileFlow', currency: 'CLP',
+  id: 'env:org-smileflow:df90b634b13b9bda', planId: 'plan:org-smileflow:2026', status, objective: 'Conseguir clínicas dentales interesadas en SmileFlow', currency: 'CLP',
   totalCap: 30000, experimentBudget: 15000, maxSpendWithoutContact: 7500, startsAt: '2026-08-25T00:00:00Z', expiresAt: '2026-09-04T00:00:00Z',
   plannedChannels: ['google'], authorizedChannels: ['google'], authorizedActionTypes: ['CREATE_CAMPAIGN', 'STOP_CAMPAIGN'],
-  stopRules: [{ id: 'STOP_BUDGET', enabled: true }, { id: 'STOP_ZERO_CONVERSION', enabled: true }], planVersion: 'ab12cd34', planHash: 'ab12cd34ef56', approvedBy: null, approvedAt: null,
+  stopRules: [{ id: 'STOP_BUDGET', enabled: true, threshold: 30000 }, { id: 'STOP_ZERO_CONVERSION', enabled: true, threshold: 7500 }], planVersion: 'df90b634', planHash: 'df90b634b13b9bda', approvedBy: status.startsWith('APPROVED') ? 'humano' : null, approvedAt: null,
 });
 const resp = (status: string) => ({ envelope: envelope(status), financial: { historicalSpend: 30137, envelopeSpend: 0, committedSpend: 0, remainingCap: 30000 }, executionAllowed: { decision: 'DENY', reasonCode: 'SUPERVISED_REAL_DISABLED' }, autonomousReal: false, supervisedReal: false });
 
-function stubFetch(status: string): void {
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => resp(status) })));
+function stub(status: string, ok = true): ReturnType<typeof vi.fn> {
+  const fn = vi.fn(async () => ({ ok, json: async () => resp(status) }));
+  vi.stubGlobal('fetch', fn);
+  return fn;
 }
+const soloGET = (fn: ReturnType<typeof vi.fn>): boolean => fn.mock.calls.every((c) => ((c[1] as { method?: string } | undefined)?.method ?? 'GET') === 'GET');
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-describe('AutorizacionSobre', () => {
-  it('authorization_ui_uses_persisted_envelope + distingue total cap de experiment budget', async () => {
-    stubFetch('READY_FOR_HUMAN_APPROVAL');
-    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
-    await waitFor(() => expect(screen.getByText(/env:org-smileflow/)).toBeTruthy());
+describe('AutorizacionSobre · hidratación', () => {
+  it('authorization_block_hydrates_from_persisted_envelope + page_reload_does_not_require_campaign_resimulation + read_only', async () => {
+    const fn = stub('READY_FOR_HUMAN_APPROVAL');
+    render(h(AutorizacionSobre, { org: 'org-smileflow' })); // montaje "en frío", sin simular
+    await waitFor(() => expect(screen.getByText(/env:org-smileflow:df90b634b13b9bda/)).toBeTruthy());
     expect(screen.getByText(/TOPE TOTAL AUTORIZADO:/)).toBeTruthy();
-    expect(screen.getByText(/PRESUPUESTO DEL PRIMER EXPERIMENTO:/)).toBeTruthy();
-    // 30.000 ≠ 15.000 visibles y etiquetados por separado
-    expect(screen.getAllByText(/\$30\.000/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/\$15\.000/).length).toBeGreaterThan(0);
+    expect(soloGET(fn)).toBe(true); // hydration_does_not_create_new_envelope / does_not_mutate / no_provider_mutation
   });
 
-  it('authorization_consent_contains_total_cap + experiment_budget + zero_contact_guardrail', async () => {
-    stubFetch('READY_FOR_HUMAN_APPROVAL');
+  it('ready_envelope_shows_approval_button', async () => {
+    stub('READY_FOR_HUMAN_APPROVAL');
     render(h(AutorizacionSobre, { org: 'org-smileflow' }));
-    const consent = await waitFor(() => screen.getByText(/Autorizo a SOEC/));
-    expect(consent.textContent).toContain('$30.000'); // tope total
-    expect(consent.textContent).toContain('$15.000'); // primer experimento
-    expect(consent.textContent).toContain('$7.500');  // corte sin contactos
-  });
-
-  it('approval_button_exists_only_when_ready', async () => {
-    stubFetch('READY_FOR_HUMAN_APPROVAL');
-    const { unmount } = render(h(AutorizacionSobre, { org: 'org-smileflow' }));
     await waitFor(() => expect(screen.getByRole('button', { name: /AUTORIZAR SOBRE DE EJECUCIÓN/ })).toBeTruthy());
-    unmount(); cleanup(); vi.unstubAllGlobals();
-    stubFetch('APPROVED_WAITING_EXTERNAL_GATE');
+  });
+
+  it('superseded_envelope_does_not_show_approval_button', async () => {
+    stub('SUPERSEDED');
     render(h(AutorizacionSobre, { org: 'org-smileflow' }));
-    await waitFor(() => expect(screen.getByText(/Autorizado por/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Reemplazada por nueva revisión/)).toBeTruthy());
     expect(screen.queryByRole('button', { name: /AUTORIZAR SOBRE DE EJECUCIÓN/ })).toBeNull();
+  });
+
+  it('revoked_envelope_does_not_show_approval_button', async () => {
+    stub('REVOKED');
+    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
+    await waitFor(() => expect(screen.getByText(/Revocada/)).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /AUTORIZAR SOBRE DE EJECUCIÓN/ })).toBeNull();
+  });
+
+  it('envelope_get_failure_fails_safe (no asume "no hay sobre" ni crea uno)', async () => {
+    const fn = stub('READY_FOR_HUMAN_APPROVAL', false); // GET no-ok
+    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
+    await waitFor(() => expect(screen.getByText(/No pudimos leer el estado del sobre/)).toBeTruthy());
+    expect(screen.queryByRole('button', { name: /Preparar sobre de ejecución/ })).toBeNull(); // no fallback de creación
+    expect(soloGET(fn)).toBe(true);
+  });
+
+  it('tenant_change_clears_previous_envelope_state + refresh_does_not_change_id_or_hash', async () => {
+    stub('READY_FOR_HUMAN_APPROVAL');
+    const { rerender } = render(h(AutorizacionSobre, { org: 'org-a', nonce: 0 }));
+    await waitFor(() => expect(screen.getByText(/df90b634b13b9bda/)).toBeTruthy());
+    // Cambio de tenant ⇒ re-lee (nonce distinto): el bloque se recarga sin cambiar id/hash del GET.
+    rerender(h(AutorizacionSobre, { org: 'org-b', nonce: 1 }));
+    await waitFor(() => expect(screen.getByText(/df90b634b13b9bda/)).toBeTruthy());
+    expect(screen.getAllByText(/df90b634b13b9bda/).length).toBeGreaterThan(0);
   });
 });

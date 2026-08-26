@@ -34,19 +34,29 @@ function stopTxt(s: { id: string; enabled: boolean; threshold?: number | null; d
 const ESTADO: Record<string, { txt: string; tono: 'ok' | 'warn' | 'info' }> = {
   DRAFT: { txt: 'Borrador', tono: 'info' }, READY_FOR_HUMAN_APPROVAL: { txt: 'Lista para tu autorización', tono: 'warn' },
   APPROVED_WAITING_EXTERNAL_GATE: { txt: 'Autorizada · esperando a Google', tono: 'ok' }, APPROVED_READY_TO_ACTIVATE: { txt: 'Autorizada · lista para activar', tono: 'ok' },
-  ACTIVE: { txt: 'Activa', tono: 'ok' }, REVOKED: { txt: 'Revocada', tono: 'warn' }, EXPIRED: { txt: 'Expirada', tono: 'warn' },
+  ACTIVE: { txt: 'Activa', tono: 'ok' }, PAUSED_BY_GUARDRAIL: { txt: 'Pausada por guardrail', tono: 'warn' }, STOPPED: { txt: 'Detenida', tono: 'warn' },
+  REVOKED: { txt: 'Revocada', tono: 'warn' }, EXPIRED: { txt: 'Expirada', tono: 'warn' }, SUPERSEDED: { txt: 'Reemplazada por nueva revisión', tono: 'info' }, FAILED_SAFE: { txt: 'Detenida de forma segura', tono: 'warn' },
 };
 
-export function AutorizacionSobre({ org }: { org: string | null | undefined }): React.ReactElement {
+export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | undefined; nonce?: number }): React.ReactElement {
   const [resp, setResp] = useState<Resp | null>(null);
   const [cargando, setCargando] = useState(false);
+  const [cargandoInicial, setCargandoInicial] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // HIDRATACIÓN read-only: al montar / cambiar de tenant / re-simular, se lee el envelope PERSISTIDO (GET).
   const cargar = useCallback(async () => {
-    if (!org) return;
-    try { const r = await fetch('/api/medicion/envelope', { headers: cabecerasOrg(org), cache: 'no-store' }); if (r.ok) setResp(await r.json()); } catch { /* silencioso */ }
+    if (!org) { setCargandoInicial(false); return; }
+    setError(null);
+    try {
+      const r = await fetch('/api/medicion/envelope', { headers: cabecerasOrg(org), cache: 'no-store' });
+      if (!r.ok) { setError('No pudimos leer el estado del sobre.'); return; }
+      setResp((await r.json()) as Resp);
+    } catch { setError('No pudimos contactar el servicio.'); }
+    finally { setCargandoInicial(false); }
   }, [org]);
-  useEffect(() => { void cargar(); }, [cargar]);
+  // Reset al cambiar de org/nonce (tenant scoping): limpia el envelope anterior ANTES de cargar el nuevo.
+  useEffect(() => { setResp(null); setError(null); setCargandoInicial(true); void cargar(); }, [cargar, nonce]);
 
   const accion = useCallback(async (ruta: string) => {
     if (!org) return;
@@ -66,14 +76,19 @@ export function AutorizacionSobre({ org }: { org: string | null | undefined }): 
     <div className="card" style={{ marginTop: 12, borderLeft: '4px solid var(--line-strong, #cbd5e1)' }}>
       <div className="spread"><div className="section" style={{ margin: 0 }}>Autorización de ejecución <span className="hint">soberanía financiera · la autorizás vos</span></div>{st && <Badge tono={st.tono}>{st.txt}</Badge>}</div>
 
-      {!env && (
+      {cargandoInicial && <p className="s muted" style={{ marginTop: 10 }}>Cargando el estado del sobre…</p>}
+
+      {/* Fail-safe: si el GET falla, NO se asume "no hay sobre" ni se crea uno. */}
+      {!cargandoInicial && error && !env && <Callout tono="warn" ico="⚠">{error} Recargá la página para reintentar.</Callout>}
+
+      {!cargandoInicial && !error && !env && (
         <div style={{ marginTop: 10 }}>
           <p className="s">Cuando el borrador está listo, podés preparar el sobre de ejecución para revisarlo y autorizarlo.</p>
           <button type="button" className="btn" disabled={cargando} onClick={() => void accion('envelope')}>{cargando ? 'Preparando…' : 'Preparar sobre de ejecución'}</button>
         </div>
       )}
 
-      {env && (
+      {!cargandoInicial && env && (
         <div style={{ marginTop: 10 }}>
           <ul className="s" style={{ margin: 0, paddingLeft: 18 }}>
             <li><b>Objetivo:</b> {env.objective}</li>

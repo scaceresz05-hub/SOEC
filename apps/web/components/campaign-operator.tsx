@@ -41,6 +41,7 @@ export function CampaignOperator({ org }: { org: string | null | undefined }): R
   const [cargando, setCargando] = useState(false);
   const [res, setRes] = useState<Resultado | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [simCount, setSimCount] = useState(0); // sube al simular ⇒ el bloque de autorización re-hidrata desde GET
 
   const simular = useCallback(async () => {
     if (!org) { setError('No hay una empresa activa.'); return; }
@@ -49,7 +50,7 @@ export function CampaignOperator({ org }: { org: string | null | undefined }): R
       const r = await fetch('/api/medicion/campaign-operator-plan', { method: 'POST', headers: { 'content-type': 'application/json', ...cabecerasOrg(org) }, body: JSON.stringify({ objetivo, presupuestoTotal: presupuesto, periodoDias: dias }) });
       const j = (await r.json().catch(() => ({}))) as Resultado & { error?: string };
       if (!r.ok || j.error) { setError('No se pudo generar el plan. Probá de nuevo.'); return; }
-      setRes(j);
+      setRes(j); setSimCount((c) => c + 1);
     } catch { setError('No se pudo contactar el servicio.'); } finally { setCargando(false); }
   }, [org, objetivo, presupuesto, dias]);
 
@@ -70,6 +71,10 @@ export function CampaignOperator({ org }: { org: string | null | undefined }): R
       </div>
       <div style={{ marginTop: 12 }}><button type="button" className="btn primary" disabled={cargando} onClick={() => void simular()}>{cargando ? 'Preparando…' : 'Simular plan (sin gastar)'}</button></div>
       {error && <Callout tono="warn" ico="⚠">{error}</Callout>}
+
+      {/* Bloque de AUTORIZACIÓN: se hidrata SIEMPRE desde el envelope PERSISTIDO (GET), también en carga fría
+          sin re-simular. Sube `nonce` tras cada simulación para re-leer el sobre recién materializado. */}
+      <AutorizacionSobre org={org} nonce={simCount} />
 
       {plan && (
         <div style={{ marginTop: 16 }}>
@@ -117,8 +122,6 @@ export function CampaignOperator({ org }: { org: string | null | undefined }): R
 
               <div className="section" style={{ marginTop: 14 }}>Reglas de detención <span className="hint">umbrales ejecutables</span></div>
               <ul className="s" style={{ margin: '4px 0 0', paddingLeft: 18 }}>{plan.stopCriteria.map((s) => <li key={s.id}>{s.enabled ? '' : '(desactivada) '}{s.descripcion}{s.reason ? ` [${s.reason}]` : ''}</li>)}</ul>
-
-              {plan.campaignDraftStatus === 'READY_FOR_APPROVAL' && <AutorizacionSobre org={org} />}
             </>
           )}
 
