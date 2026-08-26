@@ -11,7 +11,7 @@ import type { MarketingReadiness } from '../src/campana/diagnosis-evidence';
 import { construirEnvelope, aprobar, type ProviderState, type FlagsEjecucion } from '../src/campana/authorized-execution-envelope';
 import { fingerprint, fingerprintsDelPlan } from '../src/campana/material-fingerprint';
 import { construirActionPlan, idempotencyKey, type ExecutionActionIntent } from '../src/campana/execution-intent';
-import { evaluarBarreras, validateActionFinancialImpact, correrShadow } from '../src/campana/execution-engine';
+import { evaluarBarreras, validateActionFinancialImpact, correrShadow, evaluarGateEnvelope, detalleIntent, sanitizarPayload } from '../src/campana/execution-engine';
 import { ledgerCero, construirLedger } from '../src/campana/financial-ledger';
 import { ResourceBindingService, validarPropiedad, type ProviderResourceBinding } from '../src/campana/resource-binding';
 import { ShadowMutatePort } from '../src/campana/google-translator';
@@ -134,6 +134,70 @@ describe('gates (tres barreras independientes)', () => {
     const r = correrShadow(PLAN, ENV_READY, 'CUST-1', LED, provGate, SUP(false), T0);
     expect(r.providerMutateCalls).toBe(0);
     expect(port.calls).toBe(0); // el puerto shadow jamás se invoca
+  });
+});
+
+describe('execution detail inspeccionable + sanitización', () => {
+  const shadow = correrShadow(PLAN, ENV_READY, 'CUST-1', LED, provGate, SUP(false), T0);
+  const fpAll = fingerprintsDelPlan(PLAN).all;
+  const detalles = shadow.intents.map((it) => detalleIntent(it, fpAll, ENV_READY.currency));
+
+  it('execution_detail_exposes_all_intents con schema completo', () => {
+    expect(detalles.length).toBe(shadow.intents.length);
+    for (const d of detalles) {
+      expect(d.materialEntityFingerprint).toBeTruthy();        // every_intent_has_material_fingerprint
+      expect(d.idempotencyKey).toBeTruthy();                   // every_intent_has_idempotency_key
+      expect(d.status).toBeTruthy();                           // execution_detail_exposes_intent_status
+      expect(d.validation.decision).toBeTruthy();              // execution_detail_exposes_validation_reason
+      expect(typeof d.financialImpact.projectedCommitment).toBe('number'); // execution_detail_exposes_financial_impact
+      expect(d.providerPayload?.operation).toBeTruthy();       // execution_detail_exposes_translated_google_payload
+      expect(d.materialBinding.approved).toBe(true);           // no_unapproved_material_in_execution_detail
+    }
+  });
+  it('execution_detail_never_exposes_provider_secrets', () => {
+    const s = sanitizarPayload({ customerId: 'C', operation: 'campaign.create', fields: { name: 'x' }, refreshToken: 'SECRET', authorization: 'Bearer y', developerToken: 'D', client_secret: 'z' });
+    expect(s).toEqual({ customerId: 'C', operation: 'campaign.create', fields: { name: 'x' } });
+    const blob = JSON.stringify(detalles);
+    expect(/token|secret|authorization|bearer|refresh|developer|cookie|password/i.test(blob)).toBe(false);
+  });
+  it('approved_keywords/negatives/matchtypes/ads/destinations expuestos literalmente', () => {
+    const kw = detalles.find((d) => d.actionType === 'ADD_KEYWORD')!;
+    const f = kw.providerPayload!.fields as { text: string; matchType: string };
+    expect(f.text).toBeTruthy(); expect(['EXACT', 'PHRASE', 'BROAD']).toContain(f.matchType);
+    const neg = detalles.find((d) => d.actionType === 'ADD_NEGATIVE_KEYWORD')!;
+    expect((neg.providerPayload!.fields as { matchType: string }).matchType).toBeTruthy();
+    const ad = detalles.find((d) => d.actionType === 'CREATE_AD')!;
+    const af = ad.providerPayload!.fields as { headlines: string[]; finalUrl: string };
+    expect(af.headlines.length).toBeGreaterThan(0); expect(af.finalUrl).toContain('#'); // destino aprobado
+  });
+  it('create_campaign_projected_commitment_within_experiment_and_total_cap', () => {
+    const cc = detalles.find((d) => d.actionType === 'CREATE_CAMPAIGN')!;
+    expect(cc.financialImpact.projectedCommitment).toBeLessThanOrEqual(LED.remainingExperimentCap);
+    expect(cc.financialImpact.projectedCommitment).toBeLessThanOrEqual(LED.remainingEnvelopeCap);
+    expect(cc.financialImpact.scope).toBe('EXPERIMENT');
+  });
+  it('provider_resource_ids_not_fabricated_in_shadow + historical_campaign_not_referenced', () => {
+    const blob = JSON.stringify(detalles);
+    expect(blob.includes('24120966895')).toBe(false);       // id de la campaña histórica
+    expect(blob.includes('SmileFlow Search Chile')).toBe(false);
+  });
+  it('execution_detail_get_is_side_effect_free + retry byte-stable', () => {
+    const a = correrShadow(PLAN, ENV_READY, 'CUST-1', LED, provGate, SUP(false), T0).intents.map((it) => detalleIntent(it, fpAll, 'CLP'));
+    const b = correrShadow(PLAN, ENV_READY, 'CUST-1', LED, provGate, SUP(false), T0).intents.map((it) => detalleIntent(it, fpAll, 'CLP'));
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+  });
+});
+
+describe('gate unificado', () => {
+  it('envelope_and_execution_plan_use_same_gate_evaluator', () => {
+    const gate = evaluarGateEnvelope(ENV_READY, PLAN, provGate, SUP(false));
+    const shadow = correrShadow(PLAN, ENV_READY, 'CUST-1', LED, provGate, SUP(false), T0);
+    expect(shadow.realExecutionReason).toBe(gate.reasonCode);
+    expect(gate.reasonCode).toBe('ENVELOPE_NOT_APPROVED'); // unapproved_envelope_reason_is_envelope_not_approved
+  });
+  it('approved_google_pending / approved_google_ready_supervised_false (precedencia unificada)', () => {
+    expect(evaluarGateEnvelope(ENV_APP_WAIT, PLAN, provGate, SUP(true)).reasonCode).toBe('EXTERNAL_GATE_BLOCKED');
+    expect(evaluarGateEnvelope(ENV_APP_READY, PLAN, provOk, SUP(false)).reasonCode).toBe('SUPERVISED_REAL_DISABLED');
   });
 });
 

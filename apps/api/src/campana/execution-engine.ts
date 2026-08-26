@@ -71,6 +71,79 @@ export function evaluarBarreras(
   return { decision: 'ALLOW', reasonCode: null };
 }
 
+/**
+ * GATE UNIFICADO a nivel ENVELOPE (sin acción específica). Misma PRECEDENCIA que el pipeline por intent, para
+ * que GET /medicion/envelope y GET /medicion/execution-plan devuelvan el MISMO primer reason. Orden §15:
+ * 1) sin envelope → ENVELOPE_NOT_APPROVED · 2) revoked/expired · 3) no aprobado · 4) hash · 5) canal · 6) gate
+ * externo · 7) supervised flag. (material/acción específica se validan por intent.)
+ */
+export function evaluarGateEnvelope(
+  env: AuthorizedExecutionEnvelope | null, plan: MarketingPlan | null, prov: ProviderState, flags: FlagsEjecucion,
+): ResultadoBarrera {
+  const deny = (r: ExecReason): ResultadoBarrera => ({ decision: 'DENY', reasonCode: r });
+  if (!env) return deny('ENVELOPE_NOT_APPROVED');
+  if (env.status === 'REVOKED') return deny('ENVELOPE_REVOKED');
+  if (env.expiresAt && prov.now >= env.expiresAt) return deny('ENVELOPE_EXPIRED');
+  if (!APROBADOS.has(env.status)) return deny('ENVELOPE_NOT_APPROVED');
+  if (plan && !aprobacionVigente(env, plan)) return deny('PLAN_HASH_MISMATCH');
+  if (!env.authorizedChannels.includes('google')) return deny('CHANNEL_NOT_AUTHORIZED');
+  if (!prov.providerConnected || !prov.executionEligibleChannels.includes('google')) return deny('EXTERNAL_GATE_BLOCKED');
+  if (!prov.trackingValid) return deny('TRACKING_INVALID');
+  if (!prov.landingAvailable) return deny('LANDING_INVALID');
+  if (!flags.supervisedReal) return deny('SUPERVISED_REAL_DISABLED');
+  return { decision: 'ALLOW', reasonCode: null };
+}
+
+const CLAVES_PAYLOAD_PERMITIDAS = new Set(['customerId', 'operation', 'resourceType', 'fields']);
+const CLAVES_PROHIBIDAS = /token|secret|authorization|cookie|password|bearer|developer|refresh|access|session/i;
+
+/** Sanea un providerPayload: whitelist de claves + defensa ante cualquier clave sensible. Nunca expone secretos. */
+export function sanitizarPayload(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(payload as Record<string, unknown>)) {
+    if (!CLAVES_PAYLOAD_PERMITIDAS.has(k)) continue;
+    if (CLAVES_PROHIBIDAS.test(k)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+export interface IntentDetalle {
+  readonly id: string; readonly organizationId: string; readonly envelopeId: string; readonly planHash: string;
+  readonly channel: string; readonly actionType: string;
+  readonly materialEntityFingerprint: string; readonly idempotencyKey: string;
+  readonly status: string; readonly validation: { decision: string; reasonCode: string | null };
+  readonly materialBinding: { readonly approved: boolean; readonly planEntityFingerprint: string; readonly requestedFingerprint: string };
+  readonly financialImpact: { readonly scope: string; readonly currency: string; readonly projectedCommitment: number; readonly experimentCapImpact: number; readonly envelopeCapImpact: number };
+  readonly providerPayload: Record<string, unknown> | null;
+}
+
+/** Proyecta un intent a su detalle READ-ONLY, auditable y sin secretos. */
+export function detalleIntent(intent: ExecutionActionIntent, fpAll: ReadonlySet<string>, currency: string): IntentDetalle {
+  const c = intent.financialImpact.commitment;
+  return {
+    id: intent.id, organizationId: intent.organizationId, envelopeId: intent.envelopeId, planHash: intent.planHash,
+    channel: intent.channel, actionType: intent.actionType,
+    materialEntityFingerprint: intent.materialEntityFingerprint, idempotencyKey: intent.idempotencyKey,
+    status: intent.status, validation: intent.validation,
+    materialBinding: { approved: fpAll.has(intent.materialEntityFingerprint), planEntityFingerprint: intent.materialEntityFingerprint, requestedFingerprint: intent.materialEntityFingerprint },
+    financialImpact: { scope: intent.financialImpact.scope, currency, projectedCommitment: c, experimentCapImpact: intent.financialImpact.scope === 'EXPERIMENT' ? c : 0, envelopeCapImpact: c },
+    providerPayload: sanitizarPayload(intent.providerPayload),
+  };
+}
+
+/** Auditoría SHADOW DERIVADA (computada, no persistida ⇒ el GET es side-effect free). Separada de la ejecución real. */
+export function auditoriaShadowDerivada(shadow: ResultadoShadow): Array<{ type: string; actionType?: string; fingerprint?: string; reason?: string; at: string }> {
+  const evs: Array<{ type: string; actionType?: string; fingerprint?: string; reason?: string; at: string }> = [{ type: 'EXECUTION_PLAN_CREATED', at: shadow.at }];
+  for (const it of shadow.intents) {
+    evs.push({ type: 'ACTION_INTENT_CREATED', actionType: it.actionType, fingerprint: it.materialEntityFingerprint, at: shadow.at });
+    if (it.status === 'BLOCKED') evs.push({ type: 'ACTION_BLOCKED', actionType: it.actionType, fingerprint: it.materialEntityFingerprint, reason: it.validation.reasonCode ?? undefined, at: shadow.at });
+    else if (it.status === 'READY_FOR_PROVIDER') evs.push({ type: 'ACTION_SHADOW_READY', actionType: it.actionType, fingerprint: it.materialEntityFingerprint, at: shadow.at });
+  }
+  return evs;
+}
+
 export interface ResultadoShadow {
   readonly mode: 'SHADOW';
   readonly intents: readonly ExecutionActionIntent[];
@@ -101,8 +174,8 @@ export function correrShadow(
   });
   const byType: Record<string, number> = {};
   for (const it of intents) byType[it.actionType] = (byType[it.actionType] ?? 0) + 1;
-  const rep = intents.find((x) => x.actionType === 'CREATE_CAMPAIGN') ?? intents[0];
-  const repRes: ResultadoBarrera = rep ? evaluarBarreras(rep, plan, env, ledger, prov, flags, bindingDe(rep)) : { decision: 'DENY', reasonCode: 'ENVELOPE_NOT_APPROVED' };
+  // Decisión real = GATE UNIFICADO a nivel envelope (misma precedencia que GET /medicion/envelope).
+  const repRes: ResultadoBarrera = evaluarGateEnvelope(env, plan, prov, flags);
   return {
     mode: 'SHADOW', intents,
     summary: { executionActionCount: intents.length, byType, entitiesAffected: new Set(intents.map((i) => i.materialEntityFingerprint)).size },

@@ -29,9 +29,10 @@ import type { CanalId } from './campana/marketing-plan';
 import { DiagnosisEvidenceService } from './campana/diagnosis-evidence-service';
 import { normalizarReadinessInput } from './campana/diagnosis-evidence';
 import { EnvelopeService } from './campana/envelope-service';
-import { flagsEjecucion, validateAuthorizedExecution, type ProviderState, type FinancialState } from './campana/authorized-execution-envelope';
+import { flagsEjecucion, type ProviderState, type FinancialState } from './campana/authorized-execution-envelope';
 import { canalesDisponibles } from './campana/campaign-operator-service';
-import { correrShadow } from './campana/execution-engine';
+import { correrShadow, evaluarGateEnvelope, detalleIntent, auditoriaShadowDerivada } from './campana/execution-engine';
+import { fingerprintsDelPlan } from './campana/material-fingerprint';
 import { ledgerCero } from './campana/financial-ledger';
 import { ResourceBindingService } from './campana/resource-binding';
 import { getRecursoGoogleAds } from './plataforma';
@@ -401,12 +402,10 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const envelopeSpend = 0; // gasto generado por acciones del envelope tras activación (aún ninguna)
     const committedSpend = 0; // gasto comprometido por acciones pendientes (aún ninguna)
     const remainingCap = envelope ? envelope.totalCap - envelopeSpend - committedSpend : 0;
-    let executionAllowed: { decision: string; reasonCode: string | null } = { decision: 'DENY', reasonCode: 'ENVELOPE_NOT_APPROVED' };
-    if (envelope && plan) {
-      const { prov } = providerYFinancieroDe(org);
-      const r = validateAuthorizedExecution(envelope, plan, prov, { historicalSpend, envelopeSpend, committedSpend }, { canal: 'google', tipo: 'CREATE_CAMPAIGN' }, flagsEjecucion(process.env, AUTONOMOUS_REAL));
-      executionAllowed = { decision: r.decision, reasonCode: r.reasonCode };
-    }
+    // GATE UNIFICADO: misma precedencia que /medicion/execution-plan (envelope-first ⇒ ENVELOPE_NOT_APPROVED).
+    const { prov: provEnv } = providerYFinancieroDe(org);
+    const rGate = evaluarGateEnvelope(envelope, plan, provEnv, flagsEjecucion(process.env, AUTONOMOUS_REAL));
+    const executionAllowed: { decision: string; reasonCode: string | null } = { decision: rGate.decision, reasonCode: rGate.reasonCode };
     return reply.send({ organizationId: org, envelope, financial: { historicalSpend, envelopeSpend, committedSpend, remainingCap }, executionAllowed, autonomousReal: AUTONOMOUS_REAL, supervisedReal: process.env.SOEC_SUPERVISED_REAL === 'true' });
   });
   app.get('/medicion/envelope-audit', async (req, reply) => {
@@ -457,11 +456,19 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     try { customerId = getRecursoGoogleAds(org).customerId; } catch { /* org sin recurso: customerId placeholder, no afecta SHADOW */ }
     const bindings = await bindingSvc.listar(org);
     const r = correrShadow(plan, envelope, customerId, ledger, prov, flags, new Date().toISOString(), bindings);
-    return reply.send({
+    const providerBindings = { count: bindings.length, fabricatedIds: bindings.filter((b) => b.providerResourceId != null).length };
+    const base = {
       organizationId: org, shadowPlanCreated: true, mode: r.mode, summary: r.summary,
       realExecutionDecision: r.realExecutionDecision, realExecutionReason: r.realExecutionReason,
-      providerMutateCalls: r.providerMutateCalls, ledger,
-    });
+      providerMutateCalls: r.providerMutateCalls, ledger, providerBindings,
+    };
+    // detail=intents ⇒ intents completos (sanitizados) + auditoría SHADOW derivada. GET siempre side-effect free.
+    const detail = (req.query as { detail?: string } | undefined)?.detail;
+    if (detail === 'intents') {
+      const fpAll = fingerprintsDelPlan(plan).all;
+      return reply.send({ ...base, intents: r.intents.map((it) => detalleIntent(it, fpAll, envelope.currency)), shadowAudit: auditoriaShadowDerivada(r) });
+    }
+    return reply.send(base);
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {

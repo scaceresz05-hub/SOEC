@@ -19,7 +19,8 @@ interface Envelope {
 }
 interface Financial { historicalSpend: number; envelopeSpend: number; committedSpend: number; remainingCap: number }
 interface Resp { envelope: Envelope | null; financial: Financial; executionAllowed: { decision: string; reasonCode: string | null }; autonomousReal: boolean; supervisedReal: boolean }
-interface ExecPlan { shadowPlanCreated: boolean; mode?: string; summary?: { executionActionCount: number; byType: Record<string, number>; entitiesAffected: number }; realExecutionDecision?: string; realExecutionReason?: string | null; providerMutateCalls?: number }
+interface IntentDetalle { id: string; actionType: string; materialEntityFingerprint: string; idempotencyKey: string; status: string; validation: { decision: string; reasonCode: string | null }; materialBinding: { approved: boolean }; financialImpact: { scope: string; projectedCommitment: number }; providerPayload: { operation?: string } | null }
+interface ExecPlan { shadowPlanCreated: boolean; mode?: string; summary?: { executionActionCount: number; byType: Record<string, number>; entitiesAffected: number }; realExecutionDecision?: string; realExecutionReason?: string | null; providerMutateCalls?: number; providerBindings?: { count: number; fabricatedIds: number }; intents?: IntentDetalle[] }
 
 const clp = (n: number): string => `$${Math.round(n).toLocaleString('es-CL')}`;
 const nombreCanal = (c: string): string => (c === 'google' ? 'Google Ads' : c === 'meta' ? 'Meta Ads' : c);
@@ -55,7 +56,7 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
       const r = await fetch('/api/medicion/envelope', { headers: cabecerasOrg(org), cache: 'no-store' });
       if (!r.ok) { setError('No pudimos leer el estado del sobre.'); return; }
       setResp((await r.json()) as Resp);
-      const e = await fetch('/api/medicion/execution-plan', { headers: cabecerasOrg(org), cache: 'no-store' });
+      const e = await fetch('/api/medicion/execution-plan?detail=intents', { headers: cabecerasOrg(org), cache: 'no-store' });
       if (e.ok) setExec((await e.json()) as ExecPlan);
     } catch { setError('No pudimos contactar el servicio.'); }
     finally { setCargandoInicial(false); }
@@ -130,8 +131,20 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
               <ul className="s" style={{ margin: '4px 0 0', paddingLeft: 18 }}>
                 <li><b>Acciones:</b> {exec.summary.executionActionCount} · <b>Entidades:</b> {exec.summary.entitiesAffected} · <b>Proveedor:</b> Google Ads</li>
                 <li><b>Por tipo:</b> {Object.entries(exec.summary.byType).map(([t, n]) => `${t}×${n}`).join(' · ')}</li>
-                <li><b>Ejecución real:</b> {exec.realExecutionDecision === 'ALLOW' ? 'permitida' : 'bloqueada'}{exec.realExecutionReason ? ` (${exec.realExecutionReason})` : ''} · <b>mutate calls:</b> {exec.providerMutateCalls ?? 0}</li>
+                <li><b>Ejecución real:</b> {exec.realExecutionDecision === 'ALLOW' ? 'permitida' : 'bloqueada'}{exec.realExecutionReason ? ` (${exec.realExecutionReason})` : ''} · <b>mutate calls:</b> {exec.providerMutateCalls ?? 0} · <b>bindings:</b> {exec.providerBindings?.count ?? 0} (IDs fabricados: {exec.providerBindings?.fabricatedIds ?? 0})</li>
               </ul>
+              {exec.intents && exec.intents.length > 0 && (
+                <details style={{ marginTop: 6 }}>
+                  <summary className="s" style={{ cursor: 'pointer' }}>Ver detalle de acciones ({exec.intents.length}) · auditable, sin ejecutar</summary>
+                  <ul className="s" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                    {exec.intents.map((it) => (
+                      <li key={it.id}>
+                        <b>{it.actionType}</b> · fp <code>{it.materialEntityFingerprint.slice(0, 8)}</code> · {it.materialBinding.approved ? 'material aprobado' : 'MATERIAL NO APROBADO'} · {it.status}{it.validation.reasonCode ? ` (${it.validation.reasonCode})` : ''} · {it.financialImpact.scope} ${Math.round(it.financialImpact.projectedCommitment).toLocaleString('es-CL')} · {it.providerPayload?.operation ?? '—'}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
               <Callout tono="info" ico="🛰">Plan de ejecución preparado (SHADOW). La ejecución real está bloqueada; SOEC no escribe en Google Ads ni gasta.</Callout>
             </div>
           )}
