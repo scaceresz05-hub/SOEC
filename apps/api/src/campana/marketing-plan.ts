@@ -58,6 +58,19 @@ export interface AdGroupDraft { readonly name: string; readonly intent: IntentCa
 
 export interface KeywordDecision { readonly categoria: IntentCategory; readonly action: KeywordAction; readonly matchType: MatchType | null; readonly reason: string; readonly examples: readonly string[] }
 
+/**
+ * POLÍTICA DE PRESUPUESTO MATERIAL. El experimento de búsqueda usa CAMPAIGN TOTAL BUDGET (Google
+ * `CampaignBudget.period = CUSTOM_PERIOD`, `total_amount_micros`, `explicitly_shared = false`), NO un
+ * presupuesto diario (los average daily budgets permiten overdelivery y no son un hard cap exacto de N días).
+ * Es MATERIAL: entra al canonicalPlanHash. `totalAmount` es el hard cap del experimento sobre `durationDays`.
+ */
+export interface BudgetPolicy {
+  readonly type: 'CAMPAIGN_TOTAL';
+  readonly totalAmount: number;
+  readonly currency: string;
+  readonly durationDays: number;
+}
+
 export interface SuccessCriteria { readonly minimumRealContacts: number; readonly maxSpend: number; readonly measurementWindowDays: number; readonly attributionRequirement: string }
 export type TargetCpa = { readonly kind: 'VALUE'; readonly value: number; readonly rationale: string } | { readonly kind: 'UNDEFINED_INSUFFICIENT_EVIDENCE'; readonly rationale: string };
 
@@ -79,6 +92,8 @@ export interface CampaignDraft {
   readonly adGroups: readonly AdGroupDraft[];
   readonly negativeKeywords: readonly NegativeKeyword[];
   readonly budget: number;
+  /** Política de presupuesto MATERIAL (CAMPAIGN_TOTAL sobre CUSTOM_PERIOD). El experimento NO usa daily budget. */
+  readonly budgetPolicy: BudgetPolicy;
   readonly durationDays: number;
   readonly trackingRequirements: readonly string[];
   readonly successCriteria: SuccessCriteria;
@@ -398,9 +413,12 @@ export function construirMarketingPlan(e: EntradaMarketingPlan): MarketingPlan {
     grupos.push({ name: g.label, intent: g.intent, action: g.action, keywords: kws, ads: [componerAnuncio(valueProps, brand, g.action)], finalDestination: dest.finalDestination, destinationRationale: dest.rationale });
   }
 
+  const googleBudget = mix.find((m) => m.canal === 'google')?.presupuesto ?? totalSpendRecommended;
   const campaigns: CampaignDraft[] = totalSpendRecommended > 0 && grupos.length > 0 ? [{
     channel: 'google', campaignName: `Experimento · ${e.objetivo}`, objective: 'LEADS', campaignType: 'SEARCH', hypothesisId: hypId,
-    adGroups: grupos, negativeKeywords: negatives, budget: mix.find((m) => m.canal === 'google')?.presupuesto ?? totalSpendRecommended,
+    adGroups: grupos, negativeKeywords: negatives, budget: googleBudget,
+    // CAMPAIGN TOTAL BUDGET (CUSTOM_PERIOD): el tope TOTAL del experimento sobre la duración, NO un daily budget.
+    budgetPolicy: { type: 'CAMPAIGN_TOTAL', totalAmount: googleBudget, currency: moneda, durationDays: e.periodoDias },
     durationDays: e.periodoDias, trackingRequirements: [...REQUIRED_TRACKING], successCriteria, stopCriteria: stops,
   }] : [];
 

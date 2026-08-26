@@ -61,9 +61,10 @@ export function construirActionPlan(plan: MarketingPlan, env: AuthorizedExecutio
   };
 
   if (c0) {
-    // Campaña (incluye budget ⇒ reserva el experimento).
+    // Campaña: CAMPAIGN TOTAL BUDGET (CUSTOM_PERIOD) ⇒ reserva el experimento completo. Las fechas de ejecución
+    // se resuelven al ACTIVAR el sobre (env.startsAt/expiresAt); en SHADOW pre-activación son null.
     const campaignFingerprint = fingerprintsDelPlan(plan).campaign;
-    push('CREATE_CAMPAIGN', 'campaign', campaignFingerprint, { name: c0.campaignName, campaignType: c0.campaignType, objective: c0.objective, budget: c0.budget }, { commitment: env.experimentBudget, scope: 'EXPERIMENT' }, null, []);
+    push('CREATE_CAMPAIGN', 'campaign', campaignFingerprint, { name: c0.campaignName, campaignType: c0.campaignType, objective: c0.objective, budgetPolicy: c0.budgetPolicy, startDate: env.startsAt, endDate: env.expiresAt }, { commitment: env.experimentBudget, scope: 'EXPERIMENT' }, null, []);
 
     c0.adGroups.forEach((g) => {
       const parentFp = adGroupFingerprint(g);

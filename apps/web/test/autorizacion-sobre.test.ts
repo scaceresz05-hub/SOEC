@@ -10,7 +10,7 @@ import { AutorizacionSobre } from '../components/autorizacion-sobre';
 
 const envelope = (status: string) => ({
   id: 'env:org-smileflow:df90b634b13b9bda', planId: 'plan:org-smileflow:2026', status, objective: 'Conseguir clínicas dentales interesadas en SmileFlow', currency: 'CLP',
-  totalCap: 30000, experimentBudget: 15000, maxSpendWithoutContact: 7500, startsAt: '2026-08-25T00:00:00Z', expiresAt: '2026-09-04T00:00:00Z',
+  totalCap: 30000, experimentBudget: 15000, maxSpendWithoutContact: 7500, authorizedDurationDays: 10, startsAt: null, expiresAt: null,
   plannedChannels: ['google'], authorizedChannels: ['google'], authorizedActionTypes: ['CREATE_CAMPAIGN', 'STOP_CAMPAIGN'],
   stopRules: [{ id: 'STOP_BUDGET', enabled: true, threshold: 30000 }, { id: 'STOP_ZERO_CONVERSION', enabled: true, threshold: 7500 }], planVersion: 'df90b634', planHash: 'df90b634b13b9bda', approvedBy: status.startsWith('APPROVED') ? 'humano' : null, approvedAt: null,
 });
@@ -30,7 +30,9 @@ describe('AutorizacionSobre · hidratación', () => {
     const fn = stub('READY_FOR_HUMAN_APPROVAL');
     render(h(AutorizacionSobre, { org: 'org-smileflow' })); // montaje "en frío", sin simular
     await waitFor(() => expect(screen.getByText(/env:org-smileflow:df90b634b13b9bda/)).toBeTruthy());
-    expect(screen.getByText(/TOPE TOTAL AUTORIZADO:/)).toBeTruthy();
+    expect(screen.getByText(/TOPE GLOBAL DEL SOBRE:/)).toBeTruthy();
+    expect(screen.getByText(/TIPO DE PRESUPUESTO GOOGLE:/)).toBeTruthy(); // total de campaña, no daily
+    expect(screen.getByText(/días desde la activación/)).toBeTruthy(); // período arranca al activar
     expect(soloGET(fn)).toBe(true); // hydration_does_not_create_new_envelope / does_not_mutate / no_provider_mutation
   });
 

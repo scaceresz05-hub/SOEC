@@ -44,6 +44,9 @@ export interface AuthorizedExecutionEnvelope {
   readonly totalCap: number;
   readonly experimentBudget: number;
   readonly maxSpendWithoutContact: number;
+  /** Duración MATERIAL autorizada (días). La ventana comercial NO se consume antes de activar (§7/§8). */
+  readonly authorizedDurationDays: number;
+  /** Ventana de EJECUCIÓN real. null hasta la activación; se fija en `activar()` = activatedAt … +duración. */
   readonly startsAt: string | null;
   readonly expiresAt: string | null;
   readonly plannedChannels: readonly CanalId[];
@@ -130,9 +133,13 @@ export function construirEnvelope(plan: MarketingPlan, org: string, planId: stri
   const e: AuthorizedExecutionEnvelope = {
     id: `env:${org}:${hash}`, organizationId: org, objective: plan.objective, planId, planHash: hash, planVersion: hash.slice(0, 8),
     currency: plan.currency, totalCap: plan.totalAuthorizedBudget, experimentBudget: plan.totalSpendRecommended, maxSpendWithoutContact: plan.maxSpendWithoutContact.value,
-    startsAt: plan.period.startAt, expiresAt: plan.period.endAt, plannedChannels: planned, authorizedChannels: authorized,
+    authorizedDurationDays: plan.period.dias,
+    // La ventana de ejecución NO se fija al crear el draft ni al aprobar: se resuelve en `activar()`. La duración
+    // material vive en authorizedDurationDays (y en el canonicalPlanHash como periodDays), no como fecha absoluta.
+    startsAt: null, expiresAt: null, plannedChannels: planned, authorizedChannels: authorized,
     authorizedActionTypes: politicaAccionesDe(),
-    stopRules: plan.stopCriteria.map((s) => ({ id: s.id, tipo: s.tipo, enabled: s.enabled, threshold: s.threshold ?? null, date: s.date ?? null, ...(s.condition ? { condition: s.condition } : {}), ...(s.reason ? { reason: s.reason } : {}) })),
+    // STOP_PERIOD arranca SIN fecha absoluta (representa la duración); se resuelve a executionEndsAt al activar (§9).
+    stopRules: plan.stopCriteria.map((s) => ({ id: s.id, tipo: s.tipo, enabled: s.enabled, threshold: s.threshold ?? null, date: s.tipo === 'PERIOD' ? null : (s.date ?? null), ...(s.condition ? { condition: s.condition } : {}), ...(s.reason ? { reason: s.reason } : {}) })),
     trackingRequirements: plan.requiredTracking, status, approvedBy: null, approvedAt: null, activatedAt: null, stoppedAt: null, revokedAt: null, createdAt: ahora, updatedAt: ahora,
   };
   const audits: AuditEvent[] = [audit('ENVELOPE_CREATED', e, 'soec', ahora, undefined, undefined, 'DRAFT')];
@@ -187,6 +194,21 @@ export function revalidarActivacion(e: AuthorizedExecutionEnvelope, plan: Market
   // Todo OK: pasa a listo para activar (no ejecuta nada por sí mismo).
   const ne: AuthorizedExecutionEnvelope = { ...e, status: 'APPROVED_READY_TO_ACTIVATE', updatedAt: prov.now };
   return { envelope: ne, ok: true, reason: null, audit: audit('ENVELOPE_ACTIVATION_READY', ne, 'soec', prov.now, undefined, e.status, 'APPROVED_READY_TO_ACTIVATE') };
+}
+
+/**
+ * ACTIVACIÓN del sobre (PURA). Aquí — y sólo aquí — arranca la ventana comercial: `executionStartsAt = at` y
+ * `executionEndsAt = at + authorizedDurationDays`. Antes de activar la ventana es null (el período NO se consume
+ * mientras espera aprobación/gate externo). Resuelve además STOP_PERIOD.date = executionEndsAt (§9). NO habilita
+ * ninguna escritura real (los flags siguen mandando); es una transición de estado + resolución de fechas.
+ */
+export function activar(e: AuthorizedExecutionEnvelope, at: string): { envelope: AuthorizedExecutionEnvelope; changed: boolean; audit?: AuditEvent } {
+  if (e.status === 'ACTIVE') return { envelope: e, changed: false }; // idempotente
+  if (!puedeTransicionar(e.status, 'ACTIVE')) return { envelope: e, changed: false };
+  const expiresAt = new Date(Date.parse(at) + e.authorizedDurationDays * 24 * 3600_000).toISOString();
+  const stopRules = e.stopRules.map((s) => (s.tipo === 'PERIOD' ? { ...s, date: expiresAt } : s));
+  const ne: AuthorizedExecutionEnvelope = { ...e, status: 'ACTIVE', activatedAt: at, startsAt: at, expiresAt, stopRules, updatedAt: at };
+  return { envelope: ne, changed: true, audit: audit('ENVELOPE_ACTIVATED', ne, 'soec', at, 'ventana de ejecución fijada', e.status, 'ACTIVE') };
 }
 
 /**

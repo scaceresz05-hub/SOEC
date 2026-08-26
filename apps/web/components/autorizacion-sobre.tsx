@@ -12,6 +12,7 @@ import { Badge, Callout } from './ui';
 interface Envelope {
   id: string; planId: string; status: string; objective: string; currency: string;
   totalCap: number; experimentBudget: number; maxSpendWithoutContact: number;
+  authorizedDurationDays: number;
   startsAt: string | null; expiresAt: string | null;
   plannedChannels: string[]; authorizedChannels: string[]; authorizedActionTypes: string[];
   stopRules: { id: string; tipo?: string; enabled: boolean; threshold?: number | null; date?: string | null; condition?: string; reason?: string }[];
@@ -30,7 +31,7 @@ function stopTxt(s: { id: string; enabled: boolean; threshold?: number | null; d
   if (s.id === 'STOP_BUDGET') return clp(s.threshold ?? 0);
   if (s.id === 'STOP_ZERO_CONVERSION') return `${clp(s.threshold ?? 0)} sin contacto`;
   if (s.id === 'STOP_CPA') return s.threshold != null ? `CPA > ${clp(s.threshold)}` : 'DESACTIVADO';
-  if (s.id === 'STOP_PERIOD') return `hasta ${s.date?.slice(0, 10) ?? '—'}`;
+  if (s.id === 'STOP_PERIOD') return s.date ? `hasta ${s.date.slice(0, 10)}` : 'al terminar la duración autorizada (desde la activación)';
   return s.condition ?? '—';
 }
 const ESTADO: Record<string, { txt: string; tono: 'ok' | 'warn' | 'info' }> = {
@@ -99,10 +100,11 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
           <ul className="s" style={{ margin: 0, paddingLeft: 18 }}>
             <li><b>Objetivo:</b> {env.objective}</li>
             <li><b>Sobre / Plan:</b> <code>{env.id}</code> · <code>{env.planId}</code></li>
-            <li style={{ marginTop: 4 }}><b>TOPE TOTAL AUTORIZADO:</b> {clp(env.totalCap)} <span className="muted">(máximo absoluto del sobre — STOP_BUDGET)</span></li>
-            <li><b>PRESUPUESTO DEL PRIMER EXPERIMENTO:</b> {clp(env.experimentBudget)} <span className="muted">(distinto del tope total)</span></li>
+            <li style={{ marginTop: 4 }}><b>TOPE GLOBAL DEL SOBRE:</b> {clp(env.totalCap)} <span className="muted">(máximo absoluto — STOP_BUDGET)</span></li>
+            <li><b>PRESUPUESTO TOTAL DEL EXPERIMENTO (Google):</b> {clp(env.experimentBudget)} <span className="muted">(tope total de la campaña, distinto del tope global)</span></li>
+            <li><b>TIPO DE PRESUPUESTO GOOGLE:</b> TOTAL DE CAMPAÑA <span className="muted">(CUSTOM_PERIOD — no es un presupuesto diario)</span></li>
             <li><b>CORTE SI NO HAY CONTACTOS:</b> {clp(env.maxSpendWithoutContact)}</li>
-            <li style={{ marginTop: 4 }}><b>Período:</b> {env.startsAt?.slice(0, 10)} → {env.expiresAt?.slice(0, 10)}</li>
+            <li style={{ marginTop: 4 }}><b>Duración:</b> {env.authorizedDurationDays} días desde la activación{env.startsAt && env.expiresAt ? <span className="muted"> · ventana {env.startsAt.slice(0, 10)} → {env.expiresAt.slice(0, 10)}</span> : <span className="muted"> · la ventana se fija al activar</span>}</li>
             <li><b>Canal(es):</b> {env.plannedChannels.map(nombreCanal).join(', ') || '—'}</li>
             <li><b>Acciones autorizadas:</b> {env.authorizedActionTypes.join(', ')}</li>
             <li><b>Reglas de detención:</b>
@@ -152,7 +154,7 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
           {env.status === 'READY_FOR_HUMAN_APPROVAL' && (
             <>
               <Callout tono="warn" ico="✍">
-                Autorizo a SOEC a ejecutar las acciones publicitarias indicadas para este plan durante el período mostrado, con un <b>máximo TOTAL de {clp(env.totalCap)}</b>. El primer experimento tiene un presupuesto máximo de <b>{clp(env.experimentBudget)}</b> y SOEC deberá detener el gasto si alcanza <b>{clp(env.maxSpendWithoutContact)}</b> sin obtener un contacto real atribuible, además de las demás reglas de detención mostradas.
+                Autorizo a SOEC a ejecutar un experimento de Google Ads con un <b>presupuesto TOTAL de campaña de {clp(env.experimentBudget)}</b> durante <b>{env.authorizedDurationDays} días desde su activación</b>, dentro de un <b>tope global autorizado de {clp(env.totalCap)}</b>. SOEC <b>no</b> está autorizado a aumentar este presupuesto total sin una nueva revisión y aprobación. SOEC deberá detener el gasto si alcanza <b>{clp(env.maxSpendWithoutContact)}</b> sin obtener un contacto real atribuible, además de las demás reglas de detención mostradas.
               </Callout>
               <button type="button" className="btn primary" disabled={cargando} onClick={() => void accion('envelope-approve')}>{cargando ? 'Autorizando…' : 'AUTORIZAR SOBRE DE EJECUCIÓN'}</button>
             </>

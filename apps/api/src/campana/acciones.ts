@@ -15,10 +15,14 @@ export const ACCIONES_AUTORIZABLES_DEFECTO: readonly AccionAutorizable[] = [
 /**
  * Política DELIBERADA de un experimento de búsqueda (NO "todo"): construir + controlar + detener. Excluye
  * `RESUME_CAMPAIGN` a propósito. Es una función determinista del plan (hoy constante) ⇒ entra al hash canónico.
+ *
+ * `ADJUST_DAILY_BUDGET` está EXCLUIDA a propósito: el experimento usa CAMPAIGN TOTAL BUDGET (CUSTOM_PERIOD),
+ * no un presupuesto diario. No existe presupuesto diario que ajustar. Cambiar el presupuesto TOTAL exige un
+ * nuevo plan material + nuevo canonicalPlanHash + nueva aprobación humana (no una acción amplia genérica).
  */
 export const ACCIONES_EXPERIMENTO_BUSQUEDA: readonly AccionAutorizable[] = [
   'CREATE_CAMPAIGN', 'CREATE_AD_GROUP', 'CREATE_AD', 'ADD_KEYWORD', 'ADD_NEGATIVE_KEYWORD',
-  'ADJUST_DAILY_BUDGET', 'PAUSE_CAMPAIGN', 'PAUSE_AD_GROUP', 'PAUSE_KEYWORD', 'STOP_CAMPAIGN',
+  'PAUSE_CAMPAIGN', 'PAUSE_AD_GROUP', 'PAUSE_KEYWORD', 'STOP_CAMPAIGN',
 ];
 
 /** Política de acciones aplicada a un plan (determinista). Cambiar la política cambia el hash canónico. */

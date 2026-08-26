@@ -9,7 +9,7 @@ import { construirMarketingPlan, type EntradaMarketingPlan, type CanalId } from 
 import type { ChannelAvailability } from '../src/campana/channel-availability';
 import type { MarketingReadiness } from '../src/campana/diagnosis-evidence';
 import {
-  construirEnvelope, aprobar, revocar, revalidarActivacion, aprobacionVigente, validateAuthorizedExecution,
+  construirEnvelope, aprobar, revocar, revalidarActivacion, activar, aprobacionVigente, validateAuthorizedExecution,
   remainingCap, auditoriaDenegacion, type ProviderState, type FinancialState, type FlagsEjecucion, type AccionSolicitada,
 } from '../src/campana/authorized-execution-envelope';
 import { hashPlan } from '../src/campana/plan-hash';
@@ -117,8 +117,17 @@ describe('autorización de canal/acción y gates', () => {
     const PLAN2 = construirMarketingPlan(entrada(20000));
     expect(revalidarActivacion(aprobadoWaiting, PLAN2, provOk).envelope.status).toBe('FAILED_SAFE');
   });
-  it('expired_envelope_cannot_activate', () => {
-    expect(validateAuthorizedExecution(aprobadoReady, PLAN, { ...provOk, now: '2026-10-01T00:00:00Z' }, finZero, CREATE, SUP(true)).reasonCode).toBe('ENVELOPE_EXPIRED');
+  it('draft/approval_do_not_start_period + activated_envelope_expires_after_execution_window', () => {
+    // La ventana NO existe antes de activar (draft y aprobación no consumen el período).
+    expect(draftReady.startsAt).toBeNull();
+    expect(draftReady.expiresAt).toBeNull();
+    expect(aprobadoReady.expiresAt).toBeNull();
+    // Al activar, la ventana se fija = activatedAt … +duración; recién ahí puede expirar.
+    const activo = activar(aprobadoReady, T0).envelope;
+    expect(activo.status).toBe('ACTIVE');
+    expect(activo.startsAt).toBe(T0);
+    expect(activo.expiresAt).toBe('2026-09-04T00:00:00.000Z'); // T0 + 10 días
+    expect(validateAuthorizedExecution(activo, PLAN, { ...provOk, now: '2026-10-01T00:00:00Z' }, finZero, CREATE, SUP(true)).reasonCode).toBe('ENVELOPE_EXPIRED');
   });
   it('revoked_envelope_cannot_activate', () => {
     const rev = revocar(aprobadoReady, 'humano', T1).envelope;

@@ -44,6 +44,11 @@ export function canonicalizeMaterialPlan(plan: MarketingPlan): Record<string, un
     experimentBudget: plan.totalSpendRecommended,
     maxSpendWithoutContact: plan.maxSpendWithoutContact.value,
     periodDays: plan.period.dias,
+    // Política de presupuesto MATERIAL: tipo (CAMPAIGN_TOTAL vs daily) + monto total + moneda + duración.
+    // Cambiar de daily→total, el monto o la duración cambia el hash ⇒ exige nueva aprobación humana.
+    budgetPolicy: c0?.budgetPolicy
+      ? `${c0.budgetPolicy.type}|${c0.budgetPolicy.totalAmount}|${c0.budgetPolicy.currency}|${c0.budgetPolicy.durationDays}`
+      : null,
     plannedChannels: plan.recommendedChannelMix.filter((m) => m.presupuesto > 0).map((m) => m.canal).sort(),
     authorizedActionPolicy: [...politicaAccionesDe()].sort(),
     selectedHypothesis: plan.selectedHypothesis?.id ?? null,

@@ -47,7 +47,11 @@ export interface PlanFingerprints {
 export function fingerprintsDelPlan(plan: MarketingPlan): PlanFingerprints {
   const c0 = plan.campaigns[0];
   const groups = c0?.adGroups ?? [];
-  const campaign = fingerprint('campaign', [c0?.campaignName ?? '', c0?.campaignType ?? '', plan.objective, plan.totalSpendRecommended]);
+  // El fingerprint de campaña incluye la POLÍTICA DE PRESUPUESTO material (tipo|total|moneda|duración): un retry
+  // NO puede crear un segundo CampaignBudget/Campaign con términos distintos sin cambiar el fingerprint (§5).
+  const bp = c0?.budgetPolicy;
+  const budgetSig = bp ? `${bp.type}|${bp.totalAmount}|${bp.currency}|${bp.durationDays}` : '';
+  const campaign = fingerprint('campaign', [c0?.campaignName ?? '', c0?.campaignType ?? '', plan.objective, plan.totalSpendRecommended, budgetSig]);
   const adGroups = groups.map((g) => adGroupFingerprint(g));
   const ads: string[] = [];
   groups.forEach((g, gi) => g.ads.forEach((a) => ads.push(adFingerprint(adGroups[gi]!, a, g.finalDestination))));
