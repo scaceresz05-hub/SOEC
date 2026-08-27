@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createElement as h } from 'react';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, fireEvent } from '@testing-library/react';
 import { AutorizacionSobre } from '../components/autorizacion-sobre';
 
 const envelope = (status: string) => ({
@@ -89,5 +89,84 @@ describe('AutorizacionSobre · hidratación', () => {
     rerender(h(AutorizacionSobre, { org: 'org-b', nonce: 1 }));
     await waitFor(() => expect(screen.getByText(/df90b634b13b9bda/)).toBeTruthy());
     expect(screen.getAllByText(/df90b634b13b9bda/).length).toBeGreaterThan(0);
+  });
+});
+
+// ── Trigger HUMANO de ejecución del plan autorizado (§9 A–I) ──────────────────────────────────────────────
+const envAprobado = () => envelope('APPROVED_WAITING_EXTERNAL_GATE');
+function stubEjec(supervisedReal: boolean, canary: { status?: number; body?: unknown } = {}): ReturnType<typeof vi.fn> {
+  const fn = vi.fn(async (url: string) => {
+    const u = String(url);
+    if (u.includes('/canary-execute')) return { ok: (canary.status ?? 200) < 400, status: canary.status ?? 200, json: async () => canary.body ?? { decision: 'DENY', reason: 'SUPERVISED_REAL_DISABLED', providerMutateCalls: 0 } };
+    if (u.includes('/execution-plan')) return { ok: true, json: async () => ({ shadowPlanCreated: true, summary: { executionActionCount: 59, byType: {}, entitiesAffected: 59 }, providerMutateCalls: 0 }) };
+    return { ok: true, json: async () => ({ envelope: envAprobado(), financial: { historicalSpend: 30137, envelopeSpend: 0, committedSpend: 0, remainingCap: 30000 }, executionAllowed: { decision: 'DENY', reasonCode: 'SUPERVISED_REAL_DISABLED' }, autonomousReal: false, supervisedReal }) };
+  });
+  vi.stubGlobal('fetch', fn);
+  return fn;
+}
+const canaryPosts = (fn: ReturnType<typeof vi.fn>): number => fn.mock.calls.filter((c) => String(c[0]).includes('/canary-execute')).length;
+const confirmarYEjecutar = async (): Promise<void> => {
+  fireEvent.click(await screen.findByRole('button', { name: /EJECUTAR PLAN AUTORIZADO/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /EJECUTAR AHORA/ }));
+};
+
+describe('AutorizacionSobre · ejecución humana del plan', () => {
+  it('A: supervisedReal=false ⇒ botón EJECUTAR deshabilitado + MODO SUPERVISADO DESACTIVADO', async () => {
+    stubEjec(false);
+    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
+    const btn = await screen.findByRole('button', { name: /EJECUTAR PLAN AUTORIZADO/ });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/MODO SUPERVISADO DESACTIVADO/)).toBeTruthy();
+  });
+
+  it('E+H: supervised true ⇒ confirmar y EJECUTAR AHORA emite exactamente 1 POST al endpoint existente', async () => {
+    const fn = stubEjec(true, { body: { decision: 'EXECUTED', providerMutateCalls: 59 } });
+    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
+    const btn = await screen.findByRole('button', { name: /EJECUTAR PLAN AUTORIZADO/ });
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+    await confirmarYEjecutar();
+    await waitFor(() => expect(canaryPosts(fn)).toBe(1));
+    const call = fn.mock.calls.find((c) => String(c[0]).includes('/canary-execute'))!;
+    expect(String(call[0])).toContain('/api/medicion/canary-execute'); // H: usa el endpoint existente
+    expect((call[1] as { method?: string }).method).toBe('POST');
+  });
+
+  it('D: CANCELAR ⇒ 0 POST de ejecución', async () => {
+    const fn = stubEjec(true);
+    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
+    fireEvent.click(await screen.findByRole('button', { name: /EJECUTAR PLAN AUTORIZADO/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /CANCELAR/ }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(canaryPosts(fn)).toBe(0);
+  });
+
+  it('F: doble click en EJECUTAR AHORA ⇒ exactamente 1 POST', async () => {
+    const fn = stubEjec(true, { body: { decision: 'EXECUTED', providerMutateCalls: 59 } });
+    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
+    fireEvent.click(await screen.findByRole('button', { name: /EJECUTAR PLAN AUTORIZADO/ }));
+    const ahora = await screen.findByRole('button', { name: /EJECUTAR AHORA/ });
+    fireEvent.click(ahora);
+    fireEvent.click(ahora); // segundo click en el mismo tick
+    await waitFor(() => expect(canaryPosts(fn)).toBe(1));
+  });
+
+  it('G: 5xx ⇒ resultado ambiguo, sin reintento ni re-habilitación', async () => {
+    const fn = stubEjec(true, { status: 500 });
+    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
+    await confirmarYEjecutar();
+    await waitFor(() => expect(screen.getByText(/Resultado ambiguo\. NO REINTENTAR/)).toBeTruthy());
+    expect(canaryPosts(fn)).toBe(1);
+    expect(screen.queryByRole('button', { name: /EJECUTAR PLAN AUTORIZADO/ })).toBeNull(); // no se re-habilita
+  });
+
+  it('B+C+I: sólo dispara canary-execute (no toca supervisedReal/envelope/plan) y no hay contexto editable', async () => {
+    const fn = stubEjec(true, { body: { decision: 'EXECUTED', providerMutateCalls: 59 } });
+    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
+    await confirmarYEjecutar();
+    await waitFor(() => expect(canaryPosts(fn)).toBe(1));
+    const posts = fn.mock.calls.filter((c) => (c[1] as { method?: string } | undefined)?.method === 'POST').map((c) => String(c[0]));
+    expect(posts.every((u) => u.includes('/canary-execute'))).toBe(true); // único POST mutador
+    expect(posts.some((u) => /supervised|approve|revoke|envelope-/.test(u))).toBe(false); // no toggle supervised, no aprobar/revocar
+    expect(document.querySelectorAll('input[type="text"], textarea').length).toBe(0); // sin campos de contexto editables
   });
 });

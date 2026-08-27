@@ -5,7 +5,7 @@
  * gasto sin contacto, período, canal, stop rules, hash del plan) y el botón para AUTORIZAR. La autorización es
  * una acción HUMANA (financiera): SOEC/Chrome no la pulsan. Nada se ejecuta: los flags de ejecución están en false.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { cabecerasOrg } from '../lib/org-activa';
 import { Badge, Callout } from './ui';
 
@@ -47,6 +47,12 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
   const [cargando, setCargando] = useState(false);
   const [cargandoInicial, setCargandoInicial] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Ejecución del plan autorizado (trigger HUMANO). `confirmando` = diálogo abierto; `ejecEnviada` = ya se disparó
+  // el POST (se deshabilita permanentemente, sin auto-retry ni re-habilitación); `ejecMsg` = resultado mostrado.
+  const [confirmando, setConfirmando] = useState(false);
+  const [ejecEnviada, setEjecEnviada] = useState(false);
+  const [ejecMsg, setEjecMsg] = useState<string | null>(null);
+  const enviadoRef = useRef(false); // guard SÍNCRONO anti doble-submit (el estado no se actualiza dentro del mismo tick)
 
   // HIDRATACIÓN read-only: al montar / cambiar de tenant / re-simular, se lee el envelope PERSISTIDO (GET) y el
   // PLAN DE EJECUCIÓN en SHADOW (GET). Ninguna escritura ni acción de proveedor.
@@ -74,6 +80,28 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
       await cargar();
     } catch { setError('No se pudo contactar el servicio.'); } finally { setCargando(false); }
   }, [org, cargar]);
+
+  // TRIGGER HUMANO del plan autorizado: usa el entry point EXISTENTE POST /api/medicion/canary-execute (el
+  // contexto canónico org/envelope/planHash/scope lo fija y valida el BACKEND; la UI no envía valores editables).
+  // Un solo disparo: al enviar se deshabilita para siempre; nunca reintenta ni re-habilita. Sin lógica financiera
+  // en el frontend: la autoridad (gates/reserva/idempotencia/provider) vive en el executor Phase2B.
+  const ejecutarPlan = useCallback(async () => {
+    if (!org || enviadoRef.current) return; // guard síncrono: un solo POST aunque haya doble click en el mismo tick
+    enviadoRef.current = true;
+    setEjecEnviada(true); // anti doble-submit inmediato
+    setConfirmando(false);
+    setEjecMsg('Ejecución enviada. No volver a ejecutar.');
+    try {
+      const r = await fetch('/api/medicion/canary-execute', { method: 'POST', headers: { 'content-type': 'application/json', ...cabecerasOrg(org) }, body: '{}' });
+      if (!r.ok) { setEjecMsg('Resultado ambiguo. NO REINTENTAR. Verificar estado.'); return; }
+      const j = (await r.json()) as { decision?: string; reason?: string | null; providerMutateCalls?: number };
+      if (j.decision === 'DENY') setEjecMsg(`Ejecución no realizada (${j.reason ?? 'bloqueada'}). Sin gasto. No reintentar.`);
+      else if (j.decision === 'EXECUTED') setEjecMsg(`Ejecución enviada · acciones al proveedor: ${j.providerMutateCalls ?? '—'}. No volver a ejecutar.`);
+      else setEjecMsg('Resultado ambiguo. NO REINTENTAR. Verificar estado.');
+    } catch {
+      setEjecMsg('Resultado ambiguo. NO REINTENTAR. Verificar estado.');
+    }
+  }, [org]);
 
   const env = resp?.envelope;
   const st = env ? (ESTADO[env.status] ?? { txt: env.status, tono: 'info' as const }) : null;
@@ -178,7 +206,42 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
           {aprobado && (
             <div style={{ marginTop: 8 }}>
               <p className="s">Autorizado por <b>{env.approvedBy}</b> el {env.approvedAt?.slice(0, 10)}. La ejecución real permanece bloqueada por el gate externo y por los interruptores de seguridad.</p>
-              <button type="button" className="btn" disabled={cargando} onClick={() => void accion('envelope-revoke')}>Revocar autorización</button>
+
+              {/* TRIGGER HUMANO del plan autorizado. Requiere click humano + confirmación; los agentes no lo pulsan. */}
+              <div className="card" style={{ marginTop: 10, borderLeft: '4px solid var(--line-strong, #cbd5e1)' }}>
+                <div className="section" style={{ margin: 0 }}>Ejecución del plan autorizado <span className="hint">acción humana · un solo click</span></div>
+                <ul className="s" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                  <li><b>Sobre:</b> <code>{env.id}</code></li>
+                  <li><b>Acciones:</b> {exec?.summary?.executionActionCount ?? 59}</li>
+                  <li><b>Compromiso máximo del experimento:</b> {clp(env.experimentBudget)}</li>
+                  <li><b>Cap global:</b> {clp(env.totalCap)}</li>
+                  <li><b>Google Ads:</b> 860-553-9300 · SmileFlow Clinic</li>
+                  <li><b>Presupuesto:</b> Campaign Total Budget · {clp(env.experimentBudget)}</li>
+                  <li><b>Duración:</b> {env.authorizedDurationDays} días desde la activación</li>
+                </ul>
+
+                {resp && !resp.supervisedReal && (
+                  <p className="s" style={{ marginTop: 8 }}><Badge tono="warn">MODO SUPERVISADO DESACTIVADO</Badge> <span className="muted">La ejecución real está deshabilitada por seguridad. Este botón no puede activarla.</span></p>
+                )}
+
+                {!ejecEnviada && !confirmando && (
+                  <button type="button" className="btn primary" style={{ marginTop: 8 }} disabled={!resp?.supervisedReal} onClick={() => setConfirmando(true)}>EJECUTAR PLAN AUTORIZADO</button>
+                )}
+
+                {confirmando && !ejecEnviada && (
+                  <Callout tono="warn" ico="⚠">
+                    Esta acción ejecutará el plan real aprobado en Google Ads. Puede comprometer hasta <b>{clp(env.experimentBudget)}</b> dentro del cap global de <b>{clp(env.totalCap)}</b>. Se ejecutarán <b>{exec?.summary?.executionActionCount ?? 59}</b> acciones. ¿Ejecutar ahora?
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <button type="button" className="btn" onClick={() => setConfirmando(false)}>CANCELAR</button>
+                      <button type="button" className="btn primary" onClick={() => void ejecutarPlan()}>EJECUTAR AHORA</button>
+                    </div>
+                  </Callout>
+                )}
+
+                {ejecEnviada && <Callout tono="info" ico="🛰">{ejecMsg}</Callout>}
+              </div>
+
+              <button type="button" className="btn" style={{ marginTop: 10 }} disabled={cargando} onClick={() => void accion('envelope-revoke')}>Revocar autorización</button>
             </div>
           )}
           {error && <Callout tono="warn" ico="⚠">{error}</Callout>}
