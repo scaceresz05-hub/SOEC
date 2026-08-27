@@ -36,7 +36,8 @@ import { fingerprintsDelPlan } from './campana/material-fingerprint';
 import { ledgerCero } from './campana/financial-ledger';
 import { ResourceBindingService } from './campana/resource-binding';
 import { ejecutarCanary } from './campana/canary-execution';
-import { PuertoEscrituraNoConfigurada } from './campana/google-ads-real-port';
+import { PuertoEscrituraNoConfigurada, GoogleAdsRealMutatePort } from './campana/google-ads-real-port';
+import { construirPuertoEscrituraGoogleAds } from './campana/google-ads-write-runtime';
 import { getRecursoGoogleAds } from './plataforma';
 import { AUTONOMOUS_REAL } from '@soec/cia';
 import { contextoDe, permisosDe } from './superficie-auth';
@@ -503,13 +504,16 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     let customerId = 'PENDING';
     try { customerId = getRecursoGoogleAds(org).customerId; } catch { /* org sin recurso: customerId placeholder ⇒ CUSTOMER_ID_MISMATCH */ }
     const bindings = await bindingSvc.listar(org);
-    // Puerto de ESCRITURA no configurado (barrera cerrada): con SUPERVISED_REAL=false nunca se invoca; si el gate
-    // lo permitiera, falla cerrado. El cliente Google de escritura se cabla en el bloque 2/2 (canary real).
-    const r = await ejecutarCanary({ org, customerId, envelope, plan, ledger, prov, flags, port: new PuertoEscrituraNoConfigurada(), bindingsExistentes: bindings, ahora: new Date().toISOString() });
+    // Provider REAL: `GoogleAdsRealMutatePort` (adaptador Phase2B existente) sobre el transporte HTTP de escritura.
+    // Alcanzable SÓLO con SUPERVISED_REAL=true; hoy (flag en false) el ejecutor DENIEGA antes ⇒ jamás se invoca.
+    // Fallback fail-closed únicamente si la org no está configurada (nunca el camino productivo de SmileFlow).
+    const port = construirPuertoEscrituraGoogleAds(process.env, org, c) ?? new PuertoEscrituraNoConfigurada();
+    const realProviderWired = port instanceof GoogleAdsRealMutatePort;
+    const r = await ejecutarCanary({ org, customerId, envelope, plan, ledger, prov, flags, port, bindingsExistentes: bindings, ahora: new Date().toISOString() });
     // Respuesta auditable SIN payloads de proveedor: sólo decisión/razón/scope y contadores de seguridad.
     return reply.send({
       organizationId: org, decision: r.decision, reason: r.reason, executionTriggerScope: r.trigger,
-      envelopeId: r.envelopeId, planHash: r.planHash,
+      envelopeId: r.envelopeId, planHash: r.planHash, realProviderWired,
       providerMutateCalls: r.providerMutateCalls, providerBindings: r.providerBindingsCreated,
       supervisedReal: flags.supervisedReal, autonomousReal: flags.autonomousReal,
     });

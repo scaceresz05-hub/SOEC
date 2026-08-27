@@ -50,7 +50,7 @@ const base = (over: Partial<Parameters<typeof ejecutarCanary>[0]> = {}, client =
 });
 
 describe('CANARY entry point — contexto y gate maestro', () => {
-  it('C+D: SUPERVISED_REAL=false ⇒ DENY (supervisedReal) SIN tocar proveedor', async () => {
+  it('C+D: SUPERVISED_REAL=false ⇒ DENY (supervisedReal) SIN tocar el GoogleAdsRealMutatePort real', async () => {
     const { entradas, client } = base({ flags: SUP(false) });
     const r = await ejecutarCanary(entradas, CTX);
     expect(r.decision).toBe('DENY');
@@ -58,6 +58,9 @@ describe('CANARY entry point — contexto y gate maestro', () => {
     expect(r.providerMutateCalls).toBe(0);
     expect(r.providerBindingsCreated).toBe(0);
     expect(client.ops.length).toBe(0);
+    // B+D: el ejecutor recibe el GoogleAdsRealMutatePort REAL (no un placeholder) y su mutate se invoca 0 veces.
+    expect(entradas.port).toBeInstanceOf(GoogleAdsRealMutatePort);
+    expect((entradas.port as GoogleAdsRealMutatePort).calls).toBe(0);
   });
 
   it('B: envelopeId incorrecto ⇒ DENY ENVELOPE_ID_MISMATCH; planHash incorrecto ⇒ DENY PLAN_HASH_MISMATCH (0 writes)', async () => {
