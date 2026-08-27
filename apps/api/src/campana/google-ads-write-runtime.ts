@@ -1,36 +1,39 @@
 /**
  * apps/api · campana · Wiring del PUERTO DE ESCRITURA real de Google Ads. Construye el `GoogleAdsRealMutatePort`
- * (adaptador real EXISTENTE de Phase2B) sobre el transporte HTTP de escritura, reutilizando la MISMA
- * configuración/secret-refs que la ingesta de lectura (`construirIngestaGoogleAds`). Fail-closed: devuelve null
- * si la org no tiene fuente google-ads o falta configuración — nunca inventa.
+ * (adaptador real Phase2B) sobre el transporte HTTP de escritura.
  *
- * IMPORTANTE: este puerto es ALCANZABLE sólo con SUPERVISED_REAL=true. En la fase actual (flag en false) el
- * ejecutor DENIEGA antes del primer provider write, así que este transporte JAMÁS se invoca.
+ * TOKEN (P0 fix): el access_token se resuelve por la CONEXIÓN OAuth REAL por tenant (refresh token cifrado) — la
+ * misma vía que el descubrimiento de cuentas / refresh que YA funciona — NO por `env:GOOGLE_ADS_REFRESH_TOKEN`
+ * (ausente en prod, causa del NO_ACCESS_TOKEN del intento anterior). El developer-token sí viene de env (presente).
+ * Fail-closed: sin composición/config ⇒ null.
+ *
+ * `validateOnly` permite un diagnóstico SEGURO: Google valida pero no ejecuta (no crea recursos ni gasta).
  */
-import { SecretStoreEnv } from '@soec/secretos';
-import type { RequestContext } from '@soec/contracts';
-import { buscarFuente, getRecursoGoogleAds } from '../plataforma';
-import { GoogleAdsMutateHttpClient } from './google-ads-mutate-http';
+import type { ComponentesFlujoGoogleAds } from '../acquisition/google-ads-oauth-flow';
+import { obtenerAccessTokenDeOrg } from '../acquisition/google-ads-oauth-flow';
+import { getRecursoGoogleAds } from '../plataforma';
+import { GoogleAdsMutateHttpClient, type GoogleAdsWriteLog } from './google-ads-mutate-http';
 import { GoogleAdsRealMutatePort } from './google-ads-real-port';
 
+export interface OpcionesEscrituraGoogleAds {
+  readonly validateOnly?: boolean;
+  readonly logger?: (info: GoogleAdsWriteLog) => void;
+}
+
 /** Construye el `GoogleAdsRealMutatePort` real para una org, o null si no está configurada (fail-closed). */
-export function construirPuertoEscrituraGoogleAds(env: NodeJS.ProcessEnv, org: string, ctx: RequestContext): GoogleAdsRealMutatePort | null {
-  const fuente = buscarFuente(org, 'google-ads');
-  if (!fuente) return null;
+export function construirPuertoEscrituraGoogleAds(env: NodeJS.ProcessEnv, org: string, comp: ComponentesFlujoGoogleAds | null | undefined, opts: OpcionesEscrituraGoogleAds = {}): GoogleAdsRealMutatePort | null {
+  if (!comp) return null;
   let ads: ReturnType<typeof getRecursoGoogleAds>;
   try { ads = getRecursoGoogleAds(org); } catch { return null; }
-  if (!(env.GOOGLE_ADS_DEVELOPER_TOKEN && env.GOOGLE_ADS_CLIENT_ID && env.GOOGLE_ADS_CLIENT_SECRET)) return null;
+  const developerToken = env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  if (!developerToken) return null;
 
   const client = new GoogleAdsMutateHttpClient({
-    secretStore: new SecretStoreEnv(env),
-    ctx,
-    secretRefs: {
-      developerToken: 'env:GOOGLE_ADS_DEVELOPER_TOKEN',
-      clientId: 'env:GOOGLE_ADS_CLIENT_ID',
-      clientSecret: 'env:GOOGLE_ADS_CLIENT_SECRET',
-      refreshToken: fuente.credenciales.find((c) => c.nombreLogico === 'google-ads-refresh-token')?.secretRef ?? 'env:GOOGLE_ADS_REFRESH_TOKEN',
-    },
-    loginCustomerId: ads.loginCustomerId,
+    resolverAccessToken: () => obtenerAccessTokenDeOrg(comp, org), // conexión REAL por tenant (no env)
+    developerToken,
+    loginCustomerId: ads.loginCustomerId ?? ads.customerId, // manager (1742063041) si el acceso es vía MCC
+    ...(opts.validateOnly ? { validateOnly: true } : {}),
+    ...(opts.logger ? { logger: opts.logger } : {}),
   });
   return new GoogleAdsRealMutatePort(client);
 }

@@ -18,7 +18,7 @@ import type { GoogleOAuthPort, GoogleAdsAccountsPort } from './google-ads-api-ht
 import { validarEstadoGoogleAds, type EstadoOAuthGoogleAds, type ResultadoValidacionGoogleAds } from './google-ads-oauth';
 import {
   connectionIdDe, conexionInicial, transicionConexionValida,
-  type ConexionGoogleAds, type CredencialGoogleAdsRef, type CuentaGoogleAds, type EstadoConexionGoogleAds,
+  type ConexionGoogleAds, type CredencialGoogleAdsRef, type CuentaGoogleAds,
 } from './google-ads-connection';
 
 const NOMBRE_SECRETO_REFRESH = 'google-ads-refresh-token';
@@ -151,6 +151,18 @@ async function obtenerAccessToken(comp: ComponentesFlujoGoogleAds, conexion: Con
     return { ok: false, motivo: 'NEEDS_REAUTH' };
   }
   return { ok: false, motivo: 'ERROR' };
+}
+
+/**
+ * Resuelve un access_token efímero para la ORG a partir de su conexión CONNECTED (refresh token CIFRADO por
+ * tenant). Es la MISMA vía que usa el descubrimiento de cuentas / refresh (la que SÍ funciona en producción);
+ * el transporte de escritura debe usar esta, NO `env:GOOGLE_ADS_REFRESH_TOKEN`. null si no hay token válido.
+ */
+export async function obtenerAccessTokenDeOrg(comp: ComponentesFlujoGoogleAds, org: string): Promise<string | null> {
+  const conexion = await comp.connRepo.obtener(org, connectionIdDe(org));
+  if (conexion === null) return null;
+  const t = await obtenerAccessToken(comp, conexion);
+  return t.ok ? t.accessToken : null;
 }
 
 /** Descubre las cuentas accesibles por el token, resolviendo el manager (login-customer-id) por cliente. */

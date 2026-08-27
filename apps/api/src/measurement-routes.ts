@@ -37,7 +37,9 @@ import { correrShadow, evaluarGateEnvelope, evaluarCompatibilidadMaterial, detal
 import { fingerprintsDelPlan } from './campana/material-fingerprint';
 import { ledgerCero } from './campana/financial-ledger';
 import { ResourceBindingService } from './campana/resource-binding';
-import { ejecutarCanary } from './campana/canary-execution';
+import { ejecutarCanary, CONTEXTO_CANARY } from './campana/canary-execution';
+import { construirActionPlan } from './campana/execution-intent';
+import type { GoogleMutationPayload, CampaignTotalBudgetPayload } from './campana/google-translator';
 import { PuertoEscrituraNoConfigurada, GoogleAdsRealMutatePort } from './campana/google-ads-real-port';
 import { construirPuertoEscrituraGoogleAds } from './campana/google-ads-write-runtime';
 import { getRecursoGoogleAds } from './plataforma';
@@ -511,8 +513,8 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const bindings = await bindingSvc.listar(org);
     // Provider REAL: `GoogleAdsRealMutatePort` (adaptador Phase2B existente) sobre el transporte HTTP de escritura.
     // Alcanzable SÓLO con SUPERVISED_REAL=true; hoy (flag en false) el ejecutor DENIEGA antes ⇒ jamás se invoca.
-    // Fallback fail-closed únicamente si la org no está configurada (nunca el camino productivo de SmileFlow).
-    const port = construirPuertoEscrituraGoogleAds(process.env, org, c) ?? new PuertoEscrituraNoConfigurada();
+    // Token vía la conexión REAL por tenant (no env). Fallback fail-closed sólo si la org no está configurada.
+    const port = construirPuertoEscrituraGoogleAds(process.env, org, googleAdsComp, { logger: (i) => app.log.info(i, 'ga-write') }) ?? new PuertoEscrituraNoConfigurada();
     const realProviderWired = port instanceof GoogleAdsRealMutatePort;
     const r = await ejecutarCanary({ org, customerId, envelope, plan, ledger, prov, flags, port, bindingsExistentes: bindings, ahora: new Date().toISOString() });
     // OUTCOME HONESTO: éxito real SÓLO si se crearon recursos en el proveedor (providerActionsSucceeded>0). Un
@@ -530,6 +532,36 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       intentsExecuted: r.intentsExecuted, intentsFailed: r.intentsFailed, intentsBlocked: r.intentsBlocked, intentsSkippedIdempotent: r.intentsSkippedIdempotent,
       supervisedReal: flags.supervisedReal, autonomousReal: flags.autonomousReal,
     });
+  });
+
+  // DIAGNÓSTICO SEGURO (validate_only): valida contra Google la PRIMERA operación real (campaign_budget.create)
+  // SIN mutar (Google no crea recursos ni gasta). Auth + business.manage + contexto canónico. NO activa el
+  // envelope, NO crea bindings, NO requiere supervisedReal (no muta). Captura status/errorCode/request-id de Google.
+  app.post('/medicion/canary-validate', async (req, reply) => {
+    const { org } = real(req, 'autonomia-ads');
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    if (org !== CONTEXTO_CANARY.org) return reply.send({ ok: false, error: 'CONTEXT_ORG_NOT_AUTHORIZED' });
+    const envelope = await envelopeSvc.leerUltimo(org);
+    const plan = (await campaignOperator.leerUltimo(org))?.plan ?? null;
+    if (!envelope || !plan) return reply.send({ ok: false, error: 'NO_ENVELOPE_OR_PLAN' });
+    if (envelope.id !== CONTEXTO_CANARY.envelopeId || envelope.planHash !== CONTEXTO_CANARY.planHash) return reply.send({ ok: false, error: 'ENVELOPE_ID_MISMATCH' });
+    let customerId = 'PENDING';
+    try { customerId = getRecursoGoogleAds(org).customerId; } catch { return reply.send({ ok: false, error: 'GOOGLE_ADS_NOT_CONFIGURED' }); }
+    if (customerId !== CONTEXTO_CANARY.customerId) return reply.send({ ok: false, error: 'CUSTOMER_ID_MISMATCH' });
+    // PRIMERA operación del grafo: campaign_budget.create (sub-op del CREATE_CAMPAIGN).
+    const cc = construirActionPlan(plan, envelope, customerId, new Date().toISOString()).find((i) => i.actionType === 'CREATE_CAMPAIGN');
+    const budget = (cc?.providerPayload?.fields as { budget?: CampaignTotalBudgetPayload } | undefined)?.budget;
+    if (!budget) return reply.send({ ok: false, error: 'NO_BUDGET_OPERATION' });
+    const budgetPayload: GoogleMutationPayload = { customerId, operation: budget.operation, resourceType: budget.resourceType, fields: { period: budget.period, totalAmountMicros: budget.totalAmountMicros, explicitlyShared: budget.explicitlyShared } };
+    const port = construirPuertoEscrituraGoogleAds(process.env, org, googleAdsComp, { validateOnly: true, logger: (i) => app.log.info(i, 'ga-write-validate') });
+    if (!port) return reply.send({ ok: false, error: 'GOOGLE_ADS_WRITE_NOT_CONFIGURED' });
+    try {
+      await port.mutate(budgetPayload); // validate_only ⇒ Google valida, NO crea
+      return reply.send({ ok: true, validateOnly: true, firstOperation: 'campaign_budget.create', result: 'VALIDATE_ONLY_OK', totalAmountMicros: budget.totalAmountMicros });
+    } catch (e) {
+      // El mensaje del transporte lleva HTTP status + errorCode de Google + request-id (sin secretos).
+      return reply.send({ ok: false, validateOnly: true, firstOperation: 'campaign_budget.create', error: e instanceof Error ? e.message : String(e) });
+    }
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {
