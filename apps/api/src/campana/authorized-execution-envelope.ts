@@ -98,6 +98,16 @@ export function flagsEjecucion(env: NodeJS.ProcessEnv, autonomousReal: boolean):
   return { autonomousReal, supervisedReal: env.SOEC_SUPERVISED_REAL === 'true' };
 }
 
+/**
+ * FUENTE ÚNICA DE VERDAD del gate supervisedReal: el modo operativo persistido de la ORGANIZACIÓN autenticada.
+ * `SUPERVISED_REAL` ⇒ supervisedReal=true; cualquier otro valor (`PILOT`, desconocido, null, error) ⇒ false
+ * (fail-closed). `autonomousReal` permanece SIEMPRE false por diseño (AUTONOMOUS_REAL bloqueado, sin importar el
+ * modo). El cliente NO puede declararse supervisado: el modo lo inyecta el gateway desde la membresía validada.
+ */
+export function derivarFlagsDeModo(operationalMode: string | null | undefined): FlagsEjecucion {
+  return { supervisedReal: operationalMode === 'SUPERVISED_REAL', autonomousReal: false };
+}
+
 /** Estados APROBADOS: pasan el gate de estado; el gate externo/financiero decide después (reason preciso). */
 const ESTADOS_APROBADOS: ReadonlySet<EnvelopeStatus> = new Set(['APPROVED_WAITING_EXTERNAL_GATE', 'APPROVED_READY_TO_ACTIVATE', 'ACTIVE']);
 

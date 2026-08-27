@@ -29,7 +29,7 @@ import type { CanalId } from './campana/marketing-plan';
 import { DiagnosisEvidenceService } from './campana/diagnosis-evidence-service';
 import { normalizarReadinessInput } from './campana/diagnosis-evidence';
 import { EnvelopeService } from './campana/envelope-service';
-import { flagsEjecucion, type ProviderState, type FinancialState } from './campana/authorized-execution-envelope';
+import { derivarFlagsDeModo, type ProviderState, type FinancialState } from './campana/authorized-execution-envelope';
 import { canalesDisponibles } from './campana/campaign-operator-service';
 import { correrShadow, evaluarGateEnvelope, evaluarCompatibilidadMaterial, detalleIntent, auditoriaShadowDerivada } from './campana/execution-engine';
 import { fingerprintsDelPlan } from './campana/material-fingerprint';
@@ -39,8 +39,7 @@ import { ejecutarCanary } from './campana/canary-execution';
 import { PuertoEscrituraNoConfigurada, GoogleAdsRealMutatePort } from './campana/google-ads-real-port';
 import { construirPuertoEscrituraGoogleAds } from './campana/google-ads-write-runtime';
 import { getRecursoGoogleAds } from './plataforma';
-import { AUTONOMOUS_REAL } from '@soec/cia';
-import { contextoDe, permisosDe } from './superficie-auth';
+import { contextoDe, permisosDe, modoOperativoDe } from './superficie-auth';
 import {
   bindExperienciaReal,
   type ExperienciaReal,
@@ -407,9 +406,11 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const remainingCap = envelope ? envelope.totalCap - envelopeSpend - committedSpend : 0;
     // GATE UNIFICADO: misma precedencia que /medicion/execution-plan (envelope-first ⇒ ENVELOPE_NOT_APPROVED).
     const { prov: provEnv } = providerYFinancieroDe(org);
-    const rGate = evaluarGateEnvelope(envelope, plan, provEnv, flagsEjecucion(process.env, AUTONOMOUS_REAL));
+    // Gate y read model comparten la MISMA fuente: el modo operativo de la org autenticada (no env, no constante).
+    const flagsEnv = derivarFlagsDeModo(modoOperativoDe(req));
+    const rGate = evaluarGateEnvelope(envelope, plan, provEnv, flagsEnv);
     const executionAllowed: { decision: string; reasonCode: string | null } = { decision: rGate.decision, reasonCode: rGate.reasonCode };
-    return reply.send({ organizationId: org, envelope, financial: { historicalSpend, envelopeSpend, committedSpend, remainingCap }, executionAllowed, autonomousReal: AUTONOMOUS_REAL, supervisedReal: process.env.SOEC_SUPERVISED_REAL === 'true' });
+    return reply.send({ organizationId: org, envelope, financial: { historicalSpend, envelopeSpend, committedSpend, remainingCap }, executionAllowed, autonomousReal: flagsEnv.autonomousReal, supervisedReal: flagsEnv.supervisedReal });
   });
   app.get('/medicion/envelope-audit', async (req, reply) => {
     const { org } = real(req, 'autonomia-ads');
@@ -454,7 +455,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const snap = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(org)));
     const ledger = ledgerCero(envelope.totalCap, envelope.experimentBudget, snap?.cost ?? 0);
     const { prov } = providerYFinancieroDe(org);
-    const flags = flagsEjecucion(process.env, AUTONOMOUS_REAL);
+    const flags = derivarFlagsDeModo(modoOperativoDe(req));
     let customerId = 'PENDING';
     try { customerId = getRecursoGoogleAds(org).customerId; } catch { /* org sin recurso: customerId placeholder, no afecta SHADOW */ }
     const bindings = await bindingSvc.listar(org);
@@ -500,7 +501,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const snap = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(org)));
     const ledger = ledgerCero(envelope?.totalCap ?? 0, envelope?.experimentBudget ?? 0, snap?.cost ?? 0);
     const { prov } = providerYFinancieroDe(org);
-    const flags = flagsEjecucion(process.env, AUTONOMOUS_REAL);
+    const flags = derivarFlagsDeModo(modoOperativoDe(req));
     let customerId = 'PENDING';
     try { customerId = getRecursoGoogleAds(org).customerId; } catch { /* org sin recurso: customerId placeholder ⇒ CUSTOMER_ID_MISMATCH */ }
     const bindings = await bindingSvc.listar(org);

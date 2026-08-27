@@ -73,6 +73,9 @@ export function guardarVerticales(identity: IdentityService) {
     req.headers['x-organization-id'] = canonizarAliasLegado(ctx.organization.slug) ?? ctx.organization.slug;
     req.headers['x-actor-id'] = ctx.user.id;
     req.headers['x-scope'] = scopeEventStore(ctx.permisos).join(',');
+    // Modo operativo AUTORITATIVO de la organización (fuente única del gate supervisedReal del executor). Se
+    // deriva de la membresía validada, NUNCA del payload; lo que envíe el cliente se descarta (se sobreescribe).
+    req.headers['x-operational-mode'] = String(ctx.organization.operationalMode ?? '');
     // Permisos comerciales EFECTIVOS del rol, para autorización fina de las rutas que la exijan
     // (p. ej. la superficie de generación). Autoritativo: lo que envíe el cliente se descarta.
     req.headers['x-permissions'] = [...ctx.permisos].join(',');

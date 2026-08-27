@@ -16,14 +16,19 @@ import type { FinancialLedger } from './financial-ledger';
 import type { GoogleAdsMutatePort } from './google-translator';
 import type { ProviderResourceBinding } from './resource-binding';
 
+export interface ContextoCanary {
+  readonly org: string;
+  readonly envelopeId: string;
+  readonly planHash: string;
+  readonly customerId: string;
+}
 /** CONTEXTO AUTORIZADO ÚNICO (canónico, human-approved). El entry point productivo SÓLO opera con estos valores. */
-export const CONTEXTO_CANARY = {
+export const CONTEXTO_CANARY: ContextoCanary = {
   org: 'org-smileflow',
   envelopeId: 'env:org-smileflow:842a5165b22c462d',
   planHash: '842a5165b22c462d',
   customerId: '8605539300',
-} as const;
-export type ContextoCanary = typeof CONTEXTO_CANARY;
+};
 
 export type CanaryDenyReason =
   | 'CONTEXT_ORG_NOT_AUTHORIZED' | 'CUSTOMER_ID_MISMATCH' | 'ENVELOPE_NOT_FOUND'

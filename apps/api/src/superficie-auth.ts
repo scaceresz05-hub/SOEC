@@ -29,6 +29,12 @@ export function permisosDe(req: FastifyRequest): ReadonlySet<string> {
   return new Set((header(req, 'x-permissions') ?? '').split(',').map((s) => s.trim()).filter(Boolean));
 }
 
+/** Modo operativo AUTORITATIVO de la organización autenticada (inyectado por el gateway). null si ausente. */
+export function modoOperativoDe(req: FastifyRequest): string | null {
+  const v = header(req, 'x-operational-mode');
+  return v && v.trim() ? v.trim() : null;
+}
+
 /** Exige un permiso atómico del modelo canónico; lanza SinPermisoError (→ 403) si falta. */
 export function exigir(req: FastifyRequest, permiso: Permission): void {
   if (!permisosDe(req).has(permiso)) throw new SinPermisoError(`falta el permiso ${permiso}`);

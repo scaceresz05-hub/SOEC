@@ -79,3 +79,50 @@ describe('POST /medicion/canary-execute (entry point)', () => {
     await app.close();
   });
 });
+
+describe('operationalMode ⇒ supervisedReal (read model + executor, misma fuente)', () => {
+  const nuevoApp = async () => {
+    const store = new InMemoryEventStore();
+    await seed(store);
+    return buildApp({ store, intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true });
+  };
+  const envelopeConModo = async (app: Awaited<ReturnType<typeof nuevoApp>>, mode?: string) =>
+    (await app.inject({ method: 'GET', url: '/medicion/envelope', headers: mode ? { ...AUTH, 'x-operational-mode': mode } : AUTH })).json();
+
+  it('A: PILOT ⇒ envelope.supervisedReal=false', async () => {
+    const app = await nuevoApp();
+    expect((await envelopeConModo(app, 'PILOT')).supervisedReal).toBe(false);
+    await app.close();
+  });
+  it('B: SUPERVISED_REAL ⇒ envelope.supervisedReal=true', async () => {
+    const app = await nuevoApp();
+    expect((await envelopeConModo(app, 'SUPERVISED_REAL')).supervisedReal).toBe(true);
+    await app.close();
+  });
+  it('E: modo ausente/desconocido ⇒ false (fail-closed)', async () => {
+    const app = await nuevoApp();
+    expect((await envelopeConModo(app)).supervisedReal).toBe(false);
+    expect((await envelopeConModo(app, 'OTRO')).supervisedReal).toBe(false);
+    await app.close();
+  });
+  it('H: autonomousReal siempre false', async () => {
+    const app = await nuevoApp();
+    expect((await envelopeConModo(app, 'SUPERVISED_REAL')).autonomousReal).toBe(false);
+    await app.close();
+  });
+  it('I: el executor (canary-execute) recibe el mismo supervisedReal derivado del modo', async () => {
+    const app = await nuevoApp();
+    const b = (await app.inject({ method: 'POST', url: '/medicion/canary-execute', headers: { ...AUTH, 'x-operational-mode': 'SUPERVISED_REAL' }, payload: {} })).json();
+    expect(b.supervisedReal).toBe(true);       // la misma fuente llega al executor
+    expect(b.decision).toBe('DENY');            // pero DENY por contexto (envelope de test ≠ canónico)
+    expect(b.reason).toBe('ENVELOPE_ID_MISMATCH');
+    expect(b.providerMutateCalls).toBe(0);      // 0 writes
+    await app.close();
+  });
+  it('G: el body NO puede falsificar el modo (sólo cuenta la cabecera del gateway)', async () => {
+    const app = await nuevoApp();
+    const b = (await app.inject({ method: 'POST', url: '/medicion/canary-execute', headers: AUTH, payload: { mode: 'SUPERVISED_REAL', supervisedReal: true } })).json();
+    expect(b.supervisedReal).toBe(false); // sin x-operational-mode ⇒ false; el body se ignora
+    await app.close();
+  });
+});
