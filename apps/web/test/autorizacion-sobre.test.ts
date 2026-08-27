@@ -94,12 +94,14 @@ describe('AutorizacionSobre · hidratación', () => {
 
 // ── Trigger HUMANO de ejecución del plan autorizado (§9 A–I) ──────────────────────────────────────────────
 const envAprobado = () => envelope('APPROVED_WAITING_EXTERNAL_GATE');
-function stubEjec(supervisedReal: boolean, canary: { status?: number; body?: unknown } = {}): ReturnType<typeof vi.fn> {
+function stubEjec(supervisedReal: boolean, canary: { status?: number; body?: unknown } = {}, exec?: { decision: string; reasonCode: string | null }): ReturnType<typeof vi.fn> {
+  // El read model autoritativo: por defecto ALLOW si supervisado, DENY (supervised off) si no. Se puede sobreescribir.
+  const executionAllowed = exec ?? (supervisedReal ? { decision: 'ALLOW', reasonCode: null } : { decision: 'DENY', reasonCode: 'SUPERVISED_REAL_DISABLED' });
   const fn = vi.fn(async (url: string) => {
     const u = String(url);
     if (u.includes('/canary-execute')) return { ok: (canary.status ?? 200) < 400, status: canary.status ?? 200, json: async () => canary.body ?? { decision: 'DENY', reason: 'SUPERVISED_REAL_DISABLED', providerMutateCalls: 0 } };
     if (u.includes('/execution-plan')) return { ok: true, json: async () => ({ shadowPlanCreated: true, summary: { executionActionCount: 59, byType: {}, entitiesAffected: 59 }, providerMutateCalls: 0 }) };
-    return { ok: true, json: async () => ({ envelope: envAprobado(), financial: { historicalSpend: 30137, envelopeSpend: 0, committedSpend: 0, remainingCap: 30000 }, executionAllowed: { decision: 'DENY', reasonCode: 'SUPERVISED_REAL_DISABLED' }, autonomousReal: false, supervisedReal }) };
+    return { ok: true, json: async () => ({ envelope: envAprobado(), financial: { historicalSpend: 30137, envelopeSpend: 0, committedSpend: 0, remainingCap: 30000 }, executionAllowed, autonomousReal: false, supervisedReal }) };
   });
   vi.stubGlobal('fetch', fn);
   return fn;
@@ -117,6 +119,22 @@ describe('AutorizacionSobre · ejecución humana del plan', () => {
     const btn = await screen.findByRole('button', { name: /EJECUTAR PLAN AUTORIZADO/ });
     expect((btn as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/MODO SUPERVISADO DESACTIVADO/)).toBeTruthy();
+  });
+
+  it('H: supervised true PERO executionAllowed=DENY (gate externo) ⇒ botón DESHABILITADO (sigue el backend)', async () => {
+    stubEjec(true, {}, { decision: 'DENY', reasonCode: 'EXTERNAL_GATE_BLOCKED' });
+    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
+    const btn = await screen.findByRole('button', { name: /EJECUTAR PLAN AUTORIZADO/ });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/EJECUCIÓN BLOQUEADA/)).toBeTruthy();
+    expect(screen.getAllByText(/EXTERNAL_GATE_BLOCKED/).length).toBeGreaterThan(0);
+  });
+
+  it('I: executionAllowed=ALLOW ⇒ botón HABILITADO', async () => {
+    stubEjec(true, {}, { decision: 'ALLOW', reasonCode: null });
+    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
+    const btn = await screen.findByRole('button', { name: /EJECUTAR PLAN AUTORIZADO/ });
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('E+H: supervised true ⇒ confirmar y EJECUTAR AHORA emite exactamente 1 POST al endpoint existente', async () => {

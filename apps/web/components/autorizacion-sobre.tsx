@@ -220,12 +220,17 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
                   <li><b>Duración:</b> {env.authorizedDurationDays} días desde la activación</li>
                 </ul>
 
-                {resp && !resp.supervisedReal && (
-                  <p className="s" style={{ marginTop: 8 }}><Badge tono="warn">MODO SUPERVISADO DESACTIVADO</Badge> <span className="muted">La ejecución real está deshabilitada por seguridad. Este botón no puede activarla.</span></p>
+                {/* El botón sigue el read model AUTORITATIVO del backend (executionAllowed), no una copia local. */}
+                {resp && resp.executionAllowed?.decision !== 'ALLOW' && (
+                  <p className="s" style={{ marginTop: 8 }}>
+                    {!resp.supervisedReal
+                      ? <><Badge tono="warn">MODO SUPERVISADO DESACTIVADO</Badge> <span className="muted">La ejecución real está deshabilitada por seguridad. Este botón no puede activarla.</span></>
+                      : <><Badge tono="warn">EJECUCIÓN BLOQUEADA</Badge> <span className="muted">{resp.executionAllowed?.reasonCode ?? 'no permitida'}. El botón se habilita sólo cuando el backend permite la ejecución.</span></>}
+                  </p>
                 )}
 
                 {!ejecEnviada && !confirmando && (
-                  <button type="button" className="btn primary" style={{ marginTop: 8 }} disabled={!resp?.supervisedReal} onClick={() => setConfirmando(true)}>EJECUTAR PLAN AUTORIZADO</button>
+                  <button type="button" className="btn primary" style={{ marginTop: 8 }} disabled={resp?.executionAllowed?.decision !== 'ALLOW'} onClick={() => setConfirmando(true)}>EJECUTAR PLAN AUTORIZADO</button>
                 )}
 
                 {confirmando && !ejecEnviada && (

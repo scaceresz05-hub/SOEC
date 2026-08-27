@@ -30,7 +30,9 @@ import { DiagnosisEvidenceService } from './campana/diagnosis-evidence-service';
 import { normalizarReadinessInput } from './campana/diagnosis-evidence';
 import { EnvelopeService } from './campana/envelope-service';
 import { derivarFlagsDeModo, type ProviderState, type FinancialState } from './campana/authorized-execution-envelope';
-import { canalesDisponibles } from './campana/campaign-operator-service';
+import { providerStateDeConexion } from './campana/provider-readiness';
+import { connectionIdDe } from './acquisition/google-ads-connection';
+import type { ComponentesFlujoGoogleAds } from './acquisition/google-ads-oauth-flow';
 import { correrShadow, evaluarGateEnvelope, evaluarCompatibilidadMaterial, detalleIntent, auditoriaShadowDerivada } from './campana/execution-engine';
 import { fingerprintsDelPlan } from './campana/material-fingerprint';
 import { ledgerCero } from './campana/financial-ledger';
@@ -66,7 +68,7 @@ function real(
   return { ctx, org: binding.organizationId, binding };
 }
 
-export function registerMeasurementRoutes(app: FastifyInstance, store: EventStore, pool?: Pool): void {
+export function registerMeasurementRoutes(app: FastifyInstance, store: EventStore, pool?: Pool, googleAdsComp?: ComponentesFlujoGoogleAds | null): void {
   const exp = new MeasurementExperience(store);
   const budgetRepo = pool ? new PgBudgetAuthorizationRepo(pool) : null;
 
@@ -386,11 +388,13 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
   // AUTHORIZED EXECUTION ENVELOPE (soberanía financiera humana). Crear/leer/aprobar(HUMANO)/revocar. NADA se
   // ejecuta: SOEC_SUPERVISED_REAL y SOEC_AUTONOMOUS_REAL en false ⇒ validateAuthorizedExecution DENIEGA siempre.
   const envelopeSvc = new EnvelopeService(store);
-  const providerYFinancieroDe = (_org: string): { prov: ProviderState; fin: FinancialState } => {
-    const disp = canalesDisponibles(process.env);
-    const executionEligibleChannels = disp.filter((d) => d.canExecute).map((d) => d.canal);
+  // GATE EXTERNO desde la CONEXIÓN OAuth REAL (CONNECTED + cuenta seleccionada + sin re-auth), NO de una env var
+  // estática ni del interruptor de autonomía. `autonomousReal=false` no bloquea la ejecución SUPERVISADA (su gate
+  // es `supervisedReal`, evaluado aparte). Fail-closed: sin composición/conexión ⇒ no listo ⇒ EXTERNAL_GATE_BLOCKED.
+  const providerYFinancieroDe = async (org: string): Promise<{ prov: ProviderState; fin: FinancialState }> => {
+    const conexion = googleAdsComp ? await googleAdsComp.connRepo.obtener(org, connectionIdDe(org)) : null;
     return {
-      prov: { executionEligibleChannels, providerConnected: executionEligibleChannels.length > 0, trackingValid: true, landingAvailable: true, now: new Date().toISOString(), contacts: 0 },
+      prov: providerStateDeConexion(conexion, new Date().toISOString()),
       fin: { historicalSpend: 0, envelopeSpend: 0, committedSpend: 0 }, // histórico NO cuenta en el envelope
     };
   };
@@ -405,7 +409,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const committedSpend = 0; // gasto comprometido por acciones pendientes (aún ninguna)
     const remainingCap = envelope ? envelope.totalCap - envelopeSpend - committedSpend : 0;
     // GATE UNIFICADO: misma precedencia que /medicion/execution-plan (envelope-first ⇒ ENVELOPE_NOT_APPROVED).
-    const { prov: provEnv } = providerYFinancieroDe(org);
+    const { prov: provEnv } = await providerYFinancieroDe(org);
     // Gate y read model comparten la MISMA fuente: el modo operativo de la org autenticada (no env, no constante).
     const flagsEnv = derivarFlagsDeModo(modoOperativoDe(req));
     const rGate = evaluarGateEnvelope(envelope, plan, provEnv, flagsEnv);
@@ -429,7 +433,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const plan = (await campaignOperator.leerUltimo(org))?.plan;
     if (!plan) return reply.code(409).send({ ok: false, error: 'no hay plan vigente' });
     const actor = String((req as unknown as { user?: { sub?: string } }).user?.sub ?? 'humano');
-    const { prov } = providerYFinancieroDe(org);
+    const { prov } = await providerYFinancieroDe(org);
     try {
       const r = await envelopeSvc.aprobar(org, actor, plan, new Date().toISOString(), prov.executionEligibleChannels);
       return reply.code(201).send({ organizationId: org, ...r });
@@ -454,7 +458,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     if (!envelope || !plan) return reply.send({ organizationId: org, shadowPlanCreated: false, mode: 'SHADOW', providerMutateCalls: 0 });
     const snap = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(org)));
     const ledger = ledgerCero(envelope.totalCap, envelope.experimentBudget, snap?.cost ?? 0);
-    const { prov } = providerYFinancieroDe(org);
+    const { prov } = await providerYFinancieroDe(org);
     const flags = derivarFlagsDeModo(modoOperativoDe(req));
     let customerId = 'PENDING';
     try { customerId = getRecursoGoogleAds(org).customerId; } catch { /* org sin recurso: customerId placeholder, no afecta SHADOW */ }
@@ -500,7 +504,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const plan = (await campaignOperator.leerUltimo(org))?.plan ?? null;
     const snap = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(org)));
     const ledger = ledgerCero(envelope?.totalCap ?? 0, envelope?.experimentBudget ?? 0, snap?.cost ?? 0);
-    const { prov } = providerYFinancieroDe(org);
+    const { prov } = await providerYFinancieroDe(org);
     const flags = derivarFlagsDeModo(modoOperativoDe(req));
     let customerId = 'PENDING';
     try { customerId = getRecursoGoogleAds(org).customerId; } catch { /* org sin recurso: customerId placeholder ⇒ CUSTOMER_ID_MISMATCH */ }
