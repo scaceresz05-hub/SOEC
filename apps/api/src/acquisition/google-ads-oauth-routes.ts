@@ -132,14 +132,18 @@ export function registerGoogleAdsOAuthAutenticadas(app: FastifyInstance, deps: D
     return reply.send({ ok: true, datos: await construirEstadoConexion(deps, a.org) });
   });
 
-  app.post('/acquisition/google-ads/accounts', async (req, reply) => {
+  // DISCOVERY de cuentas = READ ONLY (no muta la conexión ni Google): se expone por GET (contrato productivo)
+  // y también por POST (compatibilidad con clientes previos). No exige business.manage (sólo lectura).
+  const manejarAccounts = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const a = authed(req, reply);
     if (!a) return;
-    if (comp === null) return reply.code(503).send({ ok: false, error: 'GOOGLE_ADS_NOT_CONFIGURED' });
+    if (comp === null) { await reply.code(503).send({ ok: false, error: 'GOOGLE_ADS_NOT_CONFIGURED' }); return; }
     const r = await descubrirCuentas({ ...comp, ahora }, a.org);
-    if (!r.ok) return reply.code(409).send({ ok: false, error: r.motivo });
-    return reply.send({ ok: true, datos: { cuentas: r.cuentas.map(aCuentaDTO) } });
-  });
+    if (!r.ok) { await reply.code(409).send({ ok: false, error: r.motivo }); return; }
+    await reply.send({ ok: true, datos: { cuentas: r.cuentas.map(aCuentaDTO) } });
+  };
+  app.get('/acquisition/google-ads/accounts', manejarAccounts);
+  app.post('/acquisition/google-ads/accounts', manejarAccounts);
 
   app.post('/acquisition/google-ads/select-account', async (req, reply) => {
     const a = authed(req, reply);

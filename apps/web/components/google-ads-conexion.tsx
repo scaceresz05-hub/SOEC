@@ -85,7 +85,8 @@ export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement 
     setOcupado('cuentas');
     setAviso(null);
     try {
-      const r = await fetch('/api/google-ads/accounts', { method: 'POST', headers: headers(), body: '{}' });
+      // Discovery READ ONLY ⇒ GET (no muta conexión ni campañas). Mismo patrón que /connection.
+      const r = await fetch('/api/google-ads/accounts', { method: 'GET', cache: 'no-store', headers: cabecerasOrg(org) });
       const j = await r.json();
       if (r.ok && j?.datos?.cuentas) {
         setCuentas(j.datos.cuentas as Cuenta[]);

@@ -7,7 +7,9 @@ import { API_BASE } from '../../../../lib/config';
  * suministran para el camino de desarrollo. Nunca se exponen tokens: sólo se reenvía JSON sanitizado.
  */
 
-const GET_PATHS = new Set(['connection']);
+// `accounts` (discovery) es READ ONLY ⇒ se permite por GET (contrato productivo del frontend) y por POST
+// (compatibilidad). El resto de POST son mutaciones de conexión (nunca tocan campañas).
+const GET_PATHS = new Set(['connection', 'accounts']);
 const POST_PATHS = new Set(['oauth/start', 'accounts', 'select-account', 'refresh', 'disconnect']);
 
 function cabecerasDe(req: Request): Record<string, string> {
