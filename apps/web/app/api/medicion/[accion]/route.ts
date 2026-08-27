@@ -25,6 +25,7 @@ const POST_ACCIONES = new Set([
   'envelope',
   'envelope-approve',
   'envelope-revoke',
+  'canary-execute',
 ]);
 
 /**

@@ -62,3 +62,16 @@ export class GoogleAdsRealMutatePort implements GoogleAdsMutatePort {
     return this.client.aplicar({ customerId: payload.customerId, operation: payload.operation, resourceType: payload.resourceType, fields });
   }
 }
+
+/**
+ * Puerto de escritura NO CONFIGURADO (fail-closed). Se usa mientras el cliente Google de ESCRITURA no esté
+ * cableado (barrera cerrada del canary). Nunca debe invocarse — el gate SUPERVISED_REAL=false bloquea antes;
+ * si aun así el motor lo llamara, falla cerrado (jamás una escritura silenciosa).
+ */
+export class PuertoEscrituraNoConfigurada implements GoogleAdsMutatePort {
+  public calls = 0;
+  async mutate(): Promise<{ resourceName: string }> {
+    this.calls += 1;
+    throw new Error('PROVIDER_WRITE_NOT_CONFIGURED');
+  }
+}

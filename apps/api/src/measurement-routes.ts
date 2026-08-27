@@ -35,9 +35,11 @@ import { correrShadow, evaluarGateEnvelope, evaluarCompatibilidadMaterial, detal
 import { fingerprintsDelPlan } from './campana/material-fingerprint';
 import { ledgerCero } from './campana/financial-ledger';
 import { ResourceBindingService } from './campana/resource-binding';
+import { ejecutarCanary } from './campana/canary-execution';
+import { PuertoEscrituraNoConfigurada } from './campana/google-ads-real-port';
 import { getRecursoGoogleAds } from './plataforma';
 import { AUTONOMOUS_REAL } from '@soec/cia';
-import { contextoDe } from './superficie-auth';
+import { contextoDe, permisosDe } from './superficie-auth';
 import {
   bindExperienciaReal,
   type ExperienciaReal,
@@ -484,6 +486,33 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       return reply.send({ ...base, intents: r.intents.map((it) => detalleIntent(it, fps, envelope.currency)), shadowAudit: auditoriaShadowDerivada(r) });
     }
     return reply.send(base);
+  });
+
+  // CANARY REAL — entry point autenticado del ejecutor Phase2B (wiring mínimo). Protegido por TODOS los gates
+  // existentes + CONTEXTO fijo (org/envelope/planHash/customerId). En este estado SUPERVISED_REAL=false ⇒ DENY
+  // ANTES de tocar el proveedor: 0 provider mutate, 0 bindings, 0 gasto. NO se activa el canary en este bloque.
+  app.post('/medicion/canary-execute', async (req, reply) => {
+    const { ctx: c, org } = real(req, 'autonomia-ads'); // auth + binding (fail-closed → 401/403)
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    const envelope = await envelopeSvc.leerUltimo(org);
+    const plan = (await campaignOperator.leerUltimo(org))?.plan ?? null;
+    const snap = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(org)));
+    const ledger = ledgerCero(envelope?.totalCap ?? 0, envelope?.experimentBudget ?? 0, snap?.cost ?? 0);
+    const { prov } = providerYFinancieroDe(org);
+    const flags = flagsEjecucion(process.env, AUTONOMOUS_REAL);
+    let customerId = 'PENDING';
+    try { customerId = getRecursoGoogleAds(org).customerId; } catch { /* org sin recurso: customerId placeholder ⇒ CUSTOMER_ID_MISMATCH */ }
+    const bindings = await bindingSvc.listar(org);
+    // Puerto de ESCRITURA no configurado (barrera cerrada): con SUPERVISED_REAL=false nunca se invoca; si el gate
+    // lo permitiera, falla cerrado. El cliente Google de escritura se cabla en el bloque 2/2 (canary real).
+    const r = await ejecutarCanary({ org, customerId, envelope, plan, ledger, prov, flags, port: new PuertoEscrituraNoConfigurada(), bindingsExistentes: bindings, ahora: new Date().toISOString() });
+    // Respuesta auditable SIN payloads de proveedor: sólo decisión/razón/scope y contadores de seguridad.
+    return reply.send({
+      organizationId: org, decision: r.decision, reason: r.reason, executionTriggerScope: r.trigger,
+      envelopeId: r.envelopeId, planHash: r.planHash,
+      providerMutateCalls: r.providerMutateCalls, providerBindings: r.providerBindingsCreated,
+      supervisedReal: flags.supervisedReal, autonomousReal: flags.autonomousReal,
+    });
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {
