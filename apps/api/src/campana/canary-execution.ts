@@ -56,15 +56,22 @@ export interface ResultadoCanary {
   readonly trigger: 'FULL_APPROVED_PLAN';
   readonly envelopeId: string | null;
   readonly planHash: string | null;
-  readonly providerMutateCalls: number;
-  readonly providerBindingsCreated: number;
+  /** INTENTOS de escritura al proveedor (se incrementa ANTES del mutate; NO implica éxito). */
+  readonly providerMutateAttempts: number;
+  /** ÉXITOS reales: recursos creados en el proveedor (== bindings). El número honesto de "acciones al proveedor". */
+  readonly providerActionsSucceeded: number;
+  readonly intentsExecuted: number;         // == providerActionsSucceeded
+  readonly intentsFailed: number;           // llegaron al provider pero el write falló (PROVIDER_MUTATE_FAILED)
+  readonly intentsBlocked: number;          // bloqueados por gate/material/ownership/dependencia
+  readonly intentsSkippedIdempotent: number;
   readonly execution: ResultadoEjecucionReal | null;
 }
 
 const deny = (reason: CanaryDenyReason, envelope: AuthorizedExecutionEnvelope | null): ResultadoCanary => ({
   decision: 'DENY', reason, trigger: 'FULL_APPROVED_PLAN',
   envelopeId: envelope?.id ?? null, planHash: envelope?.planHash ?? null,
-  providerMutateCalls: 0, providerBindingsCreated: 0, execution: null,
+  providerMutateAttempts: 0, providerActionsSucceeded: 0,
+  intentsExecuted: 0, intentsFailed: 0, intentsBlocked: 0, intentsSkippedIdempotent: 0, execution: null,
 });
 
 /**
@@ -93,9 +100,16 @@ export async function ejecutarCanary(e: EntradasCanary, contexto: ContextoCanary
     plan: e.plan, env: e.envelope, intents, ledger: e.ledger, prov: e.prov, flags: e.flags,
     port: e.port, bindingsExistentes: e.bindingsExistentes ?? [], ahora: e.ahora,
   });
+  // Desglose HONESTO: los "éxitos" son los bindings (recursos realmente creados), NO los intentos de mutate.
+  const ejec = r.intents;
+  const intentsExecuted = ejec.filter((i) => i.status === 'EXECUTED').length;
+  const intentsSkippedIdempotent = ejec.filter((i) => i.status === 'SKIPPED_IDEMPOTENT').length;
+  const intentsFailed = ejec.filter((i) => i.status === 'BLOCKED' && i.reason === 'PROVIDER_MUTATE_FAILED').length;
+  const intentsBlocked = ejec.filter((i) => i.status === 'BLOCKED' && i.reason !== 'PROVIDER_MUTATE_FAILED').length;
   return {
     decision: 'EXECUTED', reason: null, trigger: 'FULL_APPROVED_PLAN',
     envelopeId: e.envelope.id, planHash: e.envelope.planHash,
-    providerMutateCalls: r.providerMutateCalls, providerBindingsCreated: r.bindingsCreated.length, execution: r,
+    providerMutateAttempts: r.providerMutateCalls, providerActionsSucceeded: r.bindingsCreated.length,
+    intentsExecuted, intentsFailed, intentsBlocked, intentsSkippedIdempotent, execution: r,
   };
 }

@@ -94,9 +94,12 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
     try {
       const r = await fetch('/api/medicion/canary-execute', { method: 'POST', headers: { 'content-type': 'application/json', ...cabecerasOrg(org) }, body: '{}' });
       if (!r.ok) { setEjecMsg('Resultado ambiguo. NO REINTENTAR. Verificar estado.'); return; }
-      const j = (await r.json()) as { decision?: string; reason?: string | null; providerMutateCalls?: number };
+      const j = (await r.json()) as { decision?: string; outcome?: string; reason?: string | null; providerActionsSucceeded?: number; intentsFailed?: number };
+      const exitos = j.providerActionsSucceeded ?? 0;
+      // ÉXITO real = recursos creados en el proveedor (no "intentos"). "enviada" ≠ "ejecutada con éxito".
       if (j.decision === 'DENY') setEjecMsg(`Ejecución no realizada (${j.reason ?? 'bloqueada'}). Sin gasto. No reintentar.`);
-      else if (j.decision === 'EXECUTED') setEjecMsg(`Ejecución enviada · acciones al proveedor: ${j.providerMutateCalls ?? '—'}. No volver a ejecutar.`);
+      else if (j.decision === 'EXECUTED' && exitos > 0) setEjecMsg(`Ejecución realizada · ${exitos} recurso(s) creado(s) en el proveedor. No volver a ejecutar.`);
+      else if (j.decision === 'EXECUTED') setEjecMsg(`Enviada, pero NINGUNA acción se completó en el proveedor (0 creados${(j.intentsFailed ?? 0) > 0 ? `, ${j.intentsFailed} fallida(s)` : ''}). Sin gasto. Verificar estado. NO REINTENTAR.`);
       else setEjecMsg('Resultado ambiguo. NO REINTENTAR. Verificar estado.');
     } catch {
       setEjecMsg('Resultado ambiguo. NO REINTENTAR. Verificar estado.');

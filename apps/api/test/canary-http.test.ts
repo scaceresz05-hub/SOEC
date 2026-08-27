@@ -70,7 +70,7 @@ describe('POST /medicion/canary-execute (entry point)', () => {
     expect(b.decision).toBe('DENY'); // el envelope del test (3 términos) ≠ env:...:842a5165b22c462d ⇒ ENVELOPE_ID_MISMATCH
     expect(b.reason).toBe('ENVELOPE_ID_MISMATCH');
     expect(b.executionTriggerScope).toBe('FULL_APPROVED_PLAN');
-    expect(b.providerMutateCalls).toBe(0);
+    expect(b.providerMutateAttempts).toBe(0);
     expect(b.providerBindings).toBe(0);
     expect(b.supervisedReal).toBe(false);
     expect(b.autonomousReal).toBe(false);
@@ -116,7 +116,7 @@ describe('operationalMode ⇒ supervisedReal (read model + executor, misma fuent
     expect(b.supervisedReal).toBe(true);       // la misma fuente llega al executor
     expect(b.decision).toBe('DENY');            // pero DENY por contexto (envelope de test ≠ canónico)
     expect(b.reason).toBe('ENVELOPE_ID_MISMATCH');
-    expect(b.providerMutateCalls).toBe(0);      // 0 writes
+    expect(b.providerMutateAttempts).toBe(0);      // 0 writes
     await app.close();
   });
   it('G: el body NO puede falsificar el modo (sólo cuenta la cabecera del gateway)', async () => {

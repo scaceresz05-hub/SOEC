@@ -55,8 +55,8 @@ describe('CANARY entry point — contexto y gate maestro', () => {
     const r = await ejecutarCanary(entradas, CTX);
     expect(r.decision).toBe('DENY');
     expect(r.reason).toBe('SUPERVISED_REAL_DISABLED');
-    expect(r.providerMutateCalls).toBe(0);
-    expect(r.providerBindingsCreated).toBe(0);
+    expect(r.providerMutateAttempts).toBe(0);
+    expect(r.providerActionsSucceeded).toBe(0);
     expect(client.ops.length).toBe(0);
     // B+D: el ejecutor recibe el GoogleAdsRealMutatePort REAL (no un placeholder) y su mutate se invoca 0 veces.
     expect(entradas.port).toBeInstanceOf(GoogleAdsRealMutatePort);
@@ -71,7 +71,7 @@ describe('CANARY entry point — contexto y gate maestro', () => {
     const r2 = await ejecutarCanary(entradas, { ...CTX, planHash: 'deadbeefdeadbeef' });
     expect(r2.decision).toBe('DENY');
     expect(r2.reason).toBe('PLAN_HASH_MISMATCH');
-    expect(r1.providerMutateCalls + r2.providerMutateCalls).toBe(0);
+    expect(r1.providerMutateAttempts + r2.providerMutateAttempts).toBe(0);
   });
 
   it('org/customer incorrectos ⇒ DENY', async () => {
@@ -95,7 +95,7 @@ describe('CANARY entry point — con gates abiertos delega en el ejecutor Phase2
     const r = await ejecutarCanary(entradas, CTX);
     expect(r.decision).toBe('EXECUTED');
     expect(r.trigger).toBe('FULL_APPROVED_PLAN');
-    expect(r.providerMutateCalls).toBeGreaterThan(0);
+    expect(r.providerMutateAttempts).toBeGreaterThan(0);
     expect(client.ops[0]!.operation).toBe('campaign_budget.create'); // budget antes que campaign (mismo translator)
     const audit = r.execution!.audit;
     const iRes = audit.findIndex((e) => e.type === 'FINANCIAL_RESERVATION_CREATED');
@@ -117,7 +117,7 @@ describe('CANARY entry point — con gates abiertos delega en el ejecutor Phase2
     const r1 = await ejecutarCanary(primero.entradas, CTX);
     const segundo = base({ bindingsExistentes: r1.execution!.bindingsCreated });
     const r2 = await ejecutarCanary(segundo.entradas, CTX);
-    expect(r2.providerMutateCalls).toBe(0);
+    expect(r2.providerMutateAttempts).toBe(0);
     expect(segundo.client.ops.length).toBe(0);
     expect(r2.execution!.intents.every((x) => x.status === 'SKIPPED_IDEMPOTENT')).toBe(true);
   });
@@ -131,10 +131,15 @@ describe('CANARY entry point — con gates abiertos delega en el ejecutor Phase2
     expect(JSON.stringify(client.ops).toLowerCase()).not.toContain('dailybudget');
   });
 
-  it('puerto de escritura NO configurado falla cerrado si el gate lo permitiera', async () => {
-    const { entradas } = base({ port: new PuertoEscrituraNoConfigurada() });
+  it('write falla ⇒ INTENTO ≠ ÉXITO (el bug de "acciones al proveedor: 1"): attempts≥1 pero succeeded=0', async () => {
+    const { entradas } = base({ port: new PuertoEscrituraNoConfigurada() }); // el mutate lanza (write no configurado)
     const r = await ejecutarCanary(entradas, CTX);
-    // gates abiertos + puerto no configurado ⇒ cada intent BLOCKED por PROVIDER_MUTATE_FAILED; 0 bindings, 0 gasto.
+    // gates abiertos + puerto que falla ⇒ CREATE_CAMPAIGN BLOCKED por PROVIDER_MUTATE_FAILED; 0 recursos, 0 gasto.
+    expect(r.decision).toBe('EXECUTED');                    // el executor CORRIÓ…
+    expect(r.providerMutateAttempts).toBeGreaterThanOrEqual(1); // …intentó 1 escritura…
+    expect(r.providerActionsSucceeded).toBe(0);             // …pero NINGUNA se completó (== bindings)
+    expect(r.intentsExecuted).toBe(0);
+    expect(r.intentsFailed).toBeGreaterThanOrEqual(1);
     expect(r.execution!.bindingsCreated.length).toBe(0);
     expect(r.execution!.intents.find((x) => x.actionType === 'CREATE_CAMPAIGN')!.reason).toBe('PROVIDER_MUTATE_FAILED');
   });

@@ -515,11 +515,19 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const port = construirPuertoEscrituraGoogleAds(process.env, org, c) ?? new PuertoEscrituraNoConfigurada();
     const realProviderWired = port instanceof GoogleAdsRealMutatePort;
     const r = await ejecutarCanary({ org, customerId, envelope, plan, ledger, prov, flags, port, bindingsExistentes: bindings, ahora: new Date().toISOString() });
-    // Respuesta auditable SIN payloads de proveedor: sólo decisión/razón/scope y contadores de seguridad.
+    // OUTCOME HONESTO: éxito real SÓLO si se crearon recursos en el proveedor (providerActionsSucceeded>0). Un
+    // `decision=EXECUTED` con 0 éxitos y N fallidos = el executor corrió pero NADA se completó (write falló).
+    const outcome = r.decision === 'DENY' ? 'DENIED'
+      : r.providerActionsSucceeded > 0 ? 'EXECUTED'
+        : 'NO_ACTION_COMPLETED';
+    // Traza server-side del intento (auditable; sin secretos): el intento real deja registro aunque falle.
+    app.log.info({ ruta: 'canary-execute', org, decision: r.decision, outcome, reason: r.reason, providerMutateAttempts: r.providerMutateAttempts, providerActionsSucceeded: r.providerActionsSucceeded, intentsFailed: r.intentsFailed, intentsBlocked: r.intentsBlocked, supervisedReal: flags.supervisedReal }, 'canary-execute attempt');
+    // Respuesta auditable SIN payloads de proveedor. Distingue INTENTOS de ÉXITOS (no confundir con provider writes).
     return reply.send({
-      organizationId: org, decision: r.decision, reason: r.reason, executionTriggerScope: r.trigger,
+      organizationId: org, decision: r.decision, outcome, reason: r.reason, executionTriggerScope: r.trigger,
       envelopeId: r.envelopeId, planHash: r.planHash, realProviderWired,
-      providerMutateCalls: r.providerMutateCalls, providerBindings: r.providerBindingsCreated,
+      providerMutateAttempts: r.providerMutateAttempts, providerActionsSucceeded: r.providerActionsSucceeded, providerBindings: r.providerActionsSucceeded,
+      intentsExecuted: r.intentsExecuted, intentsFailed: r.intentsFailed, intentsBlocked: r.intentsBlocked, intentsSkippedIdempotent: r.intentsSkippedIdempotent,
       supervisedReal: flags.supervisedReal, autonomousReal: flags.autonomousReal,
     });
   });

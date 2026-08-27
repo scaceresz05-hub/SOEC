@@ -168,6 +168,21 @@ describe('AutorizacionSobre · ejecución humana del plan', () => {
     await waitFor(() => expect(canaryPosts(fn)).toBe(1));
   });
 
+  it('éxito REAL ⇒ mensaje "realizada · N recurso(s)" (sólo con providerActionsSucceeded>0)', async () => {
+    stubEjec(true, { body: { decision: 'EXECUTED', outcome: 'EXECUTED', providerActionsSucceeded: 59 } });
+    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
+    await confirmarYEjecutar();
+    await waitFor(() => expect(screen.getByText(/Ejecución realizada · 59 recurso/)).toBeTruthy());
+  });
+
+  it('EXECUTED con 0 éxitos ⇒ NO se presenta como éxito (el bug "acciones al proveedor: 1")', async () => {
+    stubEjec(true, { body: { decision: 'EXECUTED', outcome: 'NO_ACTION_COMPLETED', providerActionsSucceeded: 0, intentsFailed: 1 } });
+    render(h(AutorizacionSobre, { org: 'org-smileflow' }));
+    await confirmarYEjecutar();
+    await waitFor(() => expect(screen.getByText(/NINGUNA acción se completó/)).toBeTruthy());
+    expect(screen.queryByText(/Ejecución realizada/)).toBeNull(); // NO es un falso éxito
+  });
+
   it('G: 5xx ⇒ resultado ambiguo, sin reintento ni re-habilitación', async () => {
     const fn = stubEjec(true, { status: 500 });
     render(h(AutorizacionSobre, { org: 'org-smileflow' }));
