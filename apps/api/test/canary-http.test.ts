@@ -60,17 +60,19 @@ describe('POST /medicion/canary-execute (entry point)', () => {
     await app.close();
   });
 
-  it('autenticado + business.manage ⇒ LIVE, DENY (envelope no aprobado), 0 provider writes', async () => {
+  it('autenticado + business.manage ⇒ LIVE, DENY fail-closed, 0 provider writes, transporte atómico', async () => {
     const store = new InMemoryEventStore();
     await seed(store);
     const app = buildApp({ store, intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true });
     const res = await app.inject({ method: 'POST', url: '/medicion/canary-execute', headers: AUTH, payload: {} });
     expect(res.statusCode).toBe(200);
     const b = res.json();
-    // El contexto se deriva del envelope VIGENTE (lock exacto envelope↔hash↔plan); el sembrado nace
-    // READY_FOR_HUMAN_APPROVAL ⇒ DENY por estado (no aprobado), fail-closed, sin tocar el proveedor.
+    // Transporte REAL = Google-native atómico. En el entorno de test el write no está configurado ⇒ DENY
+    // fail-closed antes de tocar el proveedor (en prod, con transporte configurado y PILOT, sería SUPERVISED_REAL_DISABLED).
     expect(b.decision).toBe('DENY');
-    expect(b.reason).toBe('ENVELOPE_NOT_APPROVED');
+    expect(b.reason).toBe('GOOGLE_ADS_WRITE_NOT_CONFIGURED');
+    expect(b.transport).toBe('GOOGLE_ADS_SERVICE_MUTATE_ATOMIC');
+    expect(b.providerRequestCount).toBe(0);
     expect(b.executionTriggerScope).toBe('FULL_APPROVED_PLAN');
     expect(b.providerMutateAttempts).toBe(0);
     expect(b.providerBindings).toBe(0);
@@ -130,9 +132,9 @@ describe('operationalMode ⇒ supervisedReal (read model + executor, misma fuent
     const app = await nuevoApp();
     const b = (await app.inject({ method: 'POST', url: '/medicion/canary-execute', headers: { ...AUTH, 'x-operational-mode': 'SUPERVISED_REAL' }, payload: {} })).json();
     expect(b.supervisedReal).toBe(true);       // la misma fuente llega al executor
-    expect(b.decision).toBe('DENY');            // pero DENY por estado: el envelope sembrado no está aprobado
-    expect(b.reason).toBe('ENVELOPE_NOT_APPROVED'); // (ENVELOPE_NOT_APPROVED se evalúa antes del master switch)
-    expect(b.providerMutateAttempts).toBe(0);      // 0 writes
+    expect(b.decision).toBe('DENY');            // pero DENY fail-closed (write no configurado en el test)
+    expect(b.reason).toBe('GOOGLE_ADS_WRITE_NOT_CONFIGURED');
+    expect(b.providerMutateAttempts).toBe(0);      // 0 writes (llamadas MUTATE)
     await app.close();
   });
   it('G: el body NO puede falsificar el modo (sólo cuenta la cabecera del gateway)', async () => {

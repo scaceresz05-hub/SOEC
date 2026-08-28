@@ -47,6 +47,8 @@ export interface ResultadoProveedor {
   readonly errorMessage: string | null;
   /** TODOS los errores de Google en orden (evidencia completa: path, trigger, code, message). */
   readonly googleErrors: readonly GoogleAdsErrorDetalle[];
+  /** Resource names REALES por operación (en orden), para mapear bindings sin fabricar IDs. Vacío en error. */
+  readonly results: readonly { readonly resourceName: string | null }[];
   readonly partialFailure: boolean;
 }
 
@@ -229,8 +231,9 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
     const logBase = { service: 'googleAds:mutate', endpoint: 'googleAds:mutate', customerId, loginCustomerId: this.deps.loginCustomerId, httpStatus: res.status, requestId, validateOnly };
     const texto = await res.text();
     let resultsCount = 0;
+    let results: { resourceName: string | null }[] = [];
     if (res.ok) {
-      try { const j = JSON.parse(texto) as { results?: unknown[] }; resultsCount = Array.isArray(j.results) ? j.results.length : 0; } catch { /* validate ⇒ body vacío/sin results */ }
+      try { const j = JSON.parse(texto) as { results?: Array<{ resourceName?: string }> }; results = Array.isArray(j.results) ? j.results.map((x) => ({ resourceName: x.resourceName ?? null })) : []; resultsCount = results.length; } catch { /* validate ⇒ body vacío/sin results */ }
       this.deps.logger?.({ ...logBase, errorStatus: null, errorCode: null, errorMessage: null, ok: true });
     } else {
       const f = parseGoogleAdsFailure(texto);
@@ -238,9 +241,9 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
       // El GoogleAdsFailure COMPLETO (todos los errores, con fieldPathElements/trigger/path) se devuelve para
       // persistir. El log durable conserva el resumen (status/code/message del primero).
       this.deps.logger?.({ ...logBase, errorStatus: f.status, errorCode: primero?.errorCode ?? null, errorMessage: mensajeSanitizado(primero?.message ?? null), ok: false });
-      return { ok: false, httpStatus: res.status, requestId, validateOnly, operationCount: request.mutateOperations.length, resultsCount: 0, errorStatus: f.status, errorCode: primero?.errorCode ?? null, errorMessage: mensajeSanitizado(primero?.message ?? null), googleErrors: f.googleErrors, partialFailure: false };
+      return { ok: false, httpStatus: res.status, requestId, validateOnly, operationCount: request.mutateOperations.length, resultsCount: 0, errorStatus: f.status, errorCode: primero?.errorCode ?? null, errorMessage: mensajeSanitizado(primero?.message ?? null), googleErrors: f.googleErrors, results: [], partialFailure: false };
     }
-    return { ok: true, httpStatus: res.status, requestId, validateOnly, operationCount: request.mutateOperations.length, resultsCount, errorStatus: null, errorCode: null, errorMessage: null, googleErrors: [], partialFailure: false };
+    return { ok: true, httpStatus: res.status, requestId, validateOnly, operationCount: request.mutateOperations.length, resultsCount, errorStatus: null, errorCode: null, errorMessage: null, googleErrors: [], results, partialFailure: false };
   }
 
   /**

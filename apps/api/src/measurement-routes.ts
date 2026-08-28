@@ -38,10 +38,10 @@ import { correrShadow, evaluarGateEnvelope, evaluarCompatibilidadMaterial, detal
 import { fingerprintsDelPlan } from './campana/material-fingerprint';
 import { ledgerCero } from './campana/financial-ledger';
 import { ResourceBindingService } from './campana/resource-binding';
-import { ejecutarCanary, CONTEXTO_CANARY } from './campana/canary-execution';
+import { CONTEXTO_CANARY } from './campana/canary-execution';
+import { ejecutarCanaryAtomico, TRANSPORT_ATOMICO } from './campana/canary-atomic-execution';
 import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
-import { PuertoEscrituraNoConfigurada, GoogleAdsRealMutatePort } from './campana/google-ads-real-port';
-import { construirPuertoEscrituraGoogleAds, construirClienteEscrituraGoogleAds, resolverGeoRegiones } from './campana/google-ads-write-runtime';
+import { construirClienteEscrituraGoogleAds, resolverGeoRegiones } from './campana/google-ads-write-runtime';
 import { materializarGoogleAdsMutate, ventanaFechasDesdeActivacion, contarOperaciones } from './campana/google-ads-materializer';
 import { GEO_SMILEFLOW_V2, type GeoRegionResuelta } from './campana/geo-policy';
 import { getRecursoGoogleAds } from './plataforma';
@@ -524,44 +524,38 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const flags = derivarFlagsDeModo(modoOperativoDe(req));
     let customerId = 'PENDING';
     try { customerId = getRecursoGoogleAds(org).customerId; } catch { /* org sin recurso: customerId placeholder ⇒ CUSTOMER_ID_MISMATCH */ }
-    const bindings = await bindingSvc.listar(org);
-    // Provider REAL: `GoogleAdsRealMutatePort` (adaptador Phase2B existente) sobre el transporte HTTP de escritura.
-    // Alcanzable SÓLO con SUPERVISED_REAL=true; hoy (flag en false) el ejecutor DENIEGA antes ⇒ jamás se invoca.
-    // Token vía la conexión REAL por tenant (no env). Fallback fail-closed sólo si la org no está configurada.
-    // Se CAPTURAN los logs sanitizados de cada op Google (status/errorCode/request-id) para que el intento quede
-    // DURABLE y consultable (app.log de Railway no es recuperable a posteriori — fue lo que bloqueó el diagnóstico).
+    // TRANSPORTE REAL = Google-native ATÓMICO (idéntico al validado con validateOnly=true): materializarGoogleAdsMutate
+    // → mutarGrafo, UNA sola GoogleAdsService.Mutate (validateOnly=false, partialFailure=false). El camino LEGACY
+    // por-servicio (campaignBudgets:mutate, campaigns:mutate, …) queda estructuralmente FUERA del canary real: aquí
+    // ya NO se construye GoogleAdsRealMutatePort ni ejecutarEnvelopeReal. Fail-closed: el gate financiero/maestro
+    // (SUPERVISED_REAL incluido) corre ANTES del proveedor ⇒ en PILOT, 0 llamadas. Logs sanitizados durables.
     const writeLogs: GoogleAdsWriteLog[] = [];
-    const port = construirPuertoEscrituraGoogleAds(process.env, org, googleAdsComp, { logger: (i) => { app.log.info(i, 'ga-write'); writeLogs.push(i); } }) ?? new PuertoEscrituraNoConfigurada();
-    const realProviderWired = port instanceof GoogleAdsRealMutatePort;
-    // LOCK EXACTO envelope↔hash↔plan: el contexto se resuelve del envelope VIGENTE (no de un hash viejo hardcodeado),
-    // manteniendo los pines de org/customer. Así el executor resuelve el NEW ENVELOPE → NEW PLAN_HASH → NEW PLAN
-    // persistido; la coherencia real la impone `aprobacionVigente` (envelope.planHash === hashPlan(plan)) dentro de
-    // ejecutarCanary. Fail-closed intacto: sin SUPERVISED_REAL, DENIEGA antes de tocar el proveedor.
+    const cliente = construirClienteEscrituraGoogleAds(process.env, org, googleAdsComp, { validateOnly: false, logger: (i) => { app.log.info(i, 'ga-write'); writeLogs.push(i); } });
+    const realTransportReady = cliente !== null;
+    // Contexto derivado del envelope vigente (lock exacto envelope↔hash↔plan; pines org/customer).
     const contextoCanary = { org: CONTEXTO_CANARY.org, customerId: CONTEXTO_CANARY.customerId, envelopeId: envelope?.id ?? CONTEXTO_CANARY.envelopeId, planHash: envelope?.planHash ?? CONTEXTO_CANARY.planHash };
-    const r = await ejecutarCanary({ org, customerId, envelope, plan, ledger, prov, flags, port, bindingsExistentes: bindings, ahora: new Date().toISOString() }, contextoCanary);
-    // OUTCOME HONESTO: éxito real SÓLO si se crearon recursos en el proveedor (providerActionsSucceeded>0). Un
-    // `decision=EXECUTED` con 0 éxitos y N fallidos = el executor corrió pero NADA se completó (write falló).
-    const outcome = r.decision === 'DENY' ? 'DENIED'
-      : r.providerActionsSucceeded > 0 ? 'EXECUTED'
-        : 'NO_ACTION_COMPLETED';
-    // Traza server-side del intento (auditable; sin secretos): el intento real deja registro aunque falle.
-    app.log.info({ ruta: 'canary-execute', org, decision: r.decision, outcome, reason: r.reason, providerMutateAttempts: r.providerMutateAttempts, providerActionsSucceeded: r.providerActionsSucceeded, intentsFailed: r.intentsFailed, intentsBlocked: r.intentsBlocked, supervisedReal: flags.supervisedReal }, 'canary-execute attempt');
-    // PERSISTENCIA DURABLE del intento (event store): errores de Google por op (status/errorCode/request-id),
-    // para diagnosticar un fallo aunque los logs de Railway ya no estén.
+    const r = cliente
+      ? await ejecutarCanaryAtomico({ org, customerId, envelope, plan, ledger, prov, flags, cliente, ahora: new Date().toISOString() }, contextoCanary)
+      : { decision: 'DENY' as const, reason: 'GOOGLE_ADS_WRITE_NOT_CONFIGURED', transport: TRANSPORT_ATOMICO, envelopeId: envelope?.id ?? null, planHash: envelope?.planHash ?? null, providerRequestCount: 0, operationCount: 0, resultsCount: 0, providerSucceeded: 0, providerFailed: 0, bindings: [] as { operationIndex: number; resourceType: string; resourceName: string | null }[], requestId: null, googleErrors: [], supervisedReal: flags.supervisedReal, autonomousReal: flags.autonomousReal };
+    const outcome = r.decision === 'DENY' ? 'DENIED' : r.decision === 'EXECUTED' ? 'EXECUTED' : 'PROVIDER_FAILED';
+    app.log.info({ ruta: 'canary-execute', org, decision: r.decision, outcome, reason: r.reason, transport: r.transport, providerRequestCount: r.providerRequestCount, operationCount: r.operationCount, providerSucceeded: r.providerSucceeded, providerFailed: r.providerFailed, supervisedReal: flags.supervisedReal }, 'canary-execute attempt');
+    // PERSISTENCIA DURABLE del intento real (event store): transporte, requestId y googleErrors sanitizados.
     if (writeLogs.length > 0) {
       const sid = `canary-attempts:${org}`;
       const at = new Date().toISOString();
       const cw = ctxAppend(c); // events:append (sin esto el append lanzaba y se tragaba)
       const prev = await store.readStream(cw, sid);
-      await store.append(cw, sid, prev.length, [{ type: 'canary-attempt', payload: { at, decision: r.decision, outcome, reason: r.reason, writeLogs }, attribution: ATR_CANARY, occurredAt: at }]).catch(() => undefined);
+      await store.append(cw, sid, prev.length, [{ type: 'canary-attempt', payload: { at, decision: r.decision, outcome, reason: r.reason, transport: r.transport, providerRequestCount: r.providerRequestCount, operationCount: r.operationCount, requestId: r.requestId, googleErrors: r.googleErrors, writeLogs }, attribution: ATR_CANARY, occurredAt: at }]).catch(() => undefined);
     }
-    // Respuesta auditable SIN secretos. Distingue INTENTOS de ÉXITOS + expone el error de Google por op (providerAttempts).
+    // Respuesta auditable SIN secretos. UN solo transporte atómico; distingue llamada MUTATE de éxitos reales.
     return reply.send({
-      organizationId: org, decision: r.decision, outcome, reason: r.reason, executionTriggerScope: r.trigger,
-      envelopeId: r.envelopeId, planHash: r.planHash, realProviderWired,
-      providerMutateAttempts: r.providerMutateAttempts, providerActionsSucceeded: r.providerActionsSucceeded, providerBindings: r.providerActionsSucceeded,
-      intentsExecuted: r.intentsExecuted, intentsFailed: r.intentsFailed, intentsBlocked: r.intentsBlocked, intentsSkippedIdempotent: r.intentsSkippedIdempotent,
-      providerAttempts: writeLogs,
+      organizationId: org, decision: r.decision, outcome, reason: r.reason, executionTriggerScope: 'FULL_APPROVED_PLAN',
+      envelopeId: r.envelopeId, planHash: r.planHash, realTransportReady,
+      transport: r.transport, providerRequestCount: r.providerRequestCount, operationCount: r.operationCount,
+      // Compat: providerMutateAttempts = llamadas MUTATE (0/1). providerBindings = recursos reales creados.
+      providerMutateAttempts: r.providerRequestCount, providerActionsSucceeded: r.providerSucceeded, providerBindings: r.bindings.filter((b) => b.resourceName).length,
+      resultsCount: r.resultsCount, providerSucceeded: r.providerSucceeded, providerFailed: r.providerFailed,
+      requestId: r.requestId, googleErrors: r.googleErrors, providerAttempts: writeLogs,
       supervisedReal: flags.supervisedReal, autonomousReal: flags.autonomousReal,
     });
   });
@@ -738,6 +732,8 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       newPlanId: envelope.planId, newPlanHash: envelope.planHash, newPlanHashDiffersFromOld: envelope.planHash !== CONTEXTO_CANARY.planHash,
       newEnvelopeId: envelope.id, newEnvelopeStatus: envelope.status, executionAllowed: 'DENY',
       oldEnvelopeId: CONTEXTO_CANARY.envelopeId, oldEnvelopeExecutable: false,
+      // PROOF read-only del transporte real (gate de seguridad: no volver a ejecutar código distinto al validado).
+      realExecutionTransport: TRANSPORT_ATOMICO, realProviderRequestCountExpected: 1, realOperationCount: cuenta?.operationCount ?? null, legacyPerServiceRealPath: 'DISABLED', realPlanHash: envelope.planHash,
       deniedKeywordsPresent: KEYWORDS_DENEGADAS_POLITICA_GOOGLE.filter((d) => plan.activeKeywords.some((k) => k.text.trim().toLowerCase() === d.toLowerCase())),
       ...(cuenta ?? {}),
       geoPositives: GEO_SMILEFLOW_V2.regiones.filter((r) => !r.negativa).map((r) => r.nombre), geoNegative: GEO_SMILEFLOW_V2.regiones.filter((r) => r.negativa).map((r) => r.nombre), positiveGeoTargetType: GEO_SMILEFLOW_V2.positiveGeoTargetType,
