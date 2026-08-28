@@ -12,6 +12,7 @@ const GET_ACCIONES = new Set([
   'envelope',
   'envelope-audit',
   'execution-plan',
+  'canary-attempts',
 ]);
 const POST_ACCIONES = new Set([
   'preparar',

@@ -72,10 +72,24 @@ describe('POST /medicion/canary-execute (entry point)', () => {
     expect(b.executionTriggerScope).toBe('FULL_APPROVED_PLAN');
     expect(b.providerMutateAttempts).toBe(0);
     expect(b.providerBindings).toBe(0);
+    expect(Array.isArray(b.providerAttempts)).toBe(true);
+    expect(b.providerAttempts.length).toBe(0); // DENY por contexto ⇒ el transporte nunca se invocó
     expect(b.supervisedReal).toBe(false);
     expect(b.autonomousReal).toBe(false);
     // sin secretos ni payloads de proveedor en la respuesta
     expect(/token|secret|refresh|bearer|developer/i.test(res.body)).toBe(false);
+    await app.close();
+  });
+
+  it('GET /medicion/canary-attempts ⇒ 200 con attempts (durable; vacío sin intentos)', async () => {
+    const store = new InMemoryEventStore();
+    await seed(store);
+    const app = buildApp({ store, intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true });
+    const res = await app.inject({ method: 'GET', url: '/medicion/canary-attempts', headers: AUTH });
+    expect(res.statusCode).toBe(200);
+    expect(Array.isArray(res.json().attempts)).toBe(true);
+    // sin business.manage ⇒ 403
+    expect((await app.inject({ method: 'GET', url: '/medicion/canary-attempts', headers: { ...AUTH, 'x-permissions': '' } })).statusCode).toBe(403);
     await app.close();
   });
 });

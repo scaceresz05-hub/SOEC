@@ -11,7 +11,7 @@
  * NO hay endpoint para gastar, publicar públicamente ni saltar la autorización.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { ActorId, OrganizationId, type EventStore, type RequestContext } from '@soec/contracts';
+import { ActorId, OrganizationId, type Attribution, type EventStore, type RequestContext } from '@soec/contracts';
 import { ObservacionService } from '@soec/motor-medicion';
 import { MeasurementExperience } from './measurement-experience';
 import { construirPanel, type ObsPanel, type Sync } from './ingesta/panel-resultados';
@@ -40,6 +40,7 @@ import { ResourceBindingService } from './campana/resource-binding';
 import { ejecutarCanary, CONTEXTO_CANARY } from './campana/canary-execution';
 import { construirActionPlan } from './campana/execution-intent';
 import type { GoogleMutationPayload, CampaignTotalBudgetPayload } from './campana/google-translator';
+import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
 import { PuertoEscrituraNoConfigurada, GoogleAdsRealMutatePort } from './campana/google-ads-real-port';
 import { construirPuertoEscrituraGoogleAds } from './campana/google-ads-write-runtime';
 import { getRecursoGoogleAds } from './plataforma';
@@ -69,6 +70,8 @@ function real(
   };
   return { ctx, org: binding.organizationId, binding };
 }
+
+const ATR_CANARY: Attribution = { source: 'canary-execute', purpose: 'intento real de escritura Google Ads (auditable, sin secretos)', assumptions: [], claimType: 'observational', regime: 'empirical', uncertainty: 'baja' };
 
 export function registerMeasurementRoutes(app: FastifyInstance, store: EventStore, pool?: Pool, googleAdsComp?: ComponentesFlujoGoogleAds | null): void {
   const exp = new MeasurementExperience(store);
@@ -514,7 +517,10 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     // Provider REAL: `GoogleAdsRealMutatePort` (adaptador Phase2B existente) sobre el transporte HTTP de escritura.
     // Alcanzable SÓLO con SUPERVISED_REAL=true; hoy (flag en false) el ejecutor DENIEGA antes ⇒ jamás se invoca.
     // Token vía la conexión REAL por tenant (no env). Fallback fail-closed sólo si la org no está configurada.
-    const port = construirPuertoEscrituraGoogleAds(process.env, org, googleAdsComp, { logger: (i) => app.log.info(i, 'ga-write') }) ?? new PuertoEscrituraNoConfigurada();
+    // Se CAPTURAN los logs sanitizados de cada op Google (status/errorCode/request-id) para que el intento quede
+    // DURABLE y consultable (app.log de Railway no es recuperable a posteriori — fue lo que bloqueó el diagnóstico).
+    const writeLogs: GoogleAdsWriteLog[] = [];
+    const port = construirPuertoEscrituraGoogleAds(process.env, org, googleAdsComp, { logger: (i) => { app.log.info(i, 'ga-write'); writeLogs.push(i); } }) ?? new PuertoEscrituraNoConfigurada();
     const realProviderWired = port instanceof GoogleAdsRealMutatePort;
     const r = await ejecutarCanary({ org, customerId, envelope, plan, ledger, prov, flags, port, bindingsExistentes: bindings, ahora: new Date().toISOString() });
     // OUTCOME HONESTO: éxito real SÓLO si se crearon recursos en el proveedor (providerActionsSucceeded>0). Un
@@ -524,14 +530,31 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
         : 'NO_ACTION_COMPLETED';
     // Traza server-side del intento (auditable; sin secretos): el intento real deja registro aunque falle.
     app.log.info({ ruta: 'canary-execute', org, decision: r.decision, outcome, reason: r.reason, providerMutateAttempts: r.providerMutateAttempts, providerActionsSucceeded: r.providerActionsSucceeded, intentsFailed: r.intentsFailed, intentsBlocked: r.intentsBlocked, supervisedReal: flags.supervisedReal }, 'canary-execute attempt');
-    // Respuesta auditable SIN payloads de proveedor. Distingue INTENTOS de ÉXITOS (no confundir con provider writes).
+    // PERSISTENCIA DURABLE del intento (event store): errores de Google por op (status/errorCode/request-id),
+    // para diagnosticar un fallo aunque los logs de Railway ya no estén.
+    if (writeLogs.length > 0) {
+      const sid = `canary-attempts:${org}`;
+      const at = new Date().toISOString();
+      const prev = await store.readStream(c, sid);
+      await store.append(c, sid, prev.length, [{ type: 'canary-attempt', payload: { at, decision: r.decision, outcome, reason: r.reason, writeLogs }, attribution: ATR_CANARY, occurredAt: at }]).catch(() => undefined);
+    }
+    // Respuesta auditable SIN secretos. Distingue INTENTOS de ÉXITOS + expone el error de Google por op (providerAttempts).
     return reply.send({
       organizationId: org, decision: r.decision, outcome, reason: r.reason, executionTriggerScope: r.trigger,
       envelopeId: r.envelopeId, planHash: r.planHash, realProviderWired,
       providerMutateAttempts: r.providerMutateAttempts, providerActionsSucceeded: r.providerActionsSucceeded, providerBindings: r.providerActionsSucceeded,
       intentsExecuted: r.intentsExecuted, intentsFailed: r.intentsFailed, intentsBlocked: r.intentsBlocked, intentsSkippedIdempotent: r.intentsSkippedIdempotent,
+      providerAttempts: writeLogs,
       supervisedReal: flags.supervisedReal, autonomousReal: flags.autonomousReal,
     });
+  });
+
+  // Lectura DURABLE de los intentos de write reales (errores de Google sanitizados). Auth + business.manage.
+  app.get('/medicion/canary-attempts', async (req, reply) => {
+    const { ctx: c, org } = real(req, 'autonomia-ads');
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    const eventos = await store.readStream(c, `canary-attempts:${org}`);
+    return reply.send({ organizationId: org, attempts: eventos.filter((e) => e.type === 'canary-attempt').map((e) => e.payload) });
   });
 
   // DIAGNÓSTICO SEGURO (validate_only): valida contra Google la PRIMERA operación real (campaign_budget.create)
@@ -553,14 +576,16 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const budget = (cc?.providerPayload?.fields as { budget?: CampaignTotalBudgetPayload } | undefined)?.budget;
     if (!budget) return reply.send({ ok: false, error: 'NO_BUDGET_OPERATION' });
     const budgetPayload: GoogleMutationPayload = { customerId, operation: budget.operation, resourceType: budget.resourceType, fields: { period: budget.period, totalAmountMicros: budget.totalAmountMicros, explicitlyShared: budget.explicitlyShared } };
-    const port = construirPuertoEscrituraGoogleAds(process.env, org, googleAdsComp, { validateOnly: true, logger: (i) => app.log.info(i, 'ga-write-validate') });
+    const attempts: GoogleAdsWriteLog[] = [];
+    const port = construirPuertoEscrituraGoogleAds(process.env, org, googleAdsComp, { validateOnly: true, logger: (i) => { app.log.info(i, 'ga-write-validate'); attempts.push(i); } });
     if (!port) return reply.send({ ok: false, error: 'GOOGLE_ADS_WRITE_NOT_CONFIGURED' });
     try {
       await port.mutate(budgetPayload); // validate_only ⇒ Google valida, NO crea
-      return reply.send({ ok: true, validateOnly: true, firstOperation: 'campaign_budget.create', result: 'VALIDATE_ONLY_OK', totalAmountMicros: budget.totalAmountMicros });
+      // NOTA: valida SÓLO campaign_budget.create (la 1ª op). campaign.create (2ª op del canary real) NO se valida aquí.
+      return reply.send({ ok: true, validateOnly: true, firstOperation: 'campaign_budget.create', result: 'VALIDATE_ONLY_OK', totalAmountMicros: budget.totalAmountMicros, providerAttempts: attempts });
     } catch (e) {
       // El mensaje del transporte lleva HTTP status + errorCode de Google + request-id (sin secretos).
-      return reply.send({ ok: false, validateOnly: true, firstOperation: 'campaign_budget.create', error: e instanceof Error ? e.message : String(e) });
+      return reply.send({ ok: false, validateOnly: true, firstOperation: 'campaign_budget.create', error: e instanceof Error ? e.message : String(e), providerAttempts: attempts });
     }
   });
 
