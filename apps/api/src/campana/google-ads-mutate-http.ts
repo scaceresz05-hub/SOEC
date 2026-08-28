@@ -233,7 +233,22 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
     let resultsCount = 0;
     let results: { resourceName: string | null }[] = [];
     if (res.ok) {
-      try { const j = JSON.parse(texto) as { results?: Array<{ resourceName?: string }> }; results = Array.isArray(j.results) ? j.results.map((x) => ({ resourceName: x.resourceName ?? null })) : []; resultsCount = results.length; } catch { /* validate ⇒ body vacío/sin results */ }
+      // La respuesta del AGGREGATE `googleAds:mutate` es `mutateOperationResponses[]` (una por operación, en orden),
+      // cada una con un resultado por-TIPO (campaignResult/campaignBudgetResult/…) que lleva `resourceName`. NO es
+      // `results[]` (ése es el formato de los `:mutate` POR-SERVICIO). Leer el campo equivocado dejaba 0 recursos
+      // ⇒ "0 creados" pese a HTTP 200. Se soporta `results[]` como fallback para el transporte por-servicio.
+      try {
+        const j = JSON.parse(texto) as { mutateOperationResponses?: Array<Record<string, unknown>>; results?: Array<{ resourceName?: string }> };
+        if (Array.isArray(j.mutateOperationResponses)) {
+          results = j.mutateOperationResponses.map((r) => {
+            const inner = Object.values(r).find((v) => v && typeof v === 'object' && 'resourceName' in (v as object)) as { resourceName?: string } | undefined;
+            return { resourceName: inner?.resourceName ?? null };
+          });
+        } else if (Array.isArray(j.results)) {
+          results = j.results.map((x) => ({ resourceName: x.resourceName ?? null }));
+        }
+        resultsCount = results.filter((x) => x.resourceName).length; // recursos REALES creados (con resourceName)
+      } catch { /* validate ⇒ body vacío/sin responses */ }
       this.deps.logger?.({ ...logBase, errorStatus: null, errorCode: null, errorMessage: null, ok: true });
     } else {
       const f = parseGoogleAdsFailure(texto);

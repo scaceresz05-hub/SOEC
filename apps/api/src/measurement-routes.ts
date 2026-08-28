@@ -40,6 +40,7 @@ import { ledgerCero } from './campana/financial-ledger';
 import { ResourceBindingService } from './campana/resource-binding';
 import { CONTEXTO_CANARY } from './campana/canary-execution';
 import { ejecutarCanaryAtomico, TRANSPORT_ATOMICO } from './campana/canary-atomic-execution';
+import { reconciliarBindings } from './campana/canary-reconciliation';
 import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
 import { construirClienteEscrituraGoogleAds, resolverGeoRegiones } from './campana/google-ads-write-runtime';
 import { materializarGoogleAdsMutate, ventanaFechasDesdeActivacion, contarOperaciones } from './campana/google-ads-materializer';
@@ -539,25 +540,48 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       : { decision: 'DENY' as const, reason: 'GOOGLE_ADS_WRITE_NOT_CONFIGURED', transport: TRANSPORT_ATOMICO, envelopeId: envelope?.id ?? null, planHash: envelope?.planHash ?? null, providerRequestCount: 0, operationCount: 0, resultsCount: 0, providerSucceeded: 0, providerFailed: 0, bindings: [] as { operationIndex: number; resourceType: string; resourceName: string | null }[], requestId: null, googleErrors: [], supervisedReal: flags.supervisedReal, autonomousReal: flags.autonomousReal };
     const outcome = r.decision === 'DENY' ? 'DENIED' : r.decision === 'EXECUTED' ? 'EXECUTED' : 'PROVIDER_FAILED';
     app.log.info({ ruta: 'canary-execute', org, decision: r.decision, outcome, reason: r.reason, transport: r.transport, providerRequestCount: r.providerRequestCount, operationCount: r.operationCount, providerSucceeded: r.providerSucceeded, providerFailed: r.providerFailed, supervisedReal: flags.supervisedReal }, 'canary-execute attempt');
-    // PERSISTENCIA DURABLE del intento real (event store): transporte, requestId y googleErrors sanitizados.
+    // PERSISTENCIA DURABLE del intento real: transporte, requestId, googleErrors Y los resource names REALES por
+    // operación (`bindings`) — sin esto la evidencia del éxito se pierde y no se puede reconstruir (fue el vacío que
+    // dejó irreconciliable el intento del 2026-08-28T14:17:59).
+    const at = new Date().toISOString();
     if (writeLogs.length > 0) {
       const sid = `canary-attempts:${org}`;
-      const at = new Date().toISOString();
       const cw = ctxAppend(c); // events:append (sin esto el append lanzaba y se tragaba)
       const prev = await store.readStream(cw, sid);
-      await store.append(cw, sid, prev.length, [{ type: 'canary-attempt', payload: { at, decision: r.decision, outcome, reason: r.reason, transport: r.transport, providerRequestCount: r.providerRequestCount, operationCount: r.operationCount, requestId: r.requestId, googleErrors: r.googleErrors, writeLogs }, attribution: ATR_CANARY, occurredAt: at }]).catch(() => undefined);
+      await store.append(cw, sid, prev.length, [{ type: 'canary-attempt', payload: { at, decision: r.decision, outcome, reason: r.reason, transport: r.transport, providerRequestCount: r.providerRequestCount, operationCount: r.operationCount, resultsCount: r.resultsCount, requestId: r.requestId, googleErrors: r.googleErrors, bindings: r.bindings, writeLogs }, attribution: ATR_CANARY, occurredAt: at }]).catch(() => undefined);
     }
-    // Respuesta auditable SIN secretos. UN solo transporte atómico; distingue llamada MUTATE de éxitos reales.
+    // RECONCILIACIÓN inline (idempotente, sin Google): un éxito real registra sus providerBindings desde los
+    // resource names REALES devueltos por Google. Un futuro éxito nunca vuelve a mostrar "0 creados".
+    const reconc = r.decision === 'EXECUTED' && envelope ? await reconciliarBindings(bindingSvc, org, envelope, r.bindings, at) : null;
     return reply.send({
       organizationId: org, decision: r.decision, outcome, reason: r.reason, executionTriggerScope: 'FULL_APPROVED_PLAN',
       envelopeId: r.envelopeId, planHash: r.planHash, realTransportReady,
       transport: r.transport, providerRequestCount: r.providerRequestCount, operationCount: r.operationCount,
-      // Compat: providerMutateAttempts = llamadas MUTATE (0/1). providerBindings = recursos reales creados.
-      providerMutateAttempts: r.providerRequestCount, providerActionsSucceeded: r.providerSucceeded, providerBindings: r.bindings.filter((b) => b.resourceName).length,
+      // Compat: providerMutateAttempts = llamadas MUTATE (0/1). providerBindings = recursos reales creados/persistidos.
+      providerMutateAttempts: r.providerRequestCount, providerActionsSucceeded: r.providerSucceeded, providerBindings: reconc?.providerBindingsTotal ?? r.bindings.filter((b) => b.resourceName).length,
       resultsCount: r.resultsCount, providerSucceeded: r.providerSucceeded, providerFailed: r.providerFailed,
+      boundCampaignResourceName: reconc?.boundCampaignResourceName ?? null,
       requestId: r.requestId, googleErrors: r.googleErrors, providerAttempts: writeLogs,
       supervisedReal: flags.supervisedReal, autonomousReal: flags.autonomousReal,
     });
+  });
+
+  // RECONCILIADOR idempotente de un intento exitoso YA persistido (reparación de persistencia, NO ejecución nueva).
+  // Trabaja EXCLUSIVAMENTE sobre evidencia durable (los resource names en el último canary-attempt EXECUTED). NUNCA
+  // llama a Google. Si la evidencia no tiene resource names (intentos previos al fix) ⇒ EVIDENCE_INSUFFICIENT (no
+  // fabrica IDs, no consulta Google). Auth + business.manage + contexto canónico.
+  app.post('/medicion/canary-reconcile', async (req, reply) => {
+    const { ctx: c, org } = real(req, 'autonomia-ads');
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    if (org !== CONTEXTO_CANARY.org) return reply.send({ ok: false, error: 'CONTEXT_ORG_NOT_AUTHORIZED' });
+    const envelope = await envelopeSvc.leerUltimo(org);
+    if (!envelope) return reply.send({ ok: false, error: 'NO_ENVELOPE' });
+    const eventos = await store.readStream(c, `canary-attempts:${org}`);
+    const exitoso = eventos.filter((e) => e.type === 'canary-attempt').map((e) => e.payload as { decision?: string; requestId?: string | null; bindings?: { operationIndex: number; resourceType: string; resourceName: string | null }[] }).filter((p) => p.decision === 'EXECUTED').slice(-1)[0] ?? null;
+    if (!exitoso) return reply.send({ ok: false, error: 'NO_SUCCESSFUL_ATTEMPT', envelopeId: envelope.id, newGoogleWriteCalls: 0 });
+    const ops = exitoso.bindings ?? [];
+    const rec = await reconciliarBindings(bindingSvc, org, envelope, ops, new Date().toISOString());
+    return reply.send({ ...rec, envelopeId: envelope.id, planHash: envelope.planHash, requestId: exitoso.requestId ?? null });
   });
 
   // Lectura DURABLE de los intentos de write reales (errores de Google sanitizados). Auth + business.manage.
@@ -734,6 +758,11 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       oldEnvelopeId: CONTEXTO_CANARY.envelopeId, oldEnvelopeExecutable: false,
       // PROOF read-only del transporte real (gate de seguridad: no volver a ejecutar código distinto al validado).
       realExecutionTransport: TRANSPORT_ATOMICO, realProviderRequestCountExpected: 1, realOperationCount: cuenta?.operationCount ?? null, legacyPerServiceRealPath: 'DISABLED', realPlanHash: envelope.planHash,
+      // Estado reconciliado (read-only): bindings reales del envelope. activatedAt no es una capacidad persistida
+      // del dominio (no se inventa en este bloque). El gasto real observado es 0.
+      providerBindingsCount: (await bindingSvc.listar(org)).filter((b) => b.envelopeId === envelope.id).length,
+      boundCampaignResourceName: (await bindingSvc.listar(org)).find((b) => b.envelopeId === envelope.id && b.entityType === 'campaign')?.providerResourceId ?? null,
+      activatedAt: null, actualSpend: 0,
       deniedKeywordsPresent: KEYWORDS_DENEGADAS_POLITICA_GOOGLE.filter((d) => plan.activeKeywords.some((k) => k.text.trim().toLowerCase() === d.toLowerCase())),
       ...(cuenta ?? {}),
       geoPositives: GEO_SMILEFLOW_V2.regiones.filter((r) => !r.negativa).map((r) => r.nombre), geoNegative: GEO_SMILEFLOW_V2.regiones.filter((r) => r.negativa).map((r) => r.nombre), positiveGeoTargetType: GEO_SMILEFLOW_V2.positiveGeoTargetType,

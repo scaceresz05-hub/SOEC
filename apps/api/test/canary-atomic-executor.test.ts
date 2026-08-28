@@ -52,8 +52,9 @@ function clienteFake(opts: { mutateOk: boolean } = { mutateOk: true }): { client
     // googleAds:mutate
     const body = JSON.parse(init.body as string) as { mutateOperations: unknown[] };
     if (!opts.mutateOk) return { ok: false, status: 400, headers: { get: (k: string) => (k.toLowerCase() === 'request-id' ? 'REQ-FAIL' : null) }, text: async () => JSON.stringify({ error: { status: 'INVALID_ARGUMENT', details: [{ errors: [{ errorCode: { fieldError: 'REQUIRED' }, message: 'x', location: { fieldPathElements: [{ fieldName: 'mutate_operations', index: 1 }] } }] }] } }), json: async () => ({}) };
-    const results = body.mutateOperations.map((_o, i) => ({ resourceName: `customers/${CUSTOMER}/res/${i + 1}` }));
-    return { ok: true, status: 200, headers: { get: (k: string) => (k.toLowerCase() === 'request-id' ? 'REQ-OK' : null) }, text: async () => JSON.stringify({ results }), json: async () => ({ results }) };
+    // Formato REAL del aggregate googleAds:mutate: mutateOperationResponses[] con result por-tipo + resourceName.
+    const mutateOperationResponses = body.mutateOperations.map((op, i) => { const tipo = Object.keys(op as Record<string, unknown>)[0]!.replace(/Operation$/, 'Result'); return { [tipo]: { resourceName: `customers/${CUSTOMER}/res/${i + 1}` } }; });
+    return { ok: true, status: 200, headers: { get: (k: string) => (k.toLowerCase() === 'request-id' ? 'REQ-OK' : null) }, text: async () => JSON.stringify({ mutateOperationResponses }), json: async () => ({ mutateOperationResponses }) };
   }) as unknown as typeof fetch;
   const cliente = new GoogleAdsMutateHttpClient({ resolverAccessToken: async () => 'AT', developerToken: 'DT', loginCustomerId: '1742063041', fetchFn });
   return { cliente, urls, mutateBody: () => (mutateBodyRaw ? (JSON.parse(mutateBodyRaw) as Record<string, unknown>) : null) };

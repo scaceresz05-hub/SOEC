@@ -31,6 +31,7 @@ const POST_ACCIONES = new Set([
   'canary-execute',
   'canary-validate',
   'candidate-finalize',
+  'canary-reconcile',
 ]);
 
 /**

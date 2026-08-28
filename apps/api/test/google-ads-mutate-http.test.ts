@@ -119,6 +119,21 @@ describe('GoogleAdsMutateHttpClient', () => {
     expect(JSON.stringify(r)).not.toMatch(/AT-123|DEV-TOKEN|Bearer/); // J: sin secretos
   });
 
+  it('mutarGrafo SUCCESS: parsea mutateOperationResponses (aggregate) → resource names reales (no "0 creados")', async () => {
+    // La respuesta del aggregate googleAds:mutate NO es results[] sino mutateOperationResponses[] con result por-tipo.
+    const body = { mutateOperationResponses: [
+      { campaignBudgetResult: { resourceName: 'customers/8605539300/campaignBudgets/111' } },
+      { campaignResult: { resourceName: 'customers/8605539300/campaigns/24194332264' } },
+      { adGroupResult: { resourceName: 'customers/8605539300/adGroups/222' } },
+    ] };
+    const f = fakeFetch({ ok: true, status: 200, requestId: 'z4X6', body });
+    const req = { mutateOperations: [{ campaignBudgetOperation: { create: {} } }, { campaignOperation: { create: {} } }, { adGroupOperation: { create: {} } }], partialFailure: false as const };
+    const r = await client({ fetchFn: f.fn as unknown as typeof fetch }).mutarGrafo('8605539300', req);
+    expect(r.ok).toBe(true);
+    expect(r.resultsCount).toBe(3);                         // 3 recursos REALES creados (antes: 0)
+    expect(r.results.map((x) => x.resourceName)).toEqual(['customers/8605539300/campaignBudgets/111', 'customers/8605539300/campaigns/24194332264', 'customers/8605539300/adGroups/222']);
+  });
+
   it('sugerirGeoTargets: parsea geoTargetConstantSuggestions → criterionId/canonicalName/targetType', async () => {
     const f = fakeFetch({ ok: true, status: 200, body: { geoTargetConstantSuggestions: [{ geoTargetConstant: { resourceName: 'geoTargetConstants/20154', id: '20154', name: 'Tarapacá', canonicalName: 'Tarapaca,Chile', targetType: 'Region', countryCode: 'CL', status: 'ENABLED' } }] } });
     const r = await client({ fetchFn: f.fn as unknown as typeof fetch }).sugerirGeoTargets(['Tarapacá'], 'CL');
