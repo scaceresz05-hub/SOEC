@@ -55,13 +55,6 @@ export function decidirMonitorStop(e: EntradaMonitor): DecisionMonitor {
   return { action: 'NOOP', reason: null, firedRuleIds: [], campaignId };
 }
 
-/** IDEMPOTENCIA (PURA): sólo se persiste un STOP nuevo. NOOP no se persiste; un STOP idéntico ya vigente tampoco. */
-export function debePersistir(previa: { action: string; campaignId: string | null; firedRuleIds?: readonly string[] } | null, nueva: DecisionMonitor): boolean {
-  if (nueva.action !== 'STOP_CAMPAIGN') return false;
-  if (previa?.action === 'STOP_CAMPAIGN' && previa.campaignId === nueva.campaignId && (previa.firedRuleIds ?? []).join('+') === nueva.firedRuleIds.join('+')) return false;
-  return true;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Servicio de tick (orquestación I/O fina). Los lectores se INYECTAN ⇒ testable y sin acoplar el loop.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -74,34 +67,71 @@ export interface MetricasCampania {
   readonly snapshotCampaignId: string | null;
 }
 
+/** Resultado sanitizado de una pausa provider (sólo lo necesario; sin secretos). */
+export interface ResultadoPausaProvider { readonly ok: boolean; readonly requestId: string | null; readonly resourceName: string | null; readonly errorStatus: string | null; readonly errorMessage: string | null }
+
+export type OutcomeStop = 'NOOP' | 'ALREADY_STOPPED' | 'PAUSED' | 'FAILED_STOP_EXECUTION' | 'NO_PAUSE_ADAPTER';
+
+export interface UltimoStop { readonly campaignId: string | null; readonly outcome: string }
+
+/** Idempotencia de EJECUCIÓN: si ya existe un STOP con pausa EXITOSA (PAUSED) para esta campaña ⇒ no re-pausar. Un
+ * intento FALLIDO previo (FAILED_STOP_EXECUTION) SÍ permite reintento (política de STOP, no ejecución comercial). */
+export function debeSaltarPausa(ultimo: UltimoStop | null, campaignId: string | null): boolean {
+  return !!ultimo && ultimo.campaignId === campaignId && ultimo.outcome === 'PAUSED';
+}
+
+const customerIdDe = (resourceName: string | null): string | null => resourceName?.match(/^customers\/(\d+)\//)?.[1] ?? null;
+
 export interface DepsStopMonitor {
   readonly leerEnvelope: (org: string) => Promise<AuthorizedExecutionEnvelope | null>;
   readonly leerCampaignBindingResourceName: (org: string, envelopeId: string) => Promise<string | null>;
   readonly leerMetricas: (org: string) => Promise<MetricasCampania>;
-  /** Persiste la decisión (idempotente: no duplica un STOP ya vigente). NO escribe a Google. */
-  readonly registrarDecision: (org: string, decision: DecisionMonitor, metricas: MetricasCampania, at: string) => Promise<void>;
+  /** Último STOP registrado (para idempotencia de ejecución). */
+  readonly leerUltimoStop: (org: string) => Promise<UltimoStop | null>;
+  /** ÚNICA capacidad provider del monitor: PAUSAR. Opcional (sin adapter ⇒ NO_PAUSE_ADAPTER, 0 writes). */
+  readonly pausarCampania?: (customerId: string, resourceName: string) => Promise<ResultadoPausaProvider>;
+  /** Persiste el resultado de un STOP ejecutado (regla, métricas, resourceName, requestId, outcome, at). */
+  readonly registrarStop: (org: string, decision: DecisionMonitor, metricas: MetricasCampania, outcome: OutcomeStop, pausa: ResultadoPausaProvider | null, at: string) => Promise<void>;
   readonly ahora: () => string;
 }
+
+export interface ResultadoTick { readonly decision: DecisionMonitor; readonly outcome: OutcomeStop }
 
 export class StopMonitorService {
   constructor(private readonly deps: DepsStopMonitor) {}
 
-  /** Un ciclo del monitor para una org. Devuelve la decisión. NUNCA escribe a Google (0 writes por construcción). */
-  async correrUnaVez(org: string): Promise<DecisionMonitor> {
+  /**
+   * Un ciclo: decide y —si una regla dispara y la campaña está ENABLED— PAUSA realmente UNA vez (única acción). Sin
+   * STOP ⇒ 0 writes. Ya pausada / ya-stopeada ⇒ 0 writes. Fail-closed: si la pausa provider falla ⇒ FAILED_STOP_EXECUTION
+   * (no marca falso éxito; reintenta en un ciclo futuro bajo la política de STOP, sin loop agresivo).
+   */
+  async correrUnaVez(org: string): Promise<ResultadoTick> {
     const at = this.deps.ahora();
     const envelope = await this.deps.leerEnvelope(org);
-    if (!envelope) { const d: DecisionMonitor = { action: 'NOOP', reason: 'NO_ENVELOPE', firedRuleIds: [], campaignId: null }; return d; }
+    if (!envelope) return { decision: { action: 'NOOP', reason: 'NO_ENVELOPE', firedRuleIds: [], campaignId: null }, outcome: 'NOOP' };
     const bindingRN = await this.deps.leerCampaignBindingResourceName(org, envelope.id);
     const m = await this.deps.leerMetricas(org);
     const decision = decidirMonitorStop({ envelope, campaignBindingResourceName: bindingRN, snapshotCampaignId: m.snapshotCampaignId, campaignStatus: m.campaignStatus, spend: m.spend, contacts: m.contacts, trackingValid: m.trackingValid, landingAvailable: m.landingAvailable, now: at });
-    await this.deps.registrarDecision(org, decision, m, at);
-    return decision;
+    if (decision.action !== 'STOP_CAMPAIGN') return { decision, outcome: 'NOOP' }; // 0 provider writes
+    // STOP decidido ⇒ la campaña está ENABLED (decidirMonitorStop ya lo garantiza). Idempotencia de ejecución:
+    const ultimo = await this.deps.leerUltimoStop(org);
+    if (debeSaltarPausa(ultimo, decision.campaignId)) return { decision, outcome: 'ALREADY_STOPPED' }; // ya pausada con éxito ⇒ 0 writes
+    // EJECUTAR exactamente UNA pausa real (única capacidad).
+    const cid = customerIdDe(bindingRN);
+    let outcome: OutcomeStop = 'NO_PAUSE_ADAPTER';
+    let pausa: ResultadoPausaProvider | null = null;
+    if (this.deps.pausarCampania && cid && bindingRN) {
+      try { pausa = await this.deps.pausarCampania(cid, bindingRN); outcome = pausa.ok ? 'PAUSED' : 'FAILED_STOP_EXECUTION'; }
+      catch (e) { pausa = { ok: false, requestId: null, resourceName: null, errorStatus: null, errorMessage: e instanceof Error ? e.message : String(e) }; outcome = 'FAILED_STOP_EXECUTION'; }
+    }
+    await this.deps.registrarStop(org, decision, m, outcome, pausa, at);
+    return { decision, outcome };
   }
 }
 
 /** Arranca el loop periódico (setInterval, unref para no bloquear el cierre del proceso). */
 export function iniciarStopMonitor(svc: StopMonitorService, org: string, intervaloMs: number, log?: (e: unknown) => void): { detener: () => void } {
-  const tick = async (): Promise<void> => { try { const d = await svc.correrUnaVez(org); log?.({ stopMonitor: 'tick', org, action: d.action, reason: d.reason }); } catch (e) { log?.({ stopMonitor: 'error', org, error: e instanceof Error ? e.message : String(e) }); } };
+  const tick = async (): Promise<void> => { try { const r = await svc.correrUnaVez(org); log?.({ stopMonitor: 'tick', org, action: r.decision.action, reason: r.decision.reason, outcome: r.outcome }); } catch (e) { log?.({ stopMonitor: 'error', org, error: e instanceof Error ? e.message : String(e) }); } };
   const timer = setInterval(() => void tick(), intervaloMs);
   if (typeof timer === 'object' && timer && 'unref' in timer) (timer as { unref: () => void }).unref();
   return { detener: () => clearInterval(timer) };

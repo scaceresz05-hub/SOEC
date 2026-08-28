@@ -10,6 +10,7 @@ import { obtenerAccessTokenDeOrg } from '../acquisition/google-ads-oauth-flow';
 import { getRecursoGoogleAds } from '../plataforma';
 import { GoogleAdsMutateHttpClient, type GoogleAdsWriteLog } from './google-ads-mutate-http';
 import { GoogleAdsRealMutatePort } from './google-ads-real-port';
+import { GoogleAdsPauseAdapter } from './google-ads-pause-adapter';
 import type { GeoPolicy, GeoRegionResuelta } from './geo-policy';
 
 export interface OpcionesEscrituraGoogleAds {
@@ -32,6 +33,25 @@ export function construirClienteEscrituraGoogleAds(env: NodeJS.ProcessEnv, org: 
     ...(opts.logger ? { logger: opts.logger } : {}),
   });
 }
+
+/**
+ * Construye el adapter PAUSE-ONLY para una org (o null si no está configurada, fail-closed). El scheduler de stops
+ * recibe SÓLO esto: capacidad estructural de pausar, jamás de crear/habilitar/editar. Token vía conexión REAL.
+ */
+export function construirAdapterPausaGoogleAds(env: NodeJS.ProcessEnv, org: string, comp: ComponentesFlujoGoogleAds | null | undefined, logger?: DepsPauseAdapterLogger): GoogleAdsPauseAdapter | null {
+  if (!comp) return null;
+  let ads: ReturnType<typeof getRecursoGoogleAds>;
+  try { ads = getRecursoGoogleAds(org); } catch { return null; }
+  const developerToken = env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  if (!developerToken) return null;
+  return new GoogleAdsPauseAdapter({
+    resolverAccessToken: () => obtenerAccessTokenDeOrg(comp, org),
+    developerToken,
+    loginCustomerId: ads.loginCustomerId ?? ads.customerId,
+    ...(logger ? { logger } : {}),
+  });
+}
+type DepsPauseAdapterLogger = ConstructorParameters<typeof GoogleAdsPauseAdapter>[0]['logger'];
 
 /** Construye el `GoogleAdsRealMutatePort` real (adaptador Phase2B) sobre el cliente, o null (fail-closed). */
 export function construirPuertoEscrituraGoogleAds(env: NodeJS.ProcessEnv, org: string, comp: ComponentesFlujoGoogleAds | null | undefined, opts: OpcionesEscrituraGoogleAds = {}): GoogleAdsRealMutatePort | null {

@@ -1,7 +1,7 @@
 /**
  * apps/api · campana · COMPOSICIÓN del monitor de stops: cablea servicios EXISTENTES (envelope, bindings, ads
- * snapshot, readiness, contactos Growth) en `DepsStopMonitor`. NO agrega lógica de negocio ni capacidad de escritura
- * a Google — sólo lee y registra la decisión (0 provider writes por construcción).
+ * snapshot, readiness, contactos Growth) + el adapter PAUSE-ONLY en `DepsStopMonitor`. NO agrega lógica de negocio;
+ * la ÚNICA capacidad de escritura que recibe el monitor es PAUSAR (nunca crear/habilitar/editar).
  */
 import { ActorId, OrganizationId, type Attribution, type EventStore, type RequestContext } from '@soec/contracts';
 import { ObservacionService } from '@soec/motor-medicion';
@@ -9,16 +9,18 @@ import { EnvelopeService } from './envelope-service';
 import { ResourceBindingService } from './resource-binding';
 import { DiagnosisEvidenceService } from './diagnosis-evidence-service';
 import { adsSnapshotStreamId, ultimoSnapshotAds } from '../ingesta/ingesta-google-ads-service';
-import { debePersistir, type DepsStopMonitor, type MetricasCampania } from './stop-monitor';
+import type { GoogleAdsPauseAdapter } from './google-ads-pause-adapter';
+import type { DepsStopMonitor, MetricasCampania, UltimoStop } from './stop-monitor';
 
 const GROWTH = 'smileflow-growth';
 const EVENTO_CONTACTO = 'lead_created';
-export const EVENTO_STOP_DECISION = 'stop-monitor.decision';
+export const EVENTO_STOP = 'stop-monitor.stop';
 export function stopMonitorStreamId(org: string): string { return `stop-monitor:${org}`; }
 
-const ATR: Attribution = { source: 'stop-monitor', purpose: 'monitoreo de reglas de stop (READ + registro; sin efecto externo)', assumptions: ['0 provider writes; sólo STOP_CAMPAIGN como intención'], claimType: 'observational', regime: 'empirical', uncertainty: 'baja' };
+const ATR: Attribution = { source: 'stop-monitor', purpose: 'pausa automática por regla de stop autorizada (reducción de riesgo)', assumptions: ['única acción provider = PAUSE; nunca create/enable/budget/targeting'], claimType: 'observational', regime: 'empirical', uncertainty: 'baja' };
 
-export function crearDepsStopMonitor(store: EventStore): DepsStopMonitor {
+/** `pausar` es opcional: sin adapter configurado el monitor decide pero no pausa (NO_PAUSE_ADAPTER, 0 writes). */
+export function crearDepsStopMonitor(store: EventStore, pauseAdapter: GoogleAdsPauseAdapter | null): DepsStopMonitor {
   const ctx = (org: string): RequestContext => { const o = OrganizationId(org); return { organizationId: o, actor: ActorId('stop-monitor'), scope: { organizationId: o, permissions: ['events:read', 'events:append'] }, correlationId: `stop-monitor-${org}` }; };
   const envelopes = new EnvelopeService(store);
   const bindings = new ResourceBindingService(store);
@@ -40,13 +42,17 @@ export function crearDepsStopMonitor(store: EventStore): DepsStopMonitor {
       }
       return { spend: snap?.cost ?? 0, contacts, trackingValid: readiness?.firstPartyTracking?.status === 'PASS', landingAvailable: readiness?.landing?.status === 'PASS', campaignStatus: snap?.status ?? null, snapshotCampaignId: snap?.campaignId ?? null };
     },
-    registrarDecision: async (org, decision, metricas, at) => {
+    leerUltimoStop: async (org): Promise<UltimoStop | null> => {
+      const eventos = await store.readStream(ctx(org), stopMonitorStreamId(org));
+      const ultimo = eventos.filter((e) => e.type === EVENTO_STOP).map((e) => e.payload as { campaignId: string | null; outcome: string }).slice(-1)[0];
+      return ultimo ? { campaignId: ultimo.campaignId, outcome: ultimo.outcome } : null;
+    },
+    ...(pauseAdapter ? { pausarCampania: (customerId: string, resourceName: string) => pauseAdapter.pausarCampania(customerId, resourceName).then((r) => ({ ok: r.ok, requestId: r.requestId, resourceName: r.resourceName, errorStatus: r.errorStatus, errorMessage: r.errorMessage })) } : {}),
+    registrarStop: async (org, decision, metricas, outcome, pausa, at) => {
       const c = ctx(org);
       const sid = stopMonitorStreamId(org);
       const prev = await store.readStream(c, sid);
-      const ultima = prev.filter((e) => e.type === EVENTO_STOP_DECISION).map((e) => e.payload as { action: string; campaignId: string | null; firedRuleIds?: string[] }).slice(-1)[0] ?? null;
-      if (!debePersistir(ultima, decision)) return; // NOOP o STOP ya vigente ⇒ no duplica
-      await store.append(c, sid, prev.length, [{ type: EVENTO_STOP_DECISION, payload: { at, action: decision.action, reason: decision.reason, firedRuleIds: decision.firedRuleIds, campaignId: decision.campaignId, spend: metricas.spend, contacts: metricas.contacts, campaignStatus: metricas.campaignStatus }, attribution: ATR, occurredAt: at }]).catch(() => undefined);
+      await store.append(c, sid, prev.length, [{ type: EVENTO_STOP, payload: { at, action: decision.action, reason: decision.reason, firedRuleIds: decision.firedRuleIds, campaignId: decision.campaignId, campaignResourceName: pausa?.resourceName ?? null, outcome, requestId: pausa?.requestId ?? null, errorStatus: pausa?.errorStatus ?? null, spend: metricas.spend, contacts: metricas.contacts, campaignStatus: metricas.campaignStatus }, attribution: ATR, occurredAt: at }]).catch(() => undefined);
     },
     ahora: () => new Date().toISOString(),
   };
