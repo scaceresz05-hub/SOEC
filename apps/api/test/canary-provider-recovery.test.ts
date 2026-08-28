@@ -47,10 +47,15 @@ function leidosDe(): RecursosLeidos {
     adGroupAd: c0.adGroups.flatMap((g) => g.ads.map((a) => ({ adGroupAd: { resourceName: `customers/${C}/adGroupAds/${300 + n++}`, ad: { responsiveSearchAd: { headlines: a.headlines.map((t) => ({ text: t })) } } }, adGroup: { resourceName: rnGrupo.get(g.action)! } }))),
     adGroupCriterion: PLAN.activeKeywords.map((k) => ({ adGroupCriterion: { resourceName: `customers/${C}/adGroupCriteria/${400 + n++}`, keyword: { text: k.text, matchType: k.matchType } }, adGroup: { resourceName: rnGrupo.get(k.action)! } })),
     campaignCriterion: [
-      ...(c0.negativeKeywords ?? []).map((neg) => ({ campaignCriterion: { resourceName: `customers/${C}/campaignCriteria/${500 + n++}`, negative: true, keyword: { text: neg.text, matchType: neg.matchType } } })),
-      ...GEO.map((g) => ({ campaignCriterion: { resourceName: `customers/${C}/campaignCriteria/${600 + n++}`, negative: g.negativa, location: { geoTargetConstant: `geoTargetConstants/${g.criterionId}` } } })),
+      ...(c0.negativeKeywords ?? []).map((neg) => ({ campaignCriterion: { resourceName: `customers/${C}/campaignCriteria/${500 + n++}`, criterionId: String(500 + n), type: 'KEYWORD', negative: true, keyword: { text: neg.text, matchType: neg.matchType } } })),
+      ...GEO.map((g) => ({ campaignCriterion: { resourceName: `customers/${C}/campaignCriteria/${600 + n++}`, criterionId: String(600 + n), type: 'LOCATION', negative: g.negativa, location: { geoTargetConstant: `geoTargetConstants/${g.criterionId}` } } })),
     ],
   };
+}
+// Extras (campaign_criterion NO plan-owned) para las pruebas de clasificación.
+function conExtras(extras: Array<{ type: string; keyword?: { text: string; matchType: string }; location?: { geoTargetConstant: string } }>): RecursosLeidos {
+  const l = leidosDe();
+  return { ...l, campaignCriterion: [...l.campaignCriterion, ...extras.map((e, i) => ({ campaignCriterion: { resourceName: `customers/${C}/campaignCriteria/EX${i}`, criterionId: `9${i}`, type: e.type, negative: false, ...(e.keyword ? { keyword: e.keyword } : {}), ...(e.location ? { location: e.location } : {}) } }))] };
 }
 
 describe('recuperación read-only de bindings desde Google', () => {
@@ -103,6 +108,36 @@ describe('recuperación read-only de bindings desde Google', () => {
     expect(p1).toBe(r.bindings.length);
     expect(p2).toBe(0);
     expect((await svc.listar(ORG)).length).toBe(r.bindings.length);
+  });
+  it('§9-B: 61 plan-owned + 3 provider-generated defaults DEMOSTRADOS ⇒ ok, 61 matched, 3 extras observados, SIN bindings extra', () => {
+    const wl = new Set(['LANGUAGE']); // whitelist demostrada (sólo para el test)
+    const leidos = conExtras([{ type: 'LANGUAGE' }, { type: 'LANGUAGE' }, { type: 'LANGUAGE' }]);
+    const r = correlacionarGrafo(ORG, ENV, PLAN, GEO, leidos, T, wl);
+    expect(r.ok).toBe(true);
+    expect(r.planOwnedMatchedOperationCount).toBe(EXPECTED);
+    expect(r.rawRecoveredResourceCount).toBe(EXPECTED + 3);
+    expect(r.providerGeneratedExtraCount).toBe(3);
+    expect(r.providerGeneratedExtrasByType).toEqual({ LANGUAGE: 3 });
+    // los extras NO reciben binding (ni campaign, ni negative, etc.)
+    expect(r.bindings.some((b) => b.providerResourceId?.includes('campaignCriteria/EX'))).toBe(false);
+  });
+  it('§9-D: un extra de tipo DESCONOCIDO (no whitelisted) ⇒ FAIL-CLOSED con detalle, 0 bindings', () => {
+    const r = correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras([{ type: 'WEBPAGE' }]), T, new Set(['LANGUAGE']));
+    expect(r.ok).toBe(false); expect(r.reason).toBe('CAMPAIGN_CRITERION_MISMATCH'); expect(r.bindings).toHaveLength(0);
+    expect(r.extras.some((e) => e.type === 'WEBPAGE' && e.classification === 'USER_CREATED_UNKNOWN')).toBe(true);
+  });
+  it('§9-E: un extra AMBIGUO (misma semántica que una op del plan: keyword) ⇒ FAIL-CLOSED', () => {
+    const r = correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras([{ type: 'KEYWORD', keyword: { text: 'zzz extra', matchType: 'EXACT' } }]), T, new Set(['LANGUAGE', 'KEYWORD']));
+    expect(r.ok).toBe(false); expect(r.reason).toBe('CAMPAIGN_CRITERION_MISMATCH');
+    expect(r.extras.some((e) => e.classification === 'AMBIGUOUS')).toBe(true);
+  });
+  it('diagnóstico: recoveredCampaignCriteriaByType desglosa los tipos leídos', () => {
+    const r = correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras([{ type: 'LANGUAGE' }]), T);
+    expect(r.recoveredCampaignCriteriaByType.KEYWORD ?? 0).toBe((c0.negativeKeywords ?? []).length);
+    expect(r.recoveredCampaignCriteriaByType.LOCATION).toBe(GEO.length);
+    expect(r.recoveredCampaignCriteriaByType.LANGUAGE).toBe(1);
+    // sin whitelist ⇒ el extra LANGUAGE es USER_CREATED_UNKNOWN ⇒ fail-closed (no se ignora "porque sobra")
+    expect(r.ok).toBe(false);
   });
   it('G: consultas de LECTURA (SELECT…FROM), sin :mutate, y SIN el bug `FROM campaign_budget WHERE campaign.id`', () => {
     const q = consultasRecuperacion('24194332264');

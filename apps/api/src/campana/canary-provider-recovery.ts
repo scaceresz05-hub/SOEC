@@ -11,6 +11,13 @@ import { fingerprint, type EntityType } from './material-fingerprint';
 import type { ProviderResourceBinding } from './resource-binding';
 import type { AuthorizedExecutionEnvelope } from './authorized-execution-envelope';
 
+/**
+ * Tipos de `campaign_criterion` DEMOSTRADOS como provider-generated/default para esta campaña (se ignoran del grafo:
+ * observación, no bindings). VACÍO por diseño: ningún tipo se acepta sin evidencia durable del recovery real. Se
+ * poblará SÓLO tras demostrar (por `campaign_criterion.type` + contrato Google) que un tipo es siempre auto-generado.
+ */
+export const TIPOS_PROVIDER_GENERATED_DEFAULT: ReadonlySet<string> = new Set<string>();
+
 /** Consultas GAQL READ-ONLY ancladas a la campaña. Los campos verifican/correlacionan; ningún write. */
 export function consultasRecuperacion(campaignId: string): Record<string, string> {
   const wc = `WHERE campaign.id = ${campaignId}`;
@@ -21,7 +28,7 @@ export function consultasRecuperacion(campaignId: string): Record<string, string
     adGroup: `SELECT ad_group.resource_name, ad_group.name FROM ad_group ${wc}`,
     adGroupAd: `SELECT ad_group_ad.resource_name, ad_group_ad.ad.responsive_search_ad.headlines, ad_group.resource_name FROM ad_group_ad ${wc}`,
     adGroupCriterion: `SELECT ad_group_criterion.resource_name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group.resource_name FROM ad_group_criterion ${wc} AND ad_group_criterion.type = KEYWORD`,
-    campaignCriterion: `SELECT campaign_criterion.resource_name, campaign_criterion.negative, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type, campaign_criterion.location.geo_target_constant FROM campaign_criterion ${wc}`,
+    campaignCriterion: `SELECT campaign_criterion.resource_name, campaign_criterion.criterion_id, campaign_criterion.type, campaign_criterion.negative, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type, campaign_criterion.location.geo_target_constant FROM campaign_criterion ${wc}`,
   };
 }
 
@@ -32,7 +39,18 @@ export interface RecursosLeidos {
   readonly adGroup: ReadonlyArray<{ adGroup?: { resourceName?: string; name?: string } }>;
   readonly adGroupAd: ReadonlyArray<{ adGroupAd?: { resourceName?: string; ad?: { responsiveSearchAd?: { headlines?: Array<{ text?: string }> } } }; adGroup?: { resourceName?: string } }>;
   readonly adGroupCriterion: ReadonlyArray<{ adGroupCriterion?: { resourceName?: string; keyword?: { text?: string; matchType?: string } }; adGroup?: { resourceName?: string } }>;
-  readonly campaignCriterion: ReadonlyArray<{ campaignCriterion?: { resourceName?: string; negative?: boolean; keyword?: { text?: string; matchType?: string }; location?: { geoTargetConstant?: string } } }>;
+  readonly campaignCriterion: ReadonlyArray<{ campaignCriterion?: { resourceName?: string; criterionId?: string | number; type?: string; negative?: boolean; keyword?: { text?: string; matchType?: string }; location?: { geoTargetConstant?: string } } }>;
+}
+
+/** Un campaign_criterion recuperado que NO pertenece al grafo del plan (a clasificar). Sin secretos. */
+export interface ExtraCriterion {
+  readonly resourceName: string | null;
+  readonly criterionId: string | null;
+  readonly type: string | null;
+  readonly negative: boolean;
+  readonly keywordText: string | null;
+  readonly locationGeoTargetConstant: string | null;
+  readonly classification: 'PROVIDER_GENERATED_DEFAULT' | 'PLAN_OWNED' | 'USER_CREATED_UNKNOWN' | 'AMBIGUOUS';
 }
 
 export interface ResultadoCorrelacion {
@@ -40,10 +58,16 @@ export interface ResultadoCorrelacion {
   readonly reason: string | null;
   readonly fingerprintOk: boolean;
   readonly expectedOperations: number;
-  readonly recoveredResourceCount: number;
-  readonly matchedOperationCount: number;
+  readonly recoveredResourceCount: number;         // = rawRecoveredResourceCount
+  readonly rawRecoveredResourceCount: number;
+  readonly matchedOperationCount: number;          // = planOwnedMatchedOperationCount
+  readonly planOwnedMatchedOperationCount: number;
   readonly unmatchedOperationCount: number;
   readonly ambiguousOperationCount: number;
+  readonly recoveredCampaignCriteriaByType: Record<string, number>;
+  readonly providerGeneratedExtraCount: number;
+  readonly providerGeneratedExtrasByType: Record<string, number>;
+  readonly extras: readonly ExtraCriterion[];      // criterios no plan-owned (para clasificar/provenance)
   readonly campaignResourceName: string | null;
   readonly bindings: readonly ProviderResourceBinding[]; // sólo si ok; jamás parcial
 }
@@ -76,15 +100,20 @@ function binding(org: string, env: AuthorizedExecutionEnvelope, entityType: Enti
 }
 
 /**
- * Correlaciona los recursos leídos con el plan. FAIL-CLOSED total: cualquier huella incorrecta, faltante, sobrante
- * o ambigüedad ⇒ ok=false y bindings=[]. Nunca persiste parcial; nunca fabrica IDs (sólo usa resourceName de Google).
+ * Correlaciona los recursos leídos con el plan. FAIL-CLOSED total: huella incorrecta, faltante, ambigüedad, o un
+ * campaign_criterion EXTRA no clasificable como provider-generated ⇒ ok=false y bindings=[]. Nunca parcial; nunca
+ * fabrica IDs. Distingue RAW (lo que devuelve Google) de PLAN-OWNED (lo que SOEC autorizó): Google puede tener
+ * criterios propios (defaults) que NO pertenecen al grafo, pero eso NO debe impedir recuperar los del plan — SIEMPRE
+ * que cada extra quede DEMOSTRADO como provider-generated (por `tiposProviderGenerated`); si no, fail-closed.
  */
-export function correlacionarGrafo(org: string, env: AuthorizedExecutionEnvelope, plan: MarketingPlan, geoResueltas: readonly GeoRegionResuelta[], leidos: RecursosLeidos, ahora: string): ResultadoCorrelacion {
+export function correlacionarGrafo(org: string, env: AuthorizedExecutionEnvelope, plan: MarketingPlan, geoResueltas: readonly GeoRegionResuelta[], leidos: RecursosLeidos, ahora: string, tiposProviderGenerated: ReadonlySet<string> = new Set()): ResultadoCorrelacion {
   const recoveredResourceCount = leidos.campaign.length + leidos.campaignBudget.length + leidos.adGroup.length + leidos.adGroupAd.length + leidos.adGroupCriterion.length + leidos.campaignCriterion.length;
+  const recoveredCampaignCriteriaByType: Record<string, number> = {};
+  for (const c of leidos.campaignCriterion) { const t = c.campaignCriterion?.type ?? 'UNKNOWN'; recoveredCampaignCriteriaByType[t] = (recoveredCampaignCriteriaByType[t] ?? 0) + 1; }
   const c0 = plan.campaigns[0];
   // EXPECTED se DERIVA del plan (no se hardcodea 61): 1 campaign + 1 budget + adGroups + ads + keywords + negativas + geo.
   const expected = c0 ? 2 + c0.adGroups.length + c0.adGroups.reduce((n, g) => n + g.ads.length, 0) + plan.activeKeywords.length + (c0.negativeKeywords ?? []).length + geoResueltas.length : 0;
-  const base = { fingerprintOk: false, expectedOperations: expected, recoveredResourceCount, matchedOperationCount: 0, unmatchedOperationCount: 0, ambiguousOperationCount: 0, campaignResourceName: null as string | null, bindings: [] as ProviderResourceBinding[] };
+  const base = { fingerprintOk: false, expectedOperations: expected, recoveredResourceCount, rawRecoveredResourceCount: recoveredResourceCount, matchedOperationCount: 0, planOwnedMatchedOperationCount: 0, unmatchedOperationCount: 0, ambiguousOperationCount: 0, recoveredCampaignCriteriaByType, providerGeneratedExtraCount: 0, providerGeneratedExtrasByType: {} as Record<string, number>, extras: [] as ExtraCriterion[], campaignResourceName: null as string | null, bindings: [] as ProviderResourceBinding[] };
   const fail = (reason: string, extra?: Partial<ResultadoCorrelacion>): ResultadoCorrelacion => ({ ...base, ok: false, reason, ...extra });
   if (!c0) return fail('NO_PLAN');
 
@@ -117,30 +146,48 @@ export function correlacionarGrafo(org: string, env: AuthorizedExecutionEnvelope
   const kwMatch = emparejar(kwPlan, leidos.adGroupCriterion, (k) => `${k.agRN}::${norm(k.text)}::${k.matchType}`, (r) => `${r.adGroup?.resourceName ?? ''}::${norm(r.adGroupCriterion?.keyword?.text)}::${r.adGroupCriterion?.keyword?.matchType ?? ''}`);
   if (kwMatch.faltantes || kwMatch.ambiguos) return fail('KEYWORD_MISMATCH', { fingerprintOk: true });
 
-  // 5) CAMPAIGN CRITERIA: separar negativas (keyword) de geo (location) en lo LEÍDO.
-  const negLeidas = leidos.campaignCriterion.filter((c) => c.campaignCriterion?.keyword?.text);
-  const geoLeidas = leidos.campaignCriterion.filter((c) => c.campaignCriterion?.location?.geoTargetConstant);
-  // Negativas: biyección por texto + matchType.
+  // 5) CAMPAIGN CRITERIA: emparejar las PLAN-OWNED (negativas por keyword, geo por location). Los recovered que NO
+  //    correspondan al plan son EXTRAS a clasificar (provider-generated demostrado vs desconocido/ambiguo).
+  const keywordCriteria = leidos.campaignCriterion.filter((c) => c.campaignCriterion?.keyword?.text);
+  const locationCriteria = leidos.campaignCriterion.filter((c) => c.campaignCriterion?.location?.geoTargetConstant);
   const negPlan = c0.negativeKeywords ?? [];
-  const negMatch = emparejar(negPlan, negLeidas, (n) => `${norm(n.text)}::${n.matchType}`, (r) => `${norm(r.campaignCriterion?.keyword?.text)}::${r.campaignCriterion?.keyword?.matchType ?? ''}`);
+  const negMatch = emparejar(negPlan, keywordCriteria, (n) => `${norm(n.text)}::${n.matchType}`, (r) => `${norm(r.campaignCriterion?.keyword?.text)}::${r.campaignCriterion?.keyword?.matchType ?? ''}`);
   if (negMatch.faltantes || negMatch.ambiguos) return fail('NEGATIVE_MISMATCH', { fingerprintOk: true });
-  // Geo: biyección por geoTargetConstant + negative.
-  const geoMatch = emparejar(geoResueltas, geoLeidas, (g) => `geoTargetConstants/${g.criterionId}::${g.negativa ? 'neg' : 'pos'}`, (r) => `${r.campaignCriterion?.location?.geoTargetConstant ?? ''}::${r.campaignCriterion?.negative ? 'neg' : 'pos'}`);
+  const geoMatch = emparejar(geoResueltas, locationCriteria, (g) => `geoTargetConstants/${g.criterionId}::${g.negativa ? 'neg' : 'pos'}`, (r) => `${r.campaignCriterion?.location?.geoTargetConstant ?? ''}::${r.campaignCriterion?.negative ? 'neg' : 'pos'}`);
   if (geoMatch.faltantes || geoMatch.ambiguos) return fail('GEO_MISMATCH', { fingerprintOk: true });
-  // Sobrantes en campaign_criterion (negativas+geo) juntos:
-  if ((negMatch.sobrantes + geoMatch.sobrantes) !== 0 || (negLeidas.length + geoLeidas.length) !== leidos.campaignCriterion.length) return fail('CAMPAIGN_CRITERION_MISMATCH', { fingerprintOk: true });
 
-  // 6) CONTEO: todo debe cuadrar a 61 (1 campaign + 1 budget + 2 adGroups + 2 ads + N keywords + M negativas + G geo).
-  const matched = 1 + 1 + agMatch.pares.length + adMatch.pares.length + kwMatch.pares.length + negMatch.pares.length + geoMatch.pares.length;
-  const counts = { fingerprintOk: true, matchedOperationCount: matched, unmatchedOperationCount: (kwMatch.faltantes + negMatch.faltantes + geoMatch.faltantes), ambiguousOperationCount: (kwMatch.ambiguos + negMatch.ambiguos + geoMatch.ambiguos) };
-  if (matched !== expected) return fail('OPERATION_COUNT_MISMATCH', counts);
+  // EXTRAS = todo campaign_criterion NO emparejado como negativa/geo del plan. Se clasifica cada uno.
+  const matchedRecovered = new Set([...negMatch.pares.map((p) => p.r), ...geoMatch.pares.map((p) => p.r)]);
+  const extras: ExtraCriterion[] = leidos.campaignCriterion.filter((c) => !matchedRecovered.has(c)).map((row) => {
+    const cc = row.campaignCriterion ?? {};
+    const keywordText = cc.keyword?.text ?? null;
+    const location = cc.location?.geoTargetConstant ?? null;
+    const type = cc.type ?? null;
+    // Un extra con SEMÁNTICA de plan (keyword/location) que sobró ⇒ AMBIGUOUS (indistinguible de una op del plan) ⇒
+    // fail-closed (§6). Uno SIN esa semántica sólo es seguro si su TYPE está DEMOSTRADO como provider-generated.
+    const classification: ExtraCriterion['classification'] = (keywordText || location) ? 'AMBIGUOUS'
+      : (type && tiposProviderGenerated.has(type)) ? 'PROVIDER_GENERATED_DEFAULT' : 'USER_CREATED_UNKNOWN';
+    return { resourceName: cc.resourceName ?? null, criterionId: cc.criterionId != null ? String(cc.criterionId) : null, type, negative: cc.negative === true, keywordText, locationGeoTargetConstant: location, classification };
+  });
+  const providerGeneratedExtras = extras.filter((e) => e.classification === 'PROVIDER_GENERATED_DEFAULT');
+  const providerGeneratedExtrasByType: Record<string, number> = {};
+  for (const e of providerGeneratedExtras) { const t = e.type ?? 'UNKNOWN'; providerGeneratedExtrasByType[t] = (providerGeneratedExtrasByType[t] ?? 0) + 1; }
 
-  // 7) BINDINGS (sólo entidades accionables; geo/budget se correlacionan pero no se bindean). Sólo resourceNames REALES.
+  const planOwnedMatched = 1 + 1 + agMatch.pares.length + adMatch.pares.length + kwMatch.pares.length + negMatch.pares.length + geoMatch.pares.length;
+  const resumen = { fingerprintOk: true, matchedOperationCount: planOwnedMatched, planOwnedMatchedOperationCount: planOwnedMatched, unmatchedOperationCount: (kwMatch.faltantes + negMatch.faltantes + geoMatch.faltantes), ambiguousOperationCount: (kwMatch.ambiguos + negMatch.ambiguos + geoMatch.ambiguos), recoveredCampaignCriteriaByType, providerGeneratedExtraCount: providerGeneratedExtras.length, providerGeneratedExtrasByType, extras };
+
+  // FAIL-CLOSED: cualquier extra NO demostrado como provider-generated ⇒ 0 persistencia (con el detalle para clasificar).
+  const inseguros = extras.filter((e) => e.classification !== 'PROVIDER_GENERATED_DEFAULT');
+  if (inseguros.length > 0) return fail('CAMPAIGN_CRITERION_MISMATCH', resumen);
+  // El plan-owned debe cuadrar exactamente (61). Los extras provider-generated NO cuentan como operaciones del plan.
+  if (planOwnedMatched !== expected) return fail('OPERATION_COUNT_MISMATCH', resumen);
+
+  // 6) BINDINGS (sólo entidades accionables plan-owned; geo/budget/extras NO se bindean). Sólo resourceNames REALES.
   const bindings: ProviderResourceBinding[] = [binding(org, env, 'campaign', camp.resourceName, ahora)];
   for (const { r } of agMatch.pares) bindings.push(binding(org, env, 'adGroup', r.adGroup!.resourceName!, ahora));
-  for (const { r } of adMatch.pares) { const rn = r.adGroupAd?.resourceName; if (!rn) return fail('MISSING_AD_RESOURCE_NAME', counts); bindings.push(binding(org, env, 'ad', rn, ahora)); }
-  for (const { r } of kwMatch.pares) { const rn = r.adGroupCriterion?.resourceName; if (!rn) return fail('MISSING_KEYWORD_RESOURCE_NAME', counts); bindings.push(binding(org, env, 'keyword', rn, ahora)); }
-  for (const { r } of negMatch.pares) { const rn = r.campaignCriterion?.resourceName; if (!rn) return fail('MISSING_NEGATIVE_RESOURCE_NAME', counts); bindings.push(binding(org, env, 'negative', rn, ahora)); }
+  for (const { r } of adMatch.pares) { const rn = r.adGroupAd?.resourceName; if (!rn) return fail('MISSING_AD_RESOURCE_NAME', resumen); bindings.push(binding(org, env, 'ad', rn, ahora)); }
+  for (const { r } of kwMatch.pares) { const rn = r.adGroupCriterion?.resourceName; if (!rn) return fail('MISSING_KEYWORD_RESOURCE_NAME', resumen); bindings.push(binding(org, env, 'keyword', rn, ahora)); }
+  for (const { r } of negMatch.pares) { const rn = r.campaignCriterion?.resourceName; if (!rn) return fail('MISSING_NEGATIVE_RESOURCE_NAME', resumen); bindings.push(binding(org, env, 'negative', rn, ahora)); }
 
-  return { ...base, ...counts, ok: true, reason: null, campaignResourceName: camp.resourceName, bindings };
+  return { ...base, ...resumen, ok: true, reason: null, campaignResourceName: camp.resourceName, bindings };
 }

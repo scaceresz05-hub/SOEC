@@ -41,7 +41,7 @@ import { ResourceBindingService } from './campana/resource-binding';
 import { CONTEXTO_CANARY } from './campana/canary-execution';
 import { ejecutarCanaryAtomico, TRANSPORT_ATOMICO } from './campana/canary-atomic-execution';
 import { reconciliarBindings } from './campana/canary-reconciliation';
-import { correlacionarGrafo, consultasRecuperacion, type RecursosLeidos } from './campana/canary-provider-recovery';
+import { correlacionarGrafo, consultasRecuperacion, TIPOS_PROVIDER_GENERATED_DEFAULT, type RecursosLeidos } from './campana/canary-provider-recovery';
 import { hashPlan } from './campana/plan-hash';
 import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
 import { GoogleSearchError } from './campana/google-ads-mutate-http';
@@ -635,9 +635,22 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       adGroupCriterion: (filas.adGroupCriterion ?? []) as never, campaignCriterion: (filas.campaignCriterion ?? []) as never,
     };
     const ahora = new Date().toISOString();
-    const correl = correlacionarGrafo(org, envelope, plan, geo.resueltas, leidos, ahora);
-    const proof = { fingerprintOk: correl.fingerprintOk, expectedOperations: correl.expectedOperations, recoveredResourceCount: correl.recoveredResourceCount, matchedOperationCount: correl.matchedOperationCount, unmatchedOperationCount: correl.unmatchedOperationCount, ambiguousOperationCount: correl.ambiguousOperationCount };
-    if (!correl.ok) return reply.send({ ok: false, reason: correl.reason, ...proof, bindingsRegistrados: 0, newGoogleWriteCalls: 0 }); // FAIL-CLOSED: nada se persiste
+    const correl = correlacionarGrafo(org, envelope, plan, geo.resueltas, leidos, ahora, TIPOS_PROVIDER_GENERATED_DEFAULT);
+    const proof = {
+      fingerprintOk: correl.fingerprintOk, expectedOperations: correl.expectedOperations,
+      rawRecoveredResourceCount: correl.rawRecoveredResourceCount, planOwnedMatchedOperationCount: correl.planOwnedMatchedOperationCount,
+      unmatchedPlanOperationCount: correl.unmatchedOperationCount, ambiguousPlanOperationCount: correl.ambiguousOperationCount,
+      recoveredCampaignCriteriaByType: correl.recoveredCampaignCriteriaByType,
+      providerGeneratedExtraCount: correl.providerGeneratedExtraCount, providerGeneratedExtrasByType: correl.providerGeneratedExtrasByType,
+      extras: correl.extras,
+    };
+    if (!correl.ok) {
+      // DIAGNÓSTICO DURABLE: qué extras aparecieron y su clasificación (para poder demostrar/poblar la whitelist).
+      const cwD = ctxAppend(c);
+      const prevD = await store.readStream(cwD, `provider-recovery:${org}`);
+      await store.append(cwD, `provider-recovery:${org}`, prevD.length, [{ type: 'provider-recovery-diagnostic', payload: { at: ahora, envelopeId: envelope.id, campaignId: String(campaignId), reason: correl.reason, ...proof }, attribution: ATR_CANARY, occurredAt: ahora }]).catch(() => undefined);
+      return reply.send({ ok: false, reason: correl.reason, ...proof, campaignBindingFound: false, bindingsRegistrados: 0, newGoogleWriteCalls: 0 }); // FAIL-CLOSED: nada se persiste
+    }
     // PERSISTENCIA IDEMPOTENTE (buscar antes de registrar). Sólo resourceNames REALES. Sin writes a Google.
     let registrados = 0; let yaExistian = 0;
     for (const b of correl.bindings) {
@@ -648,8 +661,8 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const cw = ctxAppend(c);
     const sidP = `provider-recovery:${org}`;
     const prevP = await store.readStream(cw, sidP);
-    await store.append(cw, sidP, prevP.length, [{ type: 'provider-recovery', payload: { at: ahora, envelopeId: envelope.id, planHash: envelope.planHash, campaignId: String(campaignId), method: 'PROVIDER_READ_RECOVERY', campaignResourceName: correl.campaignResourceName, matched: correl.matchedOperationCount, bindingsRegistrados: registrados, bindingsYaExistian: yaExistian, resourceNames: correl.bindings.map((b) => ({ entityType: b.entityType, resourceName: b.providerResourceId })) }, attribution: ATR_CANARY, occurredAt: ahora }]).catch(() => undefined);
-    return reply.send({ ok: true, reason: null, ...proof, method: 'PROVIDER_READ_RECOVERY', campaignResourceName: correl.campaignResourceName, bindingsRegistrados: registrados, bindingsYaExistian: yaExistian, providerBindingsTotal: (await bindingSvc.listar(org)).filter((b) => b.envelopeId === envelope.id).length, newGoogleWriteCalls: 0 });
+    await store.append(cw, sidP, prevP.length, [{ type: 'provider-recovery', payload: { at: ahora, envelopeId: envelope.id, planHash: envelope.planHash, campaignId: String(campaignId), method: 'PROVIDER_READ_RECOVERY', campaignResourceName: correl.campaignResourceName, planOwnedMatched: correl.planOwnedMatchedOperationCount, rawRecovered: correl.rawRecoveredResourceCount, providerGeneratedExtraCount: correl.providerGeneratedExtraCount, providerGeneratedExtras: correl.extras, bindingsRegistrados: registrados, bindingsYaExistian: yaExistian, resourceNames: correl.bindings.map((b) => ({ entityType: b.entityType, resourceName: b.providerResourceId })) }, attribution: ATR_CANARY, occurredAt: ahora }]).catch(() => undefined);
+    return reply.send({ ok: true, reason: null, ...proof, method: 'PROVIDER_READ_RECOVERY', campaignResourceName: correl.campaignResourceName, campaignBindingFound: correl.bindings.some((b) => b.entityType === 'campaign'), bindingsRegistrados: registrados, bindingsYaExistian: yaExistian, providerBindingsTotal: (await bindingSvc.listar(org)).filter((b) => b.envelopeId === envelope.id).length, newGoogleWriteCalls: 0 });
   });
 
   // Lectura DURABLE de los intentos de write reales (errores de Google sanitizados). Auth + business.manage.
