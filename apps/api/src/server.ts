@@ -13,6 +13,8 @@ import { runGoogleAdsMigrationsSeguro, PgGoogleAdsSyncLease } from './acquisitio
 import { budgetAuthorizationMigrations } from './autonomia-ads/budget-authorization-pg';
 import { crearComposicionGoogleAdsOAuth } from './acquisition/google-ads-runtime-oauth';
 import { GoogleAdsScheduler } from './ingesta/google-ads-scheduler';
+import { StopMonitorService, iniciarStopMonitor } from './campana/stop-monitor';
+import { crearDepsStopMonitor } from './campana/stop-monitor-composition';
 import { ejecutarBootstrap } from '@soec/identity';
 import { DeterministicIntelligenceProvider } from '@soec/intelligence';
 import { buildApp } from './app';
@@ -121,6 +123,19 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({ googleAdsScheduler: agendado ? 'started' : 'dormant_disabled' }));
   } else {
     console.log(JSON.stringify({ googleAdsScheduler: 'idle_no_google_ads_config' }));
+  }
+
+  // MONITOR AUTOMÁTICO de STOPS: conecta las reglas EXISTENTES (evaluarStopVigente) a un loop in-proceso. Activo por
+  // defecto (apagable con SOEC_STOP_MONITOR_ENABLED=false). SIN capacidad de escritura a Google (0 provider writes):
+  // evalúa y REGISTRA la decisión; su única acción es STOP_CAMPAIGN (reducción de riesgo). Con la campaña PAUSED ⇒
+  // NOOP. Cadencia 5 min: protege un experimento de 15.000 CLP sin polling agresivo.
+  if (process.env.SOEC_STOP_MONITOR_ENABLED !== 'false') {
+    const svc = new StopMonitorService(crearDepsStopMonitor(new PgEventStore(pool)));
+    const intervaloMs = 5 * 60_000;
+    iniciarStopMonitor(svc, 'org-smileflow', intervaloMs, (e) => console.log(JSON.stringify(e)));
+    console.log(JSON.stringify({ stopMonitor: 'started', intervaloMs, org: 'org-smileflow' }));
+  } else {
+    console.log(JSON.stringify({ stopMonitor: 'disabled' }));
   }
 }
 
