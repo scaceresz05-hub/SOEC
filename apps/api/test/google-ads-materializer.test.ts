@@ -25,7 +25,9 @@ const READY: MarketingReadiness = {
 const entrada: EntradaMarketingPlan = {
   objetivo: 'Conseguir clínicas dentales interesadas en SmileFlow', presupuestoTotal: 30000, periodoDias: 10, startAt: T, endAt: '2026-09-04T00:00:00.000Z', moneda: 'CLP',
   canalesSolicitados: ['google', 'meta'] as CanalId[], disponibilidad: DISP,
-  evidencia: { impresiones: 1361, clics: 50, gasto: 30137, contactosReales: 0, capAutorizado: null, campaignStatus: 'PAUSED', moneda: 'CLP', terminos: [{ termino: 'administracion clinica dental', impresiones: 300, clics: 12 }, { termino: 'dentalink precios', impresiones: 160, clics: 9 }, { termino: 'exocad', impresiones: 50, clics: 1 }] },
+  // 'administracion clinica dental' está en la denylist de política Google → NO debe quedar como keyword activa;
+  // 'agenda clinica dental' (gestión, no denegada) mantiene el ad group TARGET con al menos una keyword.
+  evidencia: { impresiones: 1361, clics: 50, gasto: 30137, contactosReales: 0, capAutorizado: null, campaignStatus: 'PAUSED', moneda: 'CLP', terminos: [{ termino: 'administracion clinica dental', impresiones: 300, clics: 12 }, { termino: 'agenda clinica dental', impresiones: 220, clics: 10 }, { termino: 'dentalink precios', impresiones: 160, clics: 9 }, { termino: 'exocad', impresiones: 50, clics: 1 }] },
   readiness: READY, historicalCpa: null,
 };
 const PLAN = construirMarketingPlan(entrada);
@@ -99,6 +101,11 @@ describe('materializador Google-native V2', () => {
   });
   it('M: HISTORICAL_RESOURCE_REFERENCES=0 (no aparece 24120966895)', () => {
     expect(JSON.stringify(req)).not.toContain('24120966895');
+  });
+  it('política: la keyword denegada por Google no aparece en el grafo materializado (retiro determinista)', () => {
+    expect(JSON.stringify(req).toLowerCase()).not.toContain('administracion clinica dental');
+    // pero la keyword de gestión no denegada sí sobrevive (el ad group TARGET no queda vacío)
+    expect(JSON.stringify(req).toLowerCase()).toContain('agenda clinica dental');
   });
   it('K: validate y real comparten materializador (sólo cambia validateOnly)', () => {
     const real = materializarGoogleAdsMutate(PLAN, GEO_SMILEFLOW_V2, GEO, { customerId: CID, ...VENTANA, validateOnly: false })!;

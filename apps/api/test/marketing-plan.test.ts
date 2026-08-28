@@ -144,3 +144,25 @@ describe('envelope', () => {
     expect(validateEnvelope({ canal: 'google', tipo: 'CREATE_CAMPAIGN' }, draft).within).toBe(false);
   });
 });
+
+describe('retiro determinista de keywords denegadas por política de Google', () => {
+  const DENEGADAS = ['ficha clinica odontologica', 'ficha clínica odontológica', 'administracion clinica dental', 'ficha clinica dental'];
+  it('las 4 keywords rechazadas por Google NO quedan activas, sin reemplazo, y el resto se conserva', () => {
+    const conDenegadas = [
+      ...DENEGADAS.map((t, i) => ({ termino: t, impresiones: 200 + i, clics: 5 + i })), // gestión → serían TARGET
+      { termino: 'software para dentistas', impresiones: 220, clics: 10 }, // gestión NO denegada → mantiene adGroup TARGET
+      { termino: 'dentalink precios', impresiones: 180, clics: 9 },        // competidor → SEGMENT
+    ];
+    const sinDenegadas = conDenegadas.filter((t) => !DENEGADAS.includes(t.termino));
+    const p1 = construirMarketingPlan({ ...BASE, evidencia: { ...EVIDENCIA, terminos: conDenegadas }, readiness: READINESS_FULL });
+    const p2 = construirMarketingPlan({ ...BASE, evidencia: { ...EVIDENCIA, terminos: sinDenegadas }, readiness: READINESS_FULL });
+    const norm = (s: string): string => s.trim().toLowerCase();
+    const activos1 = p1.activeKeywords.map((k) => norm(k.text));
+    // A/B: ninguna de las 4 denegadas aparece; no se inventaron reemplazos (mismo set que sin ellas de entrada).
+    for (const d of DENEGADAS) expect(activos1).not.toContain(norm(d));
+    expect(new Set(activos1)).toEqual(new Set(p2.activeKeywords.map((k) => norm(k.text))));
+    // H: ambos tipos de ad group siguen con al menos una keyword (ninguno queda vacío).
+    expect(p1.activeKeywords.some((k) => k.action === 'TARGET')).toBe(true);
+    expect(p1.activeKeywords.some((k) => k.action === 'SEGMENT')).toBe(true);
+  });
+});

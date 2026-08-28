@@ -320,6 +320,23 @@ function elegirDestino(intentPreferido: string, destinos: readonly ValidatedDest
   return { finalDestination: match.url, rationale: `Destino validado (${match.intent}) alineado a la intención del grupo.` };
 }
 
+/**
+ * Keywords RECHAZADAS por política de Google Ads (policyViolationError:POLICY_ERROR) detectadas en el full
+ * validate #5 del candidate V2. Se retiran del plan de forma DETERMINISTA por coincidencia EXACTA normalizada
+ * (trim + minúsculas). Se listan las variantes con y sin acento tal como Google las reportó. NO se reemplazan,
+ * reformulan ni se buscan sinónimos: el conjunto de keywords simplemente disminuye.
+ */
+export const KEYWORDS_DENEGADAS_POLITICA_GOOGLE: readonly string[] = [
+  'ficha clinica odontologica',
+  'ficha clínica odontológica',
+  'administracion clinica dental',
+  'ficha clinica dental',
+];
+const SET_KEYWORDS_DENEGADAS: ReadonlySet<string> = new Set(KEYWORDS_DENEGADAS_POLITICA_GOOGLE.map((s) => s.trim().toLowerCase()));
+export function esKeywordDenegadaPorPoliticaGoogle(termino: string): boolean {
+  return SET_KEYWORDS_DENEGADAS.has(termino.trim().toLowerCase());
+}
+
 export function construirMarketingPlan(e: EntradaMarketingPlan): MarketingPlan {
   const moneda = e.moneda ?? 'CLP';
   const cap = Math.max(0, e.presupuestoTotal);
@@ -386,6 +403,9 @@ export function construirMarketingPlan(e: EntradaMarketingPlan): MarketingPlan {
   const observeNoSpend: ObserveKeyword[] = [];
   const negatives: NegativeKeyword[] = [];
   for (const ct of clasificados) {
+    // Retiro determinista de keywords RECHAZADAS por política de Google (policyViolationError, full validate #5):
+    // se excluyen del plan por match EXACTO normalizado (no por similitud) y NO se reemplazan ni reformulan.
+    if (esKeywordDenegadaPorPoliticaGoogle(ct.termino)) continue;
     const pol = POLITICA[ct.category];
     if (pol.action === 'TARGET' || pol.action === 'SEGMENT') activeKeywords.push({ text: ct.termino, intentClassification: ct.category, confidence: ct.confidence, action: pol.action, matchType: pol.matchType ?? 'PHRASE', rationale: pol.reason });
     else if (pol.action === 'EXCLUDE') negatives.push({ text: ct.termino, matchType: pol.matchType ?? 'PHRASE', rationale: pol.reason });

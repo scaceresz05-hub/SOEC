@@ -21,7 +21,7 @@ const READY: MarketingReadiness = {
 const entrada = (cap: number, startAt: string, endAt: string, dias = 10): EntradaMarketingPlan => ({
   objetivo: 'Conseguir clínicas dentales interesadas en SmileFlow', presupuestoTotal: cap, periodoDias: dias, startAt, endAt, moneda: 'CLP',
   canalesSolicitados: ['google', 'meta'], disponibilidad: DISP,
-  evidencia: { impresiones: 1361, clics: 50, gasto: 30137, contactosReales: 0, capAutorizado: null, campaignStatus: 'PAUSED', moneda: 'CLP', terminos: [{ termino: 'administracion clinica dental', impresiones: 300, clics: 12 }, { termino: 'dentalink precios', impresiones: 160, clics: 9 }, { termino: 'exocad', impresiones: 50, clics: 1 }] },
+  evidencia: { impresiones: 1361, clics: 50, gasto: 30137, contactosReales: 0, capAutorizado: null, campaignStatus: 'PAUSED', moneda: 'CLP', terminos: [{ termino: 'agenda clinica dental', impresiones: 300, clics: 12 }, { termino: 'dentalink precios', impresiones: 160, clics: 9 }, { termino: 'exocad', impresiones: 50, clics: 1 }] },
   readiness: READY, historicalCpa: null,
 });
 const A = construirMarketingPlan(entrada(30000, '2026-08-25T00:00:00.000Z', '2026-09-04T00:00:00.000Z'));
