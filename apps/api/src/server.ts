@@ -14,8 +14,8 @@ import { budgetAuthorizationMigrations } from './autonomia-ads/budget-authorizat
 import { crearComposicionGoogleAdsOAuth } from './acquisition/google-ads-runtime-oauth';
 import { GoogleAdsScheduler } from './ingesta/google-ads-scheduler';
 import { StopMonitorService, iniciarStopMonitor } from './campana/stop-monitor';
-import { crearDepsStopMonitor } from './campana/stop-monitor-composition';
-import { construirAdapterPausaGoogleAds } from './campana/google-ads-write-runtime';
+import { crearDepsStopMonitor, construirLectorMetricasCampania } from './campana/stop-monitor-composition';
+import { construirAdapterPausaGoogleAds, construirClienteEscrituraGoogleAds } from './campana/google-ads-write-runtime';
 import { ejecutarBootstrap } from '@soec/identity';
 import { DeterministicIntelligenceProvider } from '@soec/intelligence';
 import { buildApp } from './app';
@@ -131,12 +131,15 @@ async function main(): Promise<void> {
   // evalúa y REGISTRA la decisión; su única acción es STOP_CAMPAIGN (reducción de riesgo). Con la campaña PAUSED ⇒
   // NOOP. Cadencia 5 min: protege un experimento de 15.000 CLP sin polling agresivo.
   if (process.env.SOEC_STOP_MONITOR_ENABLED !== 'false') {
-    // El monitor recibe SÓLO el adapter PAUSE-ONLY (capacidad estructural = pausar; jamás crear/habilitar/editar).
+    // El monitor recibe SÓLO el adapter PAUSE-ONLY (capacidad estructural = pausar; jamás crear/habilitar/editar) +
+    // un lector de métricas READ-ONLY que consulta el spend/status de LA campaña del binding (no la histórica).
     const pauseAdapter = construirAdapterPausaGoogleAds(process.env, 'org-smileflow', compGoogleAds, (i) => console.log(JSON.stringify({ stopMonitorPause: i })));
-    const svc = new StopMonitorService(crearDepsStopMonitor(new PgEventStore(pool), pauseAdapter));
+    const readClient = construirClienteEscrituraGoogleAds(process.env, 'org-smileflow', compGoogleAds, {});
+    const lectorMetricas = readClient ? construirLectorMetricasCampania((cid, q) => readClient.buscar(cid, q)) : null;
+    const svc = new StopMonitorService(crearDepsStopMonitor(new PgEventStore(pool), pauseAdapter, lectorMetricas));
     const intervaloMs = 5 * 60_000;
     iniciarStopMonitor(svc, 'org-smileflow', intervaloMs, (e) => console.log(JSON.stringify(e)));
-    console.log(JSON.stringify({ stopMonitor: 'started', intervaloMs, org: 'org-smileflow', pauseWired: pauseAdapter !== null }));
+    console.log(JSON.stringify({ stopMonitor: 'started', intervaloMs, org: 'org-smileflow', pauseWired: pauseAdapter !== null, metricsWired: lectorMetricas !== null }));
   } else {
     console.log(JSON.stringify({ stopMonitor: 'disabled' }));
   }

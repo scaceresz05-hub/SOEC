@@ -39,7 +39,7 @@ import { fingerprintsDelPlan } from './campana/material-fingerprint';
 import { ledgerCero } from './campana/financial-ledger';
 import { ResourceBindingService } from './campana/resource-binding';
 import { CONTEXTO_CANARY } from './campana/canary-execution';
-import { ejecutarCanaryAtomico, TRANSPORT_ATOMICO } from './campana/canary-atomic-execution';
+import { ejecutarCanaryAtomico, envelopeYaEjecutado, TRANSPORT_ATOMICO } from './campana/canary-atomic-execution';
 import { reconciliarBindings } from './campana/canary-reconciliation';
 import { correlacionarGrafo, consultasRecuperacion, type RecursosLeidos } from './campana/canary-provider-recovery';
 import { hashPlan } from './campana/plan-hash';
@@ -538,8 +538,13 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const realTransportReady = cliente !== null;
     // Contexto derivado del envelope vigente (lock exacto envelope↔hash↔plan; pines org/customer).
     const contextoCanary = { org: CONTEXTO_CANARY.org, customerId: CONTEXTO_CANARY.customerId, envelopeId: envelope?.id ?? CONTEXTO_CANARY.envelopeId, planHash: envelope?.planHash ?? CONTEXTO_CANARY.planHash };
+    // ANTI-DUPLICADO: si este envelope/plan ya se ejecutó (intento exitoso o CAMPAIGN binding), el executor DENIEGA
+    // ALREADY_EXECUTED ANTES de materializar/llamar al proveedor — aunque supervisedReal=true o haya nueva aprobación.
+    const attemptsPrevios = (await store.readStream(c, `canary-attempts:${org}`)).filter((e) => e.type === 'canary-attempt').map((e) => e.payload as { outcome?: string; decision?: string });
+    const bindingsPrevios = await bindingSvc.listar(org);
+    const yaEjecutado = !!envelope && envelopeYaEjecutado(attemptsPrevios, bindingsPrevios, envelope.id);
     const r = cliente
-      ? await ejecutarCanaryAtomico({ org, customerId, envelope, plan, ledger, prov, flags, cliente, ahora: new Date().toISOString() }, contextoCanary)
+      ? await ejecutarCanaryAtomico({ org, customerId, envelope, plan, ledger, prov, flags, cliente, yaEjecutado, ahora: new Date().toISOString() }, contextoCanary)
       : { decision: 'DENY' as const, reason: 'GOOGLE_ADS_WRITE_NOT_CONFIGURED', transport: TRANSPORT_ATOMICO, envelopeId: envelope?.id ?? null, planHash: envelope?.planHash ?? null, providerRequestCount: 0, operationCount: 0, resultsCount: 0, providerSucceeded: 0, providerFailed: 0, bindings: [] as { operationIndex: number; resourceType: string; resourceName: string | null }[], requestId: null, googleErrors: [], supervisedReal: flags.supervisedReal, autonomousReal: flags.autonomousReal };
     const outcome = r.decision === 'DENY' ? 'DENIED' : r.decision === 'EXECUTED' ? 'EXECUTED' : 'PROVIDER_FAILED';
     app.log.info({ ruta: 'canary-execute', org, decision: r.decision, outcome, reason: r.reason, transport: r.transport, providerRequestCount: r.providerRequestCount, operationCount: r.operationCount, providerSucceeded: r.providerSucceeded, providerFailed: r.providerFailed, supervisedReal: flags.supervisedReal }, 'canary-execute attempt');
@@ -560,6 +565,8 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       organizationId: org, decision: r.decision, outcome, reason: r.reason, executionTriggerScope: 'FULL_APPROVED_PLAN',
       envelopeId: r.envelopeId, planHash: r.planHash, realTransportReady,
       transport: r.transport, providerRequestCount: r.providerRequestCount, operationCount: r.operationCount,
+      // ANTI-DUPLICADO: si ya se ejecutó, reason=ALREADY_EXECUTED, 0 requests, grafo NO materializado.
+      alreadyExecuted: r.reason === 'ALREADY_EXECUTED', operationGraphMaterialized: r.operationCount > 0, googleWrites: r.providerRequestCount,
       // Compat: providerMutateAttempts = llamadas MUTATE (0/1). providerBindings = recursos reales creados/persistidos.
       providerMutateAttempts: r.providerRequestCount, providerActionsSucceeded: r.providerSucceeded, providerBindings: reconc?.providerBindingsTotal ?? r.bindings.filter((b) => b.resourceName).length,
       resultsCount: r.resultsCount, providerSucceeded: r.providerSucceeded, providerFailed: r.providerFailed,

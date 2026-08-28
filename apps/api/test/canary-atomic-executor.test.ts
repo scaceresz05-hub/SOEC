@@ -9,7 +9,7 @@ import { construirMarketingPlan, type EntradaMarketingPlan, type CanalId } from 
 import { construirEnvelope, aprobar, type ProviderState, type FlagsEjecucion } from '../src/campana/authorized-execution-envelope';
 import { ledgerCero } from '../src/campana/financial-ledger';
 import { GoogleAdsMutateHttpClient } from '../src/campana/google-ads-mutate-http';
-import { ejecutarCanaryAtomico } from '../src/campana/canary-atomic-execution';
+import { ejecutarCanaryAtomico, envelopeYaEjecutado } from '../src/campana/canary-atomic-execution';
 import { materializarGoogleAdsMutate, ventanaFechasDesdeActivacion } from '../src/campana/google-ads-materializer';
 import { GEO_SMILEFLOW_V2, type GeoRegionResuelta } from '../src/campana/geo-policy';
 import { ORG_SMILEFLOW as ORG } from '../src/plataforma';
@@ -107,6 +107,28 @@ describe('ejecutor canary ATÓMICO — un solo GoogleAdsService.Mutate', () => {
     expect(r.providerSucceeded).toBe(0);
     expect(r.requestId).toBe('REQ-FAIL');
     expect(r.googleErrors[0]?.errorCode).toBe('fieldError:REQUIRED');
+  });
+
+  it('anti-duplicado §1-§5: yaEjecutado ⇒ ALREADY_EXECUTED, 0 provider requests, grafo NO materializado, aun con supervisedReal=true', async () => {
+    const { cliente, urls } = clienteFake();
+    const r = await ejecutarCanaryAtomico({ ...entradas(cliente, SUP(true)), yaEjecutado: true }, CTX);
+    expect(r.decision).toBe('DENY');
+    expect(r.reason).toBe('ALREADY_EXECUTED');
+    expect(r.providerRequestCount).toBe(0);
+    expect(r.operationCount).toBe(0);
+    expect(urls).toHaveLength(0); // 0 llamadas al proveedor (ni geo ni mutate)
+  });
+  it('anti-duplicado §6: yaEjecutado=false + gates abiertos ⇒ el executor corre normal (no bloquea planes nuevos)', async () => {
+    const { cliente } = clienteFake();
+    expect((await ejecutarCanaryAtomico({ ...entradas(cliente, SUP(true)), yaEjecutado: false }, CTX)).decision).toBe('EXECUTED');
+  });
+  it('envelopeYaEjecutado §1-§3: intento EXECUTED ⇒ true; campaign binding ⇒ true; sólo FAILED ⇒ false', () => {
+    const envId = ENV_APROBADO.id;
+    expect(envelopeYaEjecutado([{ outcome: 'EXECUTED' }], [], envId)).toBe(true);
+    expect(envelopeYaEjecutado([], [{ envelopeId: envId, entityType: 'campaign' }], envId)).toBe(true);
+    expect(envelopeYaEjecutado([{ outcome: 'PROVIDER_FAILED' }, { outcome: 'DENIED' }], [], envId)).toBe(false);
+    expect(envelopeYaEjecutado([], [{ envelopeId: 'otro', entityType: 'campaign' }, { envelopeId: envId, entityType: 'keyword' }], envId)).toBe(false);
+    expect(envelopeYaEjecutado([], [], envId)).toBe(false);
   });
 
   it('§12: validate y real comparten el MISMO materializador (sólo cambia validateOnly)', () => {

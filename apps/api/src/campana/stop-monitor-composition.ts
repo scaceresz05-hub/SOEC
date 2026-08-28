@@ -8,7 +8,6 @@ import { ObservacionService } from '@soec/motor-medicion';
 import { EnvelopeService } from './envelope-service';
 import { ResourceBindingService } from './resource-binding';
 import { DiagnosisEvidenceService } from './diagnosis-evidence-service';
-import { adsSnapshotStreamId, ultimoSnapshotAds } from '../ingesta/ingesta-google-ads-service';
 import type { GoogleAdsPauseAdapter } from './google-ads-pause-adapter';
 import type { DepsStopMonitor, MetricasCampania, UltimoStop } from './stop-monitor';
 
@@ -19,8 +18,30 @@ export function stopMonitorStreamId(org: string): string { return `stop-monitor:
 
 const ATR: Attribution = { source: 'stop-monitor', purpose: 'pausa automática por regla de stop autorizada (reducción de riesgo)', assumptions: ['única acción provider = PAUSE; nunca create/enable/budget/targeting'], claimType: 'observational', regime: 'empirical', uncertainty: 'baja' };
 
-/** `pausar` es opcional: sin adapter configurado el monitor decide pero no pausa (NO_PAUSE_ADAPTER, 0 writes). */
-export function crearDepsStopMonitor(store: EventStore, pauseAdapter: GoogleAdsPauseAdapter | null): DepsStopMonitor {
+/** Métricas provider (READ-ONLY) de UNA campaña específica: spend (de esa campaña, no la histórica) + status. */
+export type LeerMetricasProvider = (customerId: string, campaignId: string) => Promise<{ cost: number; status: string | null } | null>;
+
+/**
+ * Lector de métricas por campaignId vía GAQL READ-ONLY (dos consultas: status y cost del PERÍODO). El WHERE filtra por
+ * campaign.id ⇒ el spend es EXCLUSIVAMENTE de esa campaña (nunca suma la histórica 24120966895). Sin writes.
+ */
+export function construirLectorMetricasCampania(buscar: (customerId: string, query: string) => Promise<Array<Record<string, unknown>>>): LeerMetricasProvider {
+  return async (customerId, campaignId) => {
+    const statusRows = await buscar(customerId, `SELECT campaign.id, campaign.status FROM campaign WHERE campaign.id = ${campaignId}`);
+    const status = (statusRows[0] as { campaign?: { status?: string } } | undefined)?.campaign?.status ?? null;
+    if (!status) return null; // campaña no encontrada ⇒ métricas indisponibles
+    const costRows = await buscar(customerId, `SELECT metrics.cost_micros FROM campaign WHERE campaign.id = ${campaignId} DURING LAST_30_DAYS`);
+    const costMicros = Number((costRows[0] as { metrics?: { costMicros?: string | number } } | undefined)?.metrics?.costMicros ?? 0);
+    return { cost: costMicros / 1_000_000, status };
+  };
+}
+
+const idCampania = (rn: string | null): string | null => rn?.match(/campaigns\/(\d+)$/)?.[1] ?? null;
+const idCustomer = (rn: string | null): string | null => rn?.match(/^customers\/(\d+)\//)?.[1] ?? null;
+
+/** `pausar` es opcional: sin adapter configurado el monitor decide pero no pausa (NO_PAUSE_ADAPTER, 0 writes).
+ * `leerMetricasProvider` lee el spend/status de LA campaña del binding (no la histórica); null ⇒ métricas indisponibles. */
+export function crearDepsStopMonitor(store: EventStore, pauseAdapter: GoogleAdsPauseAdapter | null, leerMetricasProvider: LeerMetricasProvider | null): DepsStopMonitor {
   const ctx = (org: string): RequestContext => { const o = OrganizationId(org); return { organizationId: o, actor: ActorId('stop-monitor'), scope: { organizationId: o, permissions: ['events:read', 'events:append'] }, correlationId: `stop-monitor-${org}` }; };
   const envelopes = new EnvelopeService(store);
   const bindings = new ResourceBindingService(store);
@@ -28,9 +49,8 @@ export function crearDepsStopMonitor(store: EventStore, pauseAdapter: GoogleAdsP
   return {
     leerEnvelope: (org) => envelopes.leerUltimo(org),
     leerCampaignBindingResourceName: async (org, envelopeId) => (await bindings.listar(org)).find((b) => b.envelopeId === envelopeId && b.entityType === 'campaign')?.providerResourceId ?? null,
-    leerMetricas: async (org): Promise<MetricasCampania> => {
+    leerMetricas: async (org, campaignBindingResourceName): Promise<MetricasCampania> => {
       const c = ctx(org);
-      const snap = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(org)));
       const readiness = await readinessSvc.leerUltima(org);
       // contactos first-party (Growth) — misma fuente que el operador de campaña; NO usa histórico de gasto.
       const obs = new ObservacionService(store, {} as never);
@@ -40,7 +60,17 @@ export function crearDepsStopMonitor(store: EventStore, pauseAdapter: GoogleAdsP
         const p = st.datos?.provenanciaReal;
         if (st.datos?.naturaleza === 'REAL' && p?.provider === GROWTH && !p.diagnostico && p.eventName === EVENTO_CONTACTO) contacts += 1;
       }
-      return { spend: snap?.cost ?? 0, contacts, trackingValid: readiness?.firstPartyTracking?.status === 'PASS', landingAvailable: readiness?.landing?.status === 'PASS', campaignStatus: snap?.status ?? null, snapshotCampaignId: snap?.campaignId ?? null };
+      // SPEND/STATUS de LA campaña del BINDING (no la histórica): lectura provider por campaignId del binding. El
+      // guard METRICS_NOT_FOR_BOUND_CAMPAIGN se preserva: sólo si la métrica ES de esa campaña, snapshotCampaignId
+      // coincide. Sin lectura disponible ⇒ snapshotCampaignId=null (fail-closed: el monitor no actúa con datos ajenos).
+      const campaignId = idCampania(campaignBindingResourceName);
+      const customerId = idCustomer(campaignBindingResourceName);
+      let spend = 0; let campaignStatus: string | null = null; let snapshotCampaignId: string | null = null;
+      if (campaignId && customerId && leerMetricasProvider) {
+        const m = await leerMetricasProvider(customerId, campaignId).catch(() => null);
+        if (m) { spend = m.cost; campaignStatus = m.status; snapshotCampaignId = campaignId; }
+      }
+      return { spend, contacts, trackingValid: readiness?.firstPartyTracking?.status === 'PASS', landingAvailable: readiness?.landing?.status === 'PASS', campaignStatus, snapshotCampaignId };
     },
     leerUltimoStop: async (org): Promise<UltimoStop | null> => {
       const eventos = await store.readStream(ctx(org), stopMonitorStreamId(org));

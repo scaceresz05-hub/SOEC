@@ -55,6 +55,18 @@ export interface EntradasCanaryAtomico {
   readonly cliente: GoogleAdsMutateHttpClient;
   readonly geoPolicy?: GeoPolicy;
   readonly ahora: string;
+  /** ANTI-DUPLICADO: true si este envelope/plan ya se ejecutó (intento exitoso o campaign binding) ⇒ nunca recrear. */
+  readonly yaEjecutado?: boolean;
+}
+
+/**
+ * ANTI-DUPLICADO (PURO): el envelope/plan ya se ejecutó si existe un intento REAL exitoso (outcome EXECUTED) O un
+ * CAMPAIGN binding del mismo envelope. Un intento FALLIDO no cuenta. Determinista sobre evidencia durable existente.
+ */
+export function envelopeYaEjecutado(attempts: ReadonlyArray<{ outcome?: string; decision?: string }>, bindings: ReadonlyArray<{ envelopeId: string; entityType: string }>, envelopeId: string): boolean {
+  const intentoExitoso = attempts.some((a) => a.outcome === 'EXECUTED' || a.decision === 'EXECUTED');
+  const bindingCampania = bindings.some((b) => b.envelopeId === envelopeId && b.entityType === 'campaign');
+  return intentoExitoso || bindingCampania;
 }
 
 function denyA(reason: string, envelope: AuthorizedExecutionEnvelope | null, flags: FlagsEjecucion): ResultadoCanaryAtomico {
@@ -63,6 +75,10 @@ function denyA(reason: string, envelope: AuthorizedExecutionEnvelope | null, fla
 
 export async function ejecutarCanaryAtomico(e: EntradasCanaryAtomico, contexto: ContextoCanary = CONTEXTO_CANARY): Promise<ResultadoCanaryAtomico> {
   const geoPolicy = e.geoPolicy ?? GEO_SMILEFLOW_V2;
+  // 0) ANTI-DUPLICADO fail-closed ANTES de todo: un envelope/plan ya ejecutado NO puede recrear las 61 CREATE ops,
+  //    aunque supervisedReal=true o haya una nueva aprobación. 0 provider requests, 0 materialización. La única vía
+  //    para operar la campaña existente es vía acciones sobre su binding (p.ej. pausa), nunca recrear el plan.
+  if (e.yaEjecutado) return denyA('ALREADY_EXECUTED', e.envelope, e.flags);
   // 1) Contexto: pines org/customer + integridad content-addressed del envelope + coherencia envelope↔plan + aprobado.
   if (e.org !== contexto.org) return denyA('CONTEXT_ORG_NOT_AUTHORIZED', e.envelope, e.flags);
   if (e.customerId !== contexto.customerId) return denyA('CUSTOMER_ID_MISMATCH', e.envelope, e.flags);

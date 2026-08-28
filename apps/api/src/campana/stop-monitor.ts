@@ -85,7 +85,8 @@ const customerIdDe = (resourceName: string | null): string | null => resourceNam
 export interface DepsStopMonitor {
   readonly leerEnvelope: (org: string) => Promise<AuthorizedExecutionEnvelope | null>;
   readonly leerCampaignBindingResourceName: (org: string, envelopeId: string) => Promise<string | null>;
-  readonly leerMetricas: (org: string) => Promise<MetricasCampania>;
+  /** Métricas de la campaña del BINDING (spend/status de esa campaña, no la histórica); contacts first-party. */
+  readonly leerMetricas: (org: string, campaignBindingResourceName: string | null) => Promise<MetricasCampania>;
   /** Último STOP registrado (para idempotencia de ejecución). */
   readonly leerUltimoStop: (org: string) => Promise<UltimoStop | null>;
   /** ÚNICA capacidad provider del monitor: PAUSAR. Opcional (sin adapter ⇒ NO_PAUSE_ADAPTER, 0 writes). */
@@ -110,7 +111,7 @@ export class StopMonitorService {
     const envelope = await this.deps.leerEnvelope(org);
     if (!envelope) return { decision: { action: 'NOOP', reason: 'NO_ENVELOPE', firedRuleIds: [], campaignId: null }, outcome: 'NOOP' };
     const bindingRN = await this.deps.leerCampaignBindingResourceName(org, envelope.id);
-    const m = await this.deps.leerMetricas(org);
+    const m = await this.deps.leerMetricas(org, bindingRN);
     const decision = decidirMonitorStop({ envelope, campaignBindingResourceName: bindingRN, snapshotCampaignId: m.snapshotCampaignId, campaignStatus: m.campaignStatus, spend: m.spend, contacts: m.contacts, trackingValid: m.trackingValid, landingAvailable: m.landingAvailable, now: at });
     if (decision.action !== 'STOP_CAMPAIGN') return { decision, outcome: 'NOOP' }; // 0 provider writes
     // STOP decidido ⇒ la campaña está ENABLED (decidirMonitorStop ya lo garantiza). Idempotencia de ejecución:

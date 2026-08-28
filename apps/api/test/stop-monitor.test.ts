@@ -6,6 +6,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { decidirMonitorStop, debeSaltarPausa, StopMonitorService, type EntradaMonitor, type DepsStopMonitor, type MetricasCampania, type UltimoStop, type ResultadoPausaProvider } from '../src/campana/stop-monitor';
 import { GoogleAdsPauseAdapter } from '../src/campana/google-ads-pause-adapter';
+import { construirLectorMetricasCampania, crearDepsStopMonitor } from '../src/campana/stop-monitor-composition';
+import { InMemoryEventStore } from '@soec/event-store';
 import type { AuthorizedExecutionEnvelope } from '../src/campana/authorized-execution-envelope';
 
 const CAMP = 'customers/8605539300/campaigns/24194332264';
@@ -84,6 +86,34 @@ describe('StopMonitorService — pausa real, idempotente, fail-closed', () => {
     // idempotencia: un FAILED previo NO bloquea el reintento (sólo un PAUSED exitoso lo hace)
     expect(debeSaltarPausa({ campaignId: '24194332264', outcome: 'FAILED_STOP_EXECUTION' }, '24194332264')).toBe(false);
     expect(debeSaltarPausa({ campaignId: '24194332264', outcome: 'PAUSED' }, '24194332264')).toBe(true);
+  });
+});
+
+describe('métricas del monitor desde la campaña del binding (no la histórica)', () => {
+  it('§8/§12: lector GAQL por campaignId ⇒ spend de ESA campaña; el WHERE nunca incluye la histórica', async () => {
+    const queries: string[] = [];
+    const buscar = async (_cid: string, q: string) => { queries.push(q); return q.includes('campaign.status') ? [{ campaign: { status: 'ENABLED' } }] : [{ metrics: { costMicros: '7500000000' } }]; };
+    const m = await construirLectorMetricasCampania(buscar)('8605539300', '24194332264');
+    expect(m).toEqual({ cost: 7500, status: 'ENABLED' });
+    expect(queries.every((q) => q.includes('campaign.id = 24194332264'))).toBe(true);
+    expect(queries.some((q) => q.includes('24120966895'))).toBe(false); // jamás consulta la histórica
+  });
+  it('§8: la composición produce snapshotCampaignId = campaña del binding (guard pasa) y spend real', async () => {
+    const lector = async () => ({ cost: 7500, status: 'ENABLED' as string });
+    const deps = crearDepsStopMonitor(new InMemoryEventStore(), null, lector);
+    const m = await deps.leerMetricas('org-smileflow', CAMP);
+    expect(m.snapshotCampaignId).toBe('24194332264');
+    expect(m.spend).toBe(7500);
+    expect(m.campaignStatus).toBe('ENABLED');
+    // con esas métricas y contacts=0 ⇒ STOP_ZERO_CONVERSION (7500), NO METRICS_NOT_FOR_BOUND_CAMPAIGN
+    const d = decidirMonitorStop(entrada({ snapshotCampaignId: m.snapshotCampaignId, campaignStatus: m.campaignStatus, spend: m.spend, contacts: m.contacts }));
+    expect(d.action).toBe('STOP_CAMPAIGN'); expect(d.firedRuleIds).toContain('STOP_ZERO_CONVERSION');
+  });
+  it('§7: sin lector (métricas indisponibles) ⇒ snapshotCampaignId=null ⇒ fail-closed NOOP (no actúa con datos ajenos)', async () => {
+    const deps = crearDepsStopMonitor(new InMemoryEventStore(), null, null);
+    const m = await deps.leerMetricas('org-smileflow', CAMP);
+    expect(m.snapshotCampaignId).toBeNull();
+    expect(decidirMonitorStop(entrada({ snapshotCampaignId: null, campaignStatus: null })).action).toBe('NOOP');
   });
 });
 
