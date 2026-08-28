@@ -26,6 +26,7 @@ import { PlanAccionDryRunService, type PerfilUsuario, type CapLookup } from './a
 import { G2AService } from './autonomia-ads/g2a-service';
 import { CampaignOperatorDryRunService, type EntradaOperador } from './campana/campaign-operator-service';
 import type { CanalId } from './campana/marketing-plan';
+import { retirarKeywordsDenegadasDelPlan, esKeywordDenegadaPorPoliticaGoogle, KEYWORDS_DENEGADAS_POLITICA_GOOGLE } from './campana/marketing-plan';
 import { DiagnosisEvidenceService } from './campana/diagnosis-evidence-service';
 import { normalizarReadinessInput } from './campana/diagnosis-evidence';
 import { EnvelopeService } from './campana/envelope-service';
@@ -41,8 +42,8 @@ import { ejecutarCanary, CONTEXTO_CANARY } from './campana/canary-execution';
 import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
 import { PuertoEscrituraNoConfigurada, GoogleAdsRealMutatePort } from './campana/google-ads-real-port';
 import { construirPuertoEscrituraGoogleAds, construirClienteEscrituraGoogleAds, resolverGeoRegiones } from './campana/google-ads-write-runtime';
-import { materializarGoogleAdsMutate, ventanaFechasDesdeActivacion } from './campana/google-ads-materializer';
-import { GEO_SMILEFLOW_V2 } from './campana/geo-policy';
+import { materializarGoogleAdsMutate, ventanaFechasDesdeActivacion, contarOperaciones } from './campana/google-ads-materializer';
+import { GEO_SMILEFLOW_V2, type GeoRegionResuelta } from './campana/geo-policy';
 import { getRecursoGoogleAds } from './plataforma';
 import { contextoDe, permisosDe, modoOperativoDe } from './superficie-auth';
 import {
@@ -582,8 +583,11 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const { ctx: c, org } = real(req, 'autonomia-ads');
     if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
     if (org !== CONTEXTO_CANARY.org) return reply.send({ ok: false, error: 'CONTEXT_ORG_NOT_AUTHORIZED' });
-    const plan = (await campaignOperator.leerUltimo(org))?.plan ?? null;
-    if (!plan) return reply.send({ ok: false, error: 'NO_PLAN' });
+    const planPersistido = (await campaignOperator.leerUltimo(org))?.plan ?? null;
+    if (!planPersistido) return reply.send({ ok: false, error: 'NO_PLAN' });
+    // CANDIDATE V2: el plan PERSISTIDO se materializa TRAS retirar las keywords denegadas por política (el denylist
+    // sólo filtra al construir; el plan persistido las conserva). NO modifica el plan persistido ni su hash.
+    const plan = retirarKeywordsDenegadasDelPlan(planPersistido);
     let customerId = 'PENDING';
     try { customerId = getRecursoGoogleAds(org).customerId; } catch { return reply.send({ ok: false, error: 'GOOGLE_ADS_NOT_CONFIGURED' }); }
     if (customerId !== CONTEXTO_CANARY.customerId) return reply.send({ ok: false, error: 'CUSTOMER_ID_MISMATCH' });
@@ -620,6 +624,48 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     } catch (e) {
       return reply.send({ ok: false, validateOnly: true, error: e instanceof Error ? e.message : String(e), providerAttempts: attempts });
     }
+  });
+
+  // PREFLIGHT READ-ONLY (SIN Google): materializa el MISMO candidate que `canary-validate` usaría (plan persistido
+  // → retiro de keywords denegadas) y reporta los conteos, para verificar la alineación (61 ops / 22 positivas /
+  // sin denegadas) SIN llamar a Google ni gastar. La geo usa criterionId placeholder (el count es lo que importa;
+  // los ids reales sólo se resuelven en el validate real). NO muta, NO crea recursos, NO expone secretos.
+  app.get('/medicion/canary-candidate', async (req, reply) => {
+    const { org } = real(req, 'autonomia-ads');
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    const resultado = await campaignOperator.leerUltimo(org);
+    const planPersistido = resultado?.plan ?? null;
+    if (!planPersistido) return reply.send({ ok: false, error: 'NO_PLAN' });
+    const candidato = retirarKeywordsDenegadasDelPlan(planPersistido);
+    let customerId = 'DIAGNOSTIC';
+    try { customerId = getRecursoGoogleAds(org).customerId; } catch { /* placeholder para el conteo */ }
+    // GEO sintética desde la política (NO Google): 4 positivas + RM negativa, criterionId placeholder.
+    const geoDiag: GeoRegionResuelta[] = GEO_SMILEFLOW_V2.regiones.map((r) => ({ nombre: r.nombre, negativa: r.negativa, criterionId: 'DIAGNOSTIC', canonicalName: '' }));
+    const { startDateTime, endDateTime } = ventanaFechasDesdeActivacion(new Date(Date.now() + 2 * 24 * 3600_000).toISOString().slice(0, 10));
+    const req2 = materializarGoogleAdsMutate(candidato, GEO_SMILEFLOW_V2, geoDiag, { customerId, startDateTime, endDateTime, validateOnly: true });
+    if (!req2) return reply.send({ ok: false, error: 'MATERIALIZE_FAILED' });
+    const conteo = contarOperaciones(req2);
+    const criterios = req2.mutateOperations.filter((o) => Object.keys(o)[0] === 'campaignCriterionOperation').map((o) => (o as { campaignCriterionOperation: { create: Record<string, unknown> } }).campaignCriterionOperation.create);
+    const geoCriteria = criterios.filter((cr) => 'location' in cr).length;
+    const negativeKeywords = criterios.filter((cr) => 'keyword' in cr).length;
+    const positiveKeywords = candidato.activeKeywords.map((k) => k.text);
+    const jsonLower = JSON.stringify(req2).toLowerCase();
+    const deniedPresent = KEYWORDS_DENEGADAS_POLITICA_GOOGLE.filter((d) => jsonLower.includes(d.toLowerCase()));
+    return reply.send({
+      ok: true,
+      candidateSource: 'campaignOperator.leerUltimo → retirarKeywordsDenegadasDelPlan (denylist)',
+      operationCount: conteo.total,
+      positiveKeywordCount: positiveKeywords.length,
+      positiveKeywords,
+      deniedKeywordsPresent: deniedPresent, // debe ser []
+      negativeKeywordCount: negativeKeywords,
+      geoCriteriaCount: geoCriteria,
+      adGroupCount: conteo.adGroupOperation ?? 0,
+      adCount: conteo.adGroupAdOperation ?? 0,
+      // Evidencia de separación: el plan persistido conserva sus keywords; el candidate materializado no las denegadas.
+      persistedPositiveKeywordCount: planPersistido.activeKeywords.length,
+      persistedDeniedKeywordCount: planPersistido.activeKeywords.filter((k) => esKeywordDenegadaPorPoliticaGoogle(k.text)).length,
+    });
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {

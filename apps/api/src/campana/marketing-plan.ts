@@ -337,6 +337,21 @@ export function esKeywordDenegadaPorPoliticaGoogle(termino: string): boolean {
   return SET_KEYWORDS_DENEGADAS.has(termino.trim().toLowerCase());
 }
 
+/**
+ * Sanea un plan YA CONSTRUIDO retirando las keywords denegadas por política de Google (PURO, devuelve copia).
+ * Necesario porque `construirMarketingPlan` sólo filtra al CONSTRUIR: un plan PERSISTIDO antes del denylist
+ * (p.ej. el que lee `campaignOperator.leerUltimo`) todavía las contiene. NO muta el plan original ni su hash;
+ * produce el CANDIDATE V2 coherente (sin las denegadas) para materializar. No toca negativas ni geo.
+ */
+export function retirarKeywordsDenegadasDelPlan(plan: MarketingPlan): MarketingPlan {
+  const permitida = (k: { readonly text: string }): boolean => !esKeywordDenegadaPorPoliticaGoogle(k.text);
+  return {
+    ...plan,
+    activeKeywords: plan.activeKeywords.filter(permitida),
+    campaigns: plan.campaigns.map((c) => ({ ...c, adGroups: c.adGroups.map((g) => ({ ...g, keywords: g.keywords.filter(permitida) })) })),
+  };
+}
+
 export function construirMarketingPlan(e: EntradaMarketingPlan): MarketingPlan {
   const moneda = e.moneda ?? 'CLP';
   const cap = Math.max(0, e.presupuestoTotal);
