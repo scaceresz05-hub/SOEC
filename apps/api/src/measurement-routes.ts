@@ -38,11 +38,11 @@ import { fingerprintsDelPlan } from './campana/material-fingerprint';
 import { ledgerCero } from './campana/financial-ledger';
 import { ResourceBindingService } from './campana/resource-binding';
 import { ejecutarCanary, CONTEXTO_CANARY } from './campana/canary-execution';
-import { construirActionPlan } from './campana/execution-intent';
-import type { GoogleMutationPayload, CampaignTotalBudgetPayload } from './campana/google-translator';
 import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
 import { PuertoEscrituraNoConfigurada, GoogleAdsRealMutatePort } from './campana/google-ads-real-port';
-import { construirPuertoEscrituraGoogleAds } from './campana/google-ads-write-runtime';
+import { construirPuertoEscrituraGoogleAds, construirClienteEscrituraGoogleAds, resolverGeoRegiones } from './campana/google-ads-write-runtime';
+import { materializarGoogleAdsMutate } from './campana/google-ads-materializer';
+import { GEO_SMILEFLOW_V2 } from './campana/geo-policy';
 import { getRecursoGoogleAds } from './plataforma';
 import { contextoDe, permisosDe, modoOperativoDe } from './superficie-auth';
 import {
@@ -557,35 +557,43 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     return reply.send({ organizationId: org, attempts: eventos.filter((e) => e.type === 'canary-attempt').map((e) => e.payload) });
   });
 
-  // DIAGNÓSTICO SEGURO (validate_only): valida contra Google la PRIMERA operación real (campaign_budget.create)
-  // SIN mutar (Google no crea recursos ni gasta). Auth + business.manage + contexto canónico. NO activa el
-  // envelope, NO crea bindings, NO requiere supervisedReal (no muta). Captura status/errorCode/request-id de Google.
+  // DIAGNÓSTICO SEGURO — FULL GRAPH validate_only (V2): valida contra Google el GRAFO COMPLETO candidato
+  // (GoogleAdsService.Mutate, partialFailure=false, validateOnly=true) SIN crear recursos ni gastar. Resuelve la
+  // geo real (SuggestGeoTargetConstants). Auth + business.manage + contexto canónico. NO usa el envelope viejo para
+  // mutar ni crea envelope nuevo. Materialización COMPARTIDA con el path real (sólo cambia validateOnly).
   app.post('/medicion/canary-validate', async (req, reply) => {
     const { org } = real(req, 'autonomia-ads');
     if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
     if (org !== CONTEXTO_CANARY.org) return reply.send({ ok: false, error: 'CONTEXT_ORG_NOT_AUTHORIZED' });
-    const envelope = await envelopeSvc.leerUltimo(org);
     const plan = (await campaignOperator.leerUltimo(org))?.plan ?? null;
-    if (!envelope || !plan) return reply.send({ ok: false, error: 'NO_ENVELOPE_OR_PLAN' });
-    if (envelope.id !== CONTEXTO_CANARY.envelopeId || envelope.planHash !== CONTEXTO_CANARY.planHash) return reply.send({ ok: false, error: 'ENVELOPE_ID_MISMATCH' });
+    if (!plan) return reply.send({ ok: false, error: 'NO_PLAN' });
     let customerId = 'PENDING';
     try { customerId = getRecursoGoogleAds(org).customerId; } catch { return reply.send({ ok: false, error: 'GOOGLE_ADS_NOT_CONFIGURED' }); }
     if (customerId !== CONTEXTO_CANARY.customerId) return reply.send({ ok: false, error: 'CUSTOMER_ID_MISMATCH' });
-    // PRIMERA operación del grafo: campaign_budget.create (sub-op del CREATE_CAMPAIGN).
-    const cc = construirActionPlan(plan, envelope, customerId, new Date().toISOString()).find((i) => i.actionType === 'CREATE_CAMPAIGN');
-    const budget = (cc?.providerPayload?.fields as { budget?: CampaignTotalBudgetPayload } | undefined)?.budget;
-    if (!budget) return reply.send({ ok: false, error: 'NO_BUDGET_OPERATION' });
-    const budgetPayload: GoogleMutationPayload = { customerId, operation: budget.operation, resourceType: budget.resourceType, fields: { period: budget.period, totalAmountMicros: budget.totalAmountMicros, explicitlyShared: budget.explicitlyShared } };
     const attempts: GoogleAdsWriteLog[] = [];
-    const port = construirPuertoEscrituraGoogleAds(process.env, org, googleAdsComp, { validateOnly: true, logger: (i) => { app.log.info(i, 'ga-write-validate'); attempts.push(i); } });
-    if (!port) return reply.send({ ok: false, error: 'GOOGLE_ADS_WRITE_NOT_CONFIGURED' });
+    const cliente = construirClienteEscrituraGoogleAds(process.env, org, googleAdsComp, { validateOnly: true, logger: (i) => { app.log.info(i, 'ga-write-validate'); attempts.push(i); } });
+    if (!cliente) return reply.send({ ok: false, error: 'GOOGLE_ADS_WRITE_NOT_CONFIGURED' });
+    // 1) GEO real (criterionId por región). Fail-closed si alguna no resuelve (evita targetear mal).
+    let geo: Awaited<ReturnType<typeof resolverGeoRegiones>>;
+    try { geo = await resolverGeoRegiones(cliente, GEO_SMILEFLOW_V2); } catch (e) { return reply.send({ ok: false, error: 'GEO_RESOLVE_FAILED', detalle: e instanceof Error ? e.message : String(e), providerAttempts: attempts }); }
+    if (geo.faltantes.length > 0) return reply.send({ ok: false, error: 'GEO_UNRESOLVED', faltantes: geo.faltantes });
+    // 2) Fechas CANDIDATAS para validate (mañana + 9 días). NO se persisten como contractuales (el plan guarda la regla).
+    const startMs = Date.parse(new Date().toISOString()) + 2 * 24 * 3600_000;
+    const start = new Date(startMs).toISOString().slice(0, 10);
+    const end = new Date(startMs + 9 * 24 * 3600_000).toISOString().slice(0, 10);
+    // 3) Materializar el grafo COMPLETO (misma función que el path real) y validar.
+    const request = materializarGoogleAdsMutate(plan, GEO_SMILEFLOW_V2, geo.resueltas, { customerId, startDate: start, endDate: end, validateOnly: true });
+    if (!request) return reply.send({ ok: false, error: 'MATERIALIZE_FAILED' });
     try {
-      await port.mutate(budgetPayload); // validate_only ⇒ Google valida, NO crea
-      // NOTA: valida SÓLO campaign_budget.create (la 1ª op). campaign.create (2ª op del canary real) NO se valida aquí.
-      return reply.send({ ok: true, validateOnly: true, firstOperation: 'campaign_budget.create', result: 'VALIDATE_ONLY_OK', totalAmountMicros: budget.totalAmountMicros, providerAttempts: attempts });
+      const r = await cliente.mutarGrafo(customerId, request);
+      return reply.send({
+        ok: r.ok, validateOnly: true, mode: 'GoogleAdsService.Mutate', partialFailure: false,
+        operationCount: request.mutateOperations.length,
+        geoResolved: geo.resueltas.map((g) => ({ nombre: g.nombre, criterionId: g.criterionId, canonicalName: g.canonicalName, negativa: g.negativa })),
+        result: r, providerAttempts: attempts,
+      });
     } catch (e) {
-      // El mensaje del transporte lleva HTTP status + errorCode de Google + request-id (sin secretos).
-      return reply.send({ ok: false, validateOnly: true, firstOperation: 'campaign_budget.create', error: e instanceof Error ? e.message : String(e), providerAttempts: attempts });
+      return reply.send({ ok: false, validateOnly: true, error: e instanceof Error ? e.message : String(e), providerAttempts: attempts });
     }
   });
 

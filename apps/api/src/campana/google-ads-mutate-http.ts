@@ -12,6 +12,31 @@
  * recursos ni gasta). El error de Google (status/code/message) y el `request-id` se registran SANITIZADOS.
  */
 import type { GoogleAdsApiClient, GoogleAdsOperation } from './google-ads-real-port';
+import type { GoogleAdsMutateRequest } from './google-ads-materializer';
+
+/** Resultado sanitizado de una llamada al proveedor (validate o real). Sin secretos. */
+export interface ResultadoProveedor {
+  readonly ok: boolean;
+  readonly httpStatus: number;
+  readonly requestId: string | null;
+  readonly validateOnly: boolean;
+  readonly operationCount: number;
+  readonly resultsCount: number;
+  readonly errorStatus: string | null;
+  readonly errorCode: string | null;
+  readonly errorMessage: string | null;
+  readonly partialFailure: boolean;
+}
+
+/** Región geo resuelta por Google (SuggestGeoTargetConstants). */
+export interface GeoTargetSugerido {
+  readonly name: string;
+  readonly canonicalName: string;
+  readonly criterionId: string;
+  readonly targetType: string;
+  readonly countryCode: string;
+  readonly status: string;
+}
 
 const HOSTS_AUTORIZADOS = new Set<string>(['googleads.googleapis.com', 'oauth2.googleapis.com']);
 const API_VERSION = 'v25';
@@ -112,5 +137,59 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
     const resourceName = json.results?.[0]?.resourceName;
     if (!resourceName) throw new Error('SIN_RESOURCE_NAME');
     return { resourceName };
+  }
+
+  /**
+   * GoogleAdsService.Mutate del GRAFO COMPLETO (multi-resource, temporary resource names, partialFailure). La
+   * request YA incluye validateOnly/partialFailure. Devuelve un resultado SANITIZADO (status/errorCode/request-id)
+   * — nunca lanza por error de Google (el caller decide), pero sí ante fallos de infra (token/host).
+   */
+  async mutarGrafo(customerId: string, request: GoogleAdsMutateRequest): Promise<ResultadoProveedor> {
+    const accessToken = await this.deps.resolverAccessToken();
+    if (!accessToken) throw new Error('NO_ACCESS_TOKEN');
+    const url = urlAutorizada(`${this.apiBaseUrl}/${API_VERSION}/customers/${customerId}/googleAds:mutate`);
+    if (url === null) throw new Error('HOST_NO_AUTORIZADO');
+    const validateOnly = request.validateOnly === true;
+    const res = await this.fetchFn(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': this.deps.developerToken, 'login-customer-id': this.deps.loginCustomerId, 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    const requestId = res.headers.get('request-id') ?? res.headers.get('x-request-id') ?? null;
+    const logBase = { service: 'googleAds:mutate', endpoint: 'googleAds:mutate', customerId, loginCustomerId: this.deps.loginCustomerId, httpStatus: res.status, requestId, validateOnly };
+    const texto = await res.text();
+    let resultsCount = 0;
+    if (res.ok) {
+      try { const j = JSON.parse(texto) as { results?: unknown[] }; resultsCount = Array.isArray(j.results) ? j.results.length : 0; } catch { /* validate ⇒ body vacío/sin results */ }
+      this.deps.logger?.({ ...logBase, errorStatus: null, errorCode: null, ok: true });
+    } else {
+      const err = parseGoogleAdsError(texto);
+      this.deps.logger?.({ ...logBase, errorStatus: err.status, errorCode: err.code, ok: false });
+      return { ok: false, httpStatus: res.status, requestId, validateOnly, operationCount: request.mutateOperations.length, resultsCount: 0, errorStatus: err.status, errorCode: err.code, errorMessage: err.message, partialFailure: false };
+    }
+    return { ok: true, httpStatus: res.status, requestId, validateOnly, operationCount: request.mutateOperations.length, resultsCount, errorStatus: null, errorCode: null, errorMessage: null, partialFailure: false };
+  }
+
+  /**
+   * GeoTargetConstantService.SuggestGeoTargetConstants (READ ONLY). Resuelve nombres de región → criterionId real.
+   * countryCode filtra a Chile; el caller verifica targetType/targetable/nivel. No muta ni gasta.
+   */
+  async sugerirGeoTargets(nombres: readonly string[], countryCode: string, locale = 'es'): Promise<readonly GeoTargetSugerido[]> {
+    const accessToken = await this.deps.resolverAccessToken();
+    if (!accessToken) throw new Error('NO_ACCESS_TOKEN');
+    const url = urlAutorizada(`${this.apiBaseUrl}/${API_VERSION}/geoTargetConstants:suggest`);
+    if (url === null) throw new Error('HOST_NO_AUTORIZADO');
+    const res = await this.fetchFn(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': this.deps.developerToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locale, countryCode, locationNames: { names: [...nombres] } }),
+    });
+    if (!res.ok) throw new Error(`GEO_SUGGEST_HTTP_${res.status}`);
+    const j = (await res.json()) as { geoTargetConstantSuggestions?: Array<{ geoTargetConstant?: { resourceName?: string; name?: string; canonicalName?: string; targetType?: string; countryCode?: string; status?: string; id?: string } }> };
+    return (j.geoTargetConstantSuggestions ?? []).map((s) => {
+      const g = s.geoTargetConstant ?? {};
+      const criterionId = g.id ?? (g.resourceName ?? '').replace(/^geoTargetConstants\//, '');
+      return { name: g.name ?? '', canonicalName: g.canonicalName ?? '', criterionId, targetType: g.targetType ?? '', countryCode: g.countryCode ?? '', status: g.status ?? '' };
+    });
   }
 }

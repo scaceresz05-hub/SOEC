@@ -66,6 +66,26 @@ describe('GoogleAdsMutateHttpClient', () => {
     expect(f.fn).not.toHaveBeenCalled(); // nunca se contactó a Google
   });
 
+  it('mutarGrafo: POST a googleAds:mutate con la request completa (validateOnly + partialFailure) + parseo error', async () => {
+    const okF = fakeFetch({ ok: true, status: 200, requestId: 'REQ-G', body: { results: [{}, {}] } });
+    const req = { mutateOperations: [{ campaignBudgetOperation: { create: {} } }, { campaignOperation: { create: {} } }], partialFailure: false as const, validateOnly: true as const };
+    const r = await client({ fetchFn: okF.fn as unknown as typeof fetch }).mutarGrafo('8605539300', req);
+    expect(okF.last().url).toContain('/customers/8605539300/googleAds:mutate');
+    expect(JSON.parse(okF.last().init.body as string).validateOnly).toBe(true);
+    expect(r).toMatchObject({ ok: true, httpStatus: 200, requestId: 'REQ-G', validateOnly: true, operationCount: 2 });
+    const errF = fakeFetch({ ok: false, status: 400, requestId: 'REQ-GE', text: JSON.stringify({ error: { status: 'INVALID_ARGUMENT', details: [{ errors: [{ errorCode: { campaignError: 'DUPLICATE_NAME' }, message: 'x' }] }] } }) });
+    const r2 = await client({ fetchFn: errF.fn as unknown as typeof fetch }).mutarGrafo('8605539300', req);
+    expect(r2).toMatchObject({ ok: false, httpStatus: 400, requestId: 'REQ-GE', errorStatus: 'INVALID_ARGUMENT' });
+    expect(r2.errorCode).toContain('campaignError');
+  });
+
+  it('sugerirGeoTargets: parsea geoTargetConstantSuggestions → criterionId/canonicalName/targetType', async () => {
+    const f = fakeFetch({ ok: true, status: 200, body: { geoTargetConstantSuggestions: [{ geoTargetConstant: { resourceName: 'geoTargetConstants/20154', id: '20154', name: 'Tarapacá', canonicalName: 'Tarapaca,Chile', targetType: 'Region', countryCode: 'CL', status: 'ENABLED' } }] } });
+    const r = await client({ fetchFn: f.fn as unknown as typeof fetch }).sugerirGeoTargets(['Tarapacá'], 'CL');
+    expect(f.last().url).toContain('/geoTargetConstants:suggest');
+    expect(r[0]).toEqual({ name: 'Tarapacá', canonicalName: 'Tarapaca,Chile', criterionId: '20154', targetType: 'Region', countryCode: 'CL', status: 'ENABLED' });
+  });
+
   it('validate exitoso no expone secretos en el log', async () => {
     const f = fakeFetch({ ok: true, status: 200, requestId: 'REQ-OK', body: { results: [] } });
     const logs: GoogleAdsWriteLog[] = [];
