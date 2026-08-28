@@ -169,4 +169,16 @@ export class CampaignOperatorDryRunService {
     for (const e of eventos) if (e.type === EVENTO_CAMPAIGN_OPERATOR) ultimo = e.payload as ResultadoOperador;
     return ultimo;
   }
+
+  /**
+   * Persiste un PLAN FINAL provisto (p.ej. el candidate V2 ya saneado y validado por Google), SIN re-simular
+   * evidencia. Deja ese plan como el vigente (last-wins) de modo que leerUltimo lo devuelva NATIVAMENTE (sin
+   * depender de un saneador en runtime). NO habilita escritura real; el sobre lo gestiona EnvelopeService.
+   */
+  async persistirPlanFinal(org: string, plan: MarketingPlan, planId: string, ahora: string): Promise<ResultadoOperador> {
+    const ctx = this.ctx(org);
+    const resultado: ResultadoOperador = { modo: 'DRY_RUN', autonomousReal: false, plan, envelopeDraft: construirEnvelopeDraft(plan, org, planId), at: ahora };
+    await this.persistir(ctx, resultado);
+    return resultado;
+  }
 }

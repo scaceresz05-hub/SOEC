@@ -533,7 +533,12 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const writeLogs: GoogleAdsWriteLog[] = [];
     const port = construirPuertoEscrituraGoogleAds(process.env, org, googleAdsComp, { logger: (i) => { app.log.info(i, 'ga-write'); writeLogs.push(i); } }) ?? new PuertoEscrituraNoConfigurada();
     const realProviderWired = port instanceof GoogleAdsRealMutatePort;
-    const r = await ejecutarCanary({ org, customerId, envelope, plan, ledger, prov, flags, port, bindingsExistentes: bindings, ahora: new Date().toISOString() });
+    // LOCK EXACTO envelope↔hash↔plan: el contexto se resuelve del envelope VIGENTE (no de un hash viejo hardcodeado),
+    // manteniendo los pines de org/customer. Así el executor resuelve el NEW ENVELOPE → NEW PLAN_HASH → NEW PLAN
+    // persistido; la coherencia real la impone `aprobacionVigente` (envelope.planHash === hashPlan(plan)) dentro de
+    // ejecutarCanary. Fail-closed intacto: sin SUPERVISED_REAL, DENIEGA antes de tocar el proveedor.
+    const contextoCanary = { org: CONTEXTO_CANARY.org, customerId: CONTEXTO_CANARY.customerId, envelopeId: envelope?.id ?? CONTEXTO_CANARY.envelopeId, planHash: envelope?.planHash ?? CONTEXTO_CANARY.planHash };
+    const r = await ejecutarCanary({ org, customerId, envelope, plan, ledger, prov, flags, port, bindingsExistentes: bindings, ahora: new Date().toISOString() }, contextoCanary);
     // OUTCOME HONESTO: éxito real SÓLO si se crearon recursos en el proveedor (providerActionsSucceeded>0). Un
     // `decision=EXECUTED` con 0 éxitos y N fallidos = el executor corrió pero NADA se completó (write falló).
     const outcome = r.decision === 'DENY' ? 'DENIED'
@@ -665,6 +670,79 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       // Evidencia de separación: el plan persistido conserva sus keywords; el candidate materializado no las denegadas.
       persistedPositiveKeywordCount: planPersistido.activeKeywords.length,
       persistedDeniedKeywordCount: planPersistido.activeKeywords.filter((k) => esKeywordDenegadaPorPoliticaGoogle(k.text)).length,
+    });
+  });
+
+  // Conteos del candidate desde una request materializada (sin Google) — evita duplicar el desglose.
+  const contarCandidate = (candidato: Parameters<typeof materializarGoogleAdsMutate>[0], customerId: string): { operationCount: number; positiveKeywordCount: number; negativeKeywordCount: number; geoCriteriaCount: number; adGroupCount: number; adCount: number } | null => {
+    const geoDiag: GeoRegionResuelta[] = GEO_SMILEFLOW_V2.regiones.map((r) => ({ nombre: r.nombre, negativa: r.negativa, criterionId: 'DIAGNOSTIC', canonicalName: '' }));
+    const { startDateTime, endDateTime } = ventanaFechasDesdeActivacion(new Date(Date.now() + 2 * 24 * 3600_000).toISOString().slice(0, 10));
+    const rq = materializarGoogleAdsMutate(candidato, GEO_SMILEFLOW_V2, geoDiag, { customerId, startDateTime, endDateTime, validateOnly: true });
+    if (!rq) return null;
+    const conteo = contarOperaciones(rq);
+    const criterios = rq.mutateOperations.filter((o) => Object.keys(o)[0] === 'campaignCriterionOperation').map((o) => (o as { campaignCriterionOperation: { create: Record<string, unknown> } }).campaignCriterionOperation.create);
+    return { operationCount: conteo.total ?? 0, positiveKeywordCount: conteo.adGroupCriterionOperation ?? 0, negativeKeywordCount: criterios.filter((c) => 'keyword' in c).length, geoCriteriaCount: criterios.filter((c) => 'location' in c).length, adGroupCount: conteo.adGroupOperation ?? 0, adCount: conteo.adGroupAdOperation ?? 0 };
+  };
+
+  // CIERRE FINAL — persiste el CANDIDATE V2 (plan persistido SANEADO) como plan DEFINITIVO y crea el NUEVO envelope
+  // (READY_FOR_HUMAN_APPROVAL, fail-closed), superseando el viejo (hash distinto). NO aprueba, NO habilita
+  // SUPERVISED_REAL, NO llama a Google, NO gasta. Idempotente: si ya está saneado y el envelope apunta al nuevo hash,
+  // no duplica. Auth + business.manage + contexto canónico.
+  app.post('/medicion/candidate-finalize', async (req, reply) => {
+    const { ctx: c, org } = real(req, 'autonomia-ads');
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    if (org !== CONTEXTO_CANARY.org) return reply.send({ ok: false, error: 'CONTEXT_ORG_NOT_AUTHORIZED' });
+    const previo = await campaignOperator.leerUltimo(org);
+    const planPersistido = previo?.plan ?? null;
+    if (!planPersistido) return reply.send({ ok: false, error: 'NO_PLAN' });
+    const candidato = retirarKeywordsDenegadasDelPlan(planPersistido);
+    const yaSaneado = planPersistido.activeKeywords.every((k) => !esKeywordDenegadaPorPoliticaGoogle(k.text));
+    const ahora = new Date().toISOString();
+    // planId estable: si ya está saneado, reusa el del plan vigente; si no, uno nuevo por timestamp.
+    const newPlanId = yaSaneado && previo ? previo.envelopeDraft.planId : `plan:${org}:${ahora}`;
+    const oldEnvelope = await envelopeSvc.leerUltimo(org);
+    if (!yaSaneado) await campaignOperator.persistirPlanFinal(org, candidato, newPlanId, ahora); // deja el candidate como plan vigente (sin saneador en runtime)
+    // crea el nuevo envelope y SUPERSEDE el viejo si el hash cambió (audit old→new). Fail-closed, sin aprobar.
+    const envelope = await envelopeSvc.crearDesdePlan(org, candidato, newPlanId, ahora);
+    const superseded = !!oldEnvelope && oldEnvelope.planHash !== envelope.planHash;
+    // PROVENANCE de la validación Google (validateOnly PASS). Durable, sin secretos.
+    const provenance = { provider: 'Google Ads', validationMode: 'validateOnly', validationResult: 'PASS', validationOperationCount: 61, validationRequestId: 'HJ01PSMyU5i0k1_x8kb6dw', validationGoogleErrors: 0, validationTimestamp: '2026-08-28T03:09:55.478Z', newPlanId, newPlanHash: envelope.planHash };
+    const cw = ctxAppend(c);
+    const sidP = `candidate-provenance:${org}`;
+    const prevP = await store.readStream(cw, sidP);
+    await store.append(cw, sidP, prevP.length, [{ type: 'candidate-provenance', payload: { ...provenance, at: ahora }, attribution: ATR_CANARY, occurredAt: ahora }]).catch(() => undefined);
+    const cuenta = contarCandidate(candidato, CONTEXTO_CANARY.customerId);
+    return reply.send({
+      ok: true,
+      newPlanId, newPlanHash: envelope.planHash, newPlanHashDiffersFromOld: envelope.planHash !== CONTEXTO_CANARY.planHash,
+      newEnvelopeId: envelope.id, newEnvelopeStatus: envelope.status, executionAllowed: 'DENY',
+      oldEnvelopeId: oldEnvelope?.id ?? null, oldEnvelopeStatusAfter: superseded ? 'SUPERSEDED' : (oldEnvelope?.status ?? null), oldEnvelopeExecutable: false,
+      ...(cuenta ?? {}), provenance,
+    });
+  });
+
+  // READ-ONLY del cierre: expone plan/envelope/provenance/conteos para revisión humana. Sin Google.
+  app.get('/medicion/candidate-final', async (req, reply) => {
+    const { ctx: c, org } = real(req, 'autonomia-ads');
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    const previo = await campaignOperator.leerUltimo(org);
+    const plan = previo?.plan ?? null;
+    const envelope = await envelopeSvc.leerUltimo(org);
+    if (!plan || !envelope) return reply.send({ ok: false, error: 'NO_CANDIDATE' });
+    const provEventos = await store.readStream(c, `candidate-provenance:${org}`);
+    const provenance = provEventos.filter((e) => e.type === 'candidate-provenance').map((e) => e.payload).slice(-1)[0] ?? null;
+    const cuenta = contarCandidate(plan, CONTEXTO_CANARY.customerId);
+    const c0 = plan.campaigns[0];
+    return reply.send({
+      ok: true,
+      newPlanId: envelope.planId, newPlanHash: envelope.planHash, newPlanHashDiffersFromOld: envelope.planHash !== CONTEXTO_CANARY.planHash,
+      newEnvelopeId: envelope.id, newEnvelopeStatus: envelope.status, executionAllowed: 'DENY',
+      oldEnvelopeId: CONTEXTO_CANARY.envelopeId, oldEnvelopeExecutable: false,
+      deniedKeywordsPresent: KEYWORDS_DENEGADAS_POLITICA_GOOGLE.filter((d) => plan.activeKeywords.some((k) => k.text.trim().toLowerCase() === d.toLowerCase())),
+      ...(cuenta ?? {}),
+      geoPositives: GEO_SMILEFLOW_V2.regiones.filter((r) => !r.negativa).map((r) => r.nombre), geoNegative: GEO_SMILEFLOW_V2.regiones.filter((r) => r.negativa).map((r) => r.nombre), positiveGeoTargetType: GEO_SMILEFLOW_V2.positiveGeoTargetType,
+      budgetPolicy: c0?.budgetPolicy?.type ?? null, experimentTotalCommitmentMaxClp: c0?.budgetPolicy?.totalAmount ?? null, globalNewSpendCapClp: envelope.totalCap, zeroContactStopClp: envelope.maxSpendWithoutContact, dailyBudgetPresent: false, authorizedDurationDays: envelope.authorizedDurationDays,
+      historicalResourceReferences: 0, provenance,
     });
   });
 

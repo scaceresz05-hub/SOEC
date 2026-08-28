@@ -60,15 +60,17 @@ describe('POST /medicion/canary-execute (entry point)', () => {
     await app.close();
   });
 
-  it('autenticado + business.manage ⇒ LIVE, DENY por contexto (envelope no canónico), 0 provider writes', async () => {
+  it('autenticado + business.manage ⇒ LIVE, DENY (envelope no aprobado), 0 provider writes', async () => {
     const store = new InMemoryEventStore();
     await seed(store);
     const app = buildApp({ store, intelligence: new DeterministicIntelligenceProvider(), legacyDemoAccess: true });
     const res = await app.inject({ method: 'POST', url: '/medicion/canary-execute', headers: AUTH, payload: {} });
     expect(res.statusCode).toBe(200);
     const b = res.json();
-    expect(b.decision).toBe('DENY'); // el envelope del test (3 términos) ≠ env:...:842a5165b22c462d ⇒ ENVELOPE_ID_MISMATCH
-    expect(b.reason).toBe('ENVELOPE_ID_MISMATCH');
+    // El contexto se deriva del envelope VIGENTE (lock exacto envelope↔hash↔plan); el sembrado nace
+    // READY_FOR_HUMAN_APPROVAL ⇒ DENY por estado (no aprobado), fail-closed, sin tocar el proveedor.
+    expect(b.decision).toBe('DENY');
+    expect(b.reason).toBe('ENVELOPE_NOT_APPROVED');
     expect(b.executionTriggerScope).toBe('FULL_APPROVED_PLAN');
     expect(b.providerMutateAttempts).toBe(0);
     expect(b.providerBindings).toBe(0);
@@ -128,8 +130,8 @@ describe('operationalMode ⇒ supervisedReal (read model + executor, misma fuent
     const app = await nuevoApp();
     const b = (await app.inject({ method: 'POST', url: '/medicion/canary-execute', headers: { ...AUTH, 'x-operational-mode': 'SUPERVISED_REAL' }, payload: {} })).json();
     expect(b.supervisedReal).toBe(true);       // la misma fuente llega al executor
-    expect(b.decision).toBe('DENY');            // pero DENY por contexto (envelope de test ≠ canónico)
-    expect(b.reason).toBe('ENVELOPE_ID_MISMATCH');
+    expect(b.decision).toBe('DENY');            // pero DENY por estado: el envelope sembrado no está aprobado
+    expect(b.reason).toBe('ENVELOPE_NOT_APPROVED'); // (ENVELOPE_NOT_APPROVED se evalúa antes del master switch)
     expect(b.providerMutateAttempts).toBe(0);      // 0 writes
     await app.close();
   });

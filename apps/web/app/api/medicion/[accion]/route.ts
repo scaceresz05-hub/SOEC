@@ -14,6 +14,7 @@ const GET_ACCIONES = new Set([
   'execution-plan',
   'canary-attempts',
   'canary-candidate',
+  'candidate-final',
 ]);
 const POST_ACCIONES = new Set([
   'preparar',
@@ -29,6 +30,7 @@ const POST_ACCIONES = new Set([
   'envelope-revoke',
   'canary-execute',
   'canary-validate',
+  'candidate-finalize',
 ]);
 
 /**
