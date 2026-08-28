@@ -41,7 +41,7 @@ import { ejecutarCanary, CONTEXTO_CANARY } from './campana/canary-execution';
 import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
 import { PuertoEscrituraNoConfigurada, GoogleAdsRealMutatePort } from './campana/google-ads-real-port';
 import { construirPuertoEscrituraGoogleAds, construirClienteEscrituraGoogleAds, resolverGeoRegiones } from './campana/google-ads-write-runtime';
-import { materializarGoogleAdsMutate } from './campana/google-ads-materializer';
+import { materializarGoogleAdsMutate, ventanaFechasDesdeActivacion } from './campana/google-ads-materializer';
 import { GEO_SMILEFLOW_V2 } from './campana/geo-policy';
 import { getRecursoGoogleAds } from './plataforma';
 import { contextoDe, permisosDe, modoOperativoDe } from './superficie-auth';
@@ -69,6 +69,16 @@ function real(
     correlationId: autenticado.correlationId,
   };
   return { ctx, org: binding.organizationId, binding };
+}
+
+/**
+ * Deriva un contexto con permiso de ESCRITURA a partir del de lectura. El ctx de `real()` sólo trae
+ * `events:read`; `store.append` exige `events:append` (requireScope) ⇒ sin esto el append LANZA y el
+ * `.catch(() => undefined)` lo tragaba en silencio: fue la causa exacta de que la persistencia del validate
+ * (y del execute) quedara vacía. No amplía el alcance de lectura de las rutas; sólo habilita el append puntual.
+ */
+function ctxAppend(ctx: RequestContext): RequestContext {
+  return { ...ctx, scope: { ...ctx.scope, permissions: [...ctx.scope.permissions, 'events:append'] } };
 }
 
 const ATR_CANARY: Attribution = { source: 'canary-execute', purpose: 'intento real de escritura Google Ads (auditable, sin secretos)', assumptions: [], claimType: 'observational', regime: 'empirical', uncertainty: 'baja' };
@@ -535,8 +545,9 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     if (writeLogs.length > 0) {
       const sid = `canary-attempts:${org}`;
       const at = new Date().toISOString();
-      const prev = await store.readStream(c, sid);
-      await store.append(c, sid, prev.length, [{ type: 'canary-attempt', payload: { at, decision: r.decision, outcome, reason: r.reason, writeLogs }, attribution: ATR_CANARY, occurredAt: at }]).catch(() => undefined);
+      const cw = ctxAppend(c); // events:append (sin esto el append lanzaba y se tragaba)
+      const prev = await store.readStream(cw, sid);
+      await store.append(cw, sid, prev.length, [{ type: 'canary-attempt', payload: { at, decision: r.decision, outcome, reason: r.reason, writeLogs }, attribution: ATR_CANARY, occurredAt: at }]).catch(() => undefined);
     }
     // Respuesta auditable SIN secretos. Distingue INTENTOS de ÉXITOS + expone el error de Google por op (providerAttempts).
     return reply.send({
@@ -583,12 +594,12 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     let geo: Awaited<ReturnType<typeof resolverGeoRegiones>>;
     try { geo = await resolverGeoRegiones(cliente, GEO_SMILEFLOW_V2); } catch (e) { return reply.send({ ok: false, error: 'GEO_RESOLVE_FAILED', detalle: e instanceof Error ? e.message : String(e), providerAttempts: attempts }); }
     if (geo.faltantes.length > 0) return reply.send({ ok: false, error: 'GEO_UNRESOLVED', faltantes: geo.faltantes });
-    // 2) Fechas CANDIDATAS para validate (mañana + 9 días). NO se persisten como contractuales (el plan guarda la regla).
-    const startMs = Date.parse(new Date().toISOString()) + 2 * 24 * 3600_000;
-    const start = new Date(startMs).toISOString().slice(0, 10);
-    const end = new Date(startMs + 9 * 24 * 3600_000).toISOString().slice(0, 10);
+    // 2) Fecha de activación CANDIDATA para validate (hoy + 2 días). NO se persiste como contractual (el plan guarda
+    // la regla START_AT_ACTIVATION_LOCAL_DATE / END_AT_START_PLUS_9_DAYS). Ventana Google-native start/end_date_time.
+    const activacion = new Date(Date.now() + 2 * 24 * 3600_000).toISOString().slice(0, 10);
+    const { startDateTime, endDateTime } = ventanaFechasDesdeActivacion(activacion);
     // 3) Materializar el grafo COMPLETO (misma función que el path real) y validar.
-    const request = materializarGoogleAdsMutate(plan, GEO_SMILEFLOW_V2, geo.resueltas, { customerId, startDate: start, endDate: end, validateOnly: true });
+    const request = materializarGoogleAdsMutate(plan, GEO_SMILEFLOW_V2, geo.resueltas, { customerId, startDateTime, endDateTime, validateOnly: true });
     if (!request) return reply.send({ ok: false, error: 'MATERIALIZE_FAILED' });
     try {
       const r = await cliente.mutarGrafo(customerId, request);
@@ -597,8 +608,9 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       // TRUNQUE la respuesta o los logs de Railway ya no estén. Fue el punto ciego que impidió el diagnóstico previo.
       const at = new Date().toISOString();
       const sid = `canary-attempts:${org}`;
-      const prev = await store.readStream(c, sid);
-      await store.append(c, sid, prev.length, [{ type: 'canary-validate-attempt', payload: { at, ok: r.ok, httpStatus: r.httpStatus, requestId: r.requestId, operationCount: r.operationCount, errorStatus: r.errorStatus, errorCode: r.errorCode, errorMessage: r.errorMessage, geoResolved: geo.resueltas.map((g) => ({ nombre: g.nombre, criterionId: g.criterionId, negativa: g.negativa })) }, attribution: ATR_CANARY, occurredAt: at }]).catch(() => undefined);
+      const cw = ctxAppend(c); // events:append — sin esto el append lanzaba y `validateAttempts` salía vacío
+      const prev = await store.readStream(cw, sid);
+      await store.append(cw, sid, prev.length, [{ type: 'canary-validate-attempt', payload: { at, ok: r.ok, httpStatus: r.httpStatus, requestId: r.requestId, operationCount: r.operationCount, errorStatus: r.errorStatus, errorCode: r.errorCode, errorMessage: r.errorMessage, geoResolved: geo.resueltas.map((g) => ({ nombre: g.nombre, criterionId: g.criterionId, negativa: g.negativa })) }, attribution: ATR_CANARY, occurredAt: at }]).catch(() => undefined);
       return reply.send({
         ok: r.ok, validateOnly: true, mode: 'GoogleAdsService.Mutate', partialFailure: false,
         operationCount: request.mutateOperations.length,

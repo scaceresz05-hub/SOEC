@@ -16,11 +16,25 @@ import type { GeoPolicy, GeoRegionResuelta } from './geo-policy';
 
 export interface OpcionesMaterializacion {
   readonly customerId: string;
-  readonly startDate: string; // 'YYYY-MM-DD' (candidata para validate; real al activar)
-  readonly endDate: string;   // start + 9 días
+  /** 'YYYY-MM-DD HH:mm:ss' en la zona de serving del customer (NO UTC). Campaign.start_date_time (v23+). */
+  readonly startDateTime: string;
+  /** 'YYYY-MM-DD HH:mm:ss'. Campaign.end_date_time = inicio + 9 días 23:59:59 (10 días calendario inclusivos). */
+  readonly endDateTime: string;
   readonly validateOnly: boolean;
   /** Estado inicial de la campaña (semántica de activación prevista). */
   readonly campaignStatus?: 'ENABLED' | 'PAUSED';
+}
+
+/**
+ * Ventana de fechas Google-native desde la fecha LOCAL de activación (política contractual, PURA):
+ * START = activación a las 00:00:00; END = START + 9 días a las 23:59:59 (10 días calendario inclusivos).
+ * Formato Google `yyyy-MM-dd HH:mm:ss`. NO convierte a UTC — la aritmética de +9 días es sobre el calendario
+ * (medianoche UTC como pivote determinista) y las horas literales son wall-clock de serving.
+ */
+export function ventanaFechasDesdeActivacion(activationDate: string): { startDateTime: string; endDateTime: string } {
+  const fin = new Date(`${activationDate}T00:00:00Z`);
+  fin.setUTCDate(fin.getUTCDate() + 9);
+  return { startDateTime: `${activationDate} 00:00:00`, endDateTime: `${fin.toISOString().slice(0, 10)} 23:59:59` };
 }
 
 export interface MutateOperationGoogle { readonly [k: string]: unknown }
@@ -69,8 +83,9 @@ export function materializarGoogleAdsMutate(plan: MarketingPlan, geo: GeoPolicy,
     [bidding.field]: {},
     networkSettings: { ...NETWORK_SETTINGS_V2 },
     geoTargetTypeSetting: { positiveGeoTargetType: geo.positiveGeoTargetType, negativeGeoTargetType: geo.negativeGeoTargetType },
-    startDate: opts.startDate,
-    endDate: opts.endDate,
+    // v23+ eliminó Campaign.start_date/end_date. v25 usa start_date_time/end_date_time (yyyy-MM-dd HH:mm:ss).
+    startDateTime: opts.startDateTime,
+    endDateTime: opts.endDateTime,
   } } });
 
   // 3) AdGroups (uno por grupo del plan) + índice por acción para asignar keywords a su grupo.

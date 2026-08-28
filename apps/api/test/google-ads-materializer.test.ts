@@ -8,7 +8,7 @@ import { construirMarketingPlan, type EntradaMarketingPlan, type CanalId } from 
 import type { ChannelAvailability } from '../src/campana/channel-availability';
 import type { MarketingReadiness } from '../src/campana/diagnosis-evidence';
 import { GEO_SMILEFLOW_V2, type GeoRegionResuelta } from '../src/campana/geo-policy';
-import { materializarGoogleAdsMutate, contarOperaciones, biddingGoogleDePlan } from '../src/campana/google-ads-materializer';
+import { materializarGoogleAdsMutate, contarOperaciones, biddingGoogleDePlan, ventanaFechasDesdeActivacion } from '../src/campana/google-ads-materializer';
 
 const T = '2026-08-27T00:00:00.000Z';
 const CID = '8605539300';
@@ -36,7 +36,8 @@ const GEO: GeoRegionResuelta[] = [
   { nombre: 'Los Lagos', negativa: false, criterionId: '20164', canonicalName: 'Los Lagos,Chile' },
   { nombre: 'Región Metropolitana de Santiago', negativa: true, criterionId: '20161', canonicalName: 'Santiago Metropolitan,Chile' },
 ];
-const req = materializarGoogleAdsMutate(PLAN, GEO_SMILEFLOW_V2, GEO, { customerId: CID, startDate: '2026-09-01', endDate: '2026-09-10', validateOnly: true })!;
+const VENTANA = ventanaFechasDesdeActivacion('2026-09-01');
+const req = materializarGoogleAdsMutate(PLAN, GEO_SMILEFLOW_V2, GEO, { customerId: CID, ...VENTANA, validateOnly: true })!;
 const opDe = (clave: string): Record<string, unknown> => (req.mutateOperations.find((o) => Object.keys(o)[0] === clave) as Record<string, { create: Record<string, unknown> }>)[clave]!.create;
 const budget = opDe('campaignBudgetOperation');
 const campaign = opDe('campaignOperation');
@@ -63,9 +64,16 @@ describe('materializador Google-native V2', () => {
     expect(budget.explicitlyShared).toBe(false);
     expect('amountMicros' in budget).toBe(false);
   });
-  it('D/E: startDate/endDate concretas (el caller garantiza fin=inicio+9)', () => {
-    expect(campaign.startDate).toBe('2026-09-01');
-    expect(campaign.endDate).toBe('2026-09-10');
+  it('A/B/C/D: startDateTime/endDateTime (v25) — NO startDate/endDate/start_date/end_date; formato + fin=inicio+9', () => {
+    // A: los campos obsoletos (removidos en v23) NO existen — fue el "Unknown name" que rechazó Google.
+    for (const k of ['startDate', 'endDate', 'start_date', 'end_date']) expect(k in campaign).toBe(false);
+    // B/C: los vigentes existen con formato 'yyyy-MM-dd HH:mm:ss' (00:00:00 / 23:59:59).
+    expect(campaign.startDateTime).toBe('2026-09-01 00:00:00');
+    expect(campaign.endDateTime).toBe('2026-09-10 23:59:59');
+    expect(JSON.stringify(req)).not.toMatch(/"(startDate|endDate|start_date|end_date)":/);
+    // D: 10 días calendario inclusivos (inicio + 9). Verificado también en el borde de mes.
+    expect(ventanaFechasDesdeActivacion('2026-09-01')).toEqual({ startDateTime: '2026-09-01 00:00:00', endDateTime: '2026-09-10 23:59:59' });
+    expect(ventanaFechasDesdeActivacion('2026-08-27')).toEqual({ startDateTime: '2026-08-27 00:00:00', endDateTime: '2026-09-05 23:59:59' });
   });
   it('H: geoTargetTypeSetting PRESENCE/PRESENCE', () => {
     expect(campaign.geoTargetTypeSetting).toEqual({ positiveGeoTargetType: 'PRESENCE', negativeGeoTargetType: 'PRESENCE' });
@@ -92,7 +100,7 @@ describe('materializador Google-native V2', () => {
     expect(JSON.stringify(req)).not.toContain('24120966895');
   });
   it('K: validate y real comparten materializador (sólo cambia validateOnly)', () => {
-    const real = materializarGoogleAdsMutate(PLAN, GEO_SMILEFLOW_V2, GEO, { customerId: CID, startDate: '2026-09-01', endDate: '2026-09-10', validateOnly: false })!;
+    const real = materializarGoogleAdsMutate(PLAN, GEO_SMILEFLOW_V2, GEO, { customerId: CID, ...VENTANA, validateOnly: false })!;
     expect(real.validateOnly).toBeUndefined();
     expect(real.mutateOperations).toEqual(req.mutateOperations); // mismo grafo
   });
