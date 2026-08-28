@@ -41,6 +41,8 @@ import { ResourceBindingService } from './campana/resource-binding';
 import { CONTEXTO_CANARY } from './campana/canary-execution';
 import { ejecutarCanaryAtomico, TRANSPORT_ATOMICO } from './campana/canary-atomic-execution';
 import { reconciliarBindings } from './campana/canary-reconciliation';
+import { correlacionarGrafo, consultasRecuperacion, type RecursosLeidos } from './campana/canary-provider-recovery';
+import { hashPlan } from './campana/plan-hash';
 import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
 import { construirClienteEscrituraGoogleAds, resolverGeoRegiones } from './campana/google-ads-write-runtime';
 import { materializarGoogleAdsMutate, ventanaFechasDesdeActivacion, contarOperaciones } from './campana/google-ads-materializer';
@@ -582,6 +584,63 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const ops = exitoso.bindings ?? [];
     const rec = await reconciliarBindings(bindingSvc, org, envelope, ops, new Date().toISOString());
     return reply.send({ ...rec, envelopeId: envelope.id, planHash: envelope.planHash, requestId: exitoso.requestId ?? null });
+  });
+
+  // RECUPERACIÓN READ-ONLY desde Google Ads: recupera los resource names REALES de un mutate exitoso cuya evidencia
+  // durable no los retuvo, LEYENDO Google (GAQL searchStream). Verifica huella + correlaciona las 61 operaciones +
+  // persiste bindings idempotentes SÓLO si TODO cuadra (fail-closed, sin fabricar IDs). NUNCA escribe en Google.
+  app.post('/medicion/canary-provider-reconcile', async (req, reply) => {
+    const { ctx: c, org } = real(req, 'autonomia-ads');
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    if (org !== CONTEXTO_CANARY.org) return reply.send({ ok: false, error: 'CONTEXT_ORG_NOT_AUTHORIZED' });
+    const { envelopeId, campaignId } = (req.body ?? {}) as { envelopeId?: string; campaignId?: string };
+    if (!envelopeId || !campaignId || !/^\d+$/.test(String(campaignId))) return reply.send({ ok: false, error: 'INVALID_INPUT' });
+    const envelope = await envelopeSvc.leerUltimo(org);
+    if (!envelope) return reply.send({ ok: false, error: 'NO_ENVELOPE' });
+    if (envelope.id !== envelopeId) return reply.send({ ok: false, error: 'ENVELOPE_ID_MISMATCH' });
+    const plan = (await campaignOperator.leerUltimo(org))?.plan ?? null;
+    if (!plan) return reply.send({ ok: false, error: 'NO_PLAN' });
+    if (hashPlan(plan) !== envelope.planHash) return reply.send({ ok: false, error: 'PLAN_HASH_MISMATCH' });
+    const eventos = await store.readStream(c, `canary-attempts:${org}`);
+    const huboExito = eventos.filter((e) => e.type === 'canary-attempt').map((e) => e.payload as { decision?: string }).some((p) => p.decision === 'EXECUTED');
+    if (!huboExito) return reply.send({ ok: false, error: 'NO_SUCCESSFUL_ATTEMPT' });
+    let customerId = 'PENDING';
+    try { customerId = getRecursoGoogleAds(org).customerId; } catch { return reply.send({ ok: false, error: 'GOOGLE_ADS_NOT_CONFIGURED' }); }
+    if (customerId !== CONTEXTO_CANARY.customerId) return reply.send({ ok: false, error: 'CUSTOMER_ID_MISMATCH' });
+    const cliente = construirClienteEscrituraGoogleAds(process.env, org, googleAdsComp, { validateOnly: false });
+    if (!cliente) return reply.send({ ok: false, error: 'GOOGLE_ADS_WRITE_NOT_CONFIGURED' });
+    let geo: Awaited<ReturnType<typeof resolverGeoRegiones>>;
+    try { geo = await resolverGeoRegiones(cliente, GEO_SMILEFLOW_V2); } catch (e) { return reply.send({ ok: false, error: 'GEO_RESOLVE_FAILED', detalle: e instanceof Error ? e.message : String(e), newGoogleWriteCalls: 0 }); }
+    if (geo.faltantes.length > 0) return reply.send({ ok: false, error: 'GEO_UNRESOLVED', newGoogleWriteCalls: 0 });
+    // LECTURAS GAQL (READ ONLY). Ningún write. Si Google falla ⇒ 0 persistencia.
+    const q = consultasRecuperacion(String(campaignId));
+    let leidos: RecursosLeidos;
+    try {
+      leidos = {
+        campaign: (await cliente.buscar(customerId, q.campaign!)) as never,
+        campaignBudget: (await cliente.buscar(customerId, q.campaignBudget!)) as never,
+        adGroup: (await cliente.buscar(customerId, q.adGroup!)) as never,
+        adGroupAd: (await cliente.buscar(customerId, q.adGroupAd!)) as never,
+        adGroupCriterion: (await cliente.buscar(customerId, q.adGroupCriterion!)) as never,
+        campaignCriterion: (await cliente.buscar(customerId, q.campaignCriterion!)) as never,
+      };
+    } catch (e) { return reply.send({ ok: false, error: 'PROVIDER_READ_FAILED', detalle: e instanceof Error ? e.message : String(e), newGoogleWriteCalls: 0 }); }
+    const ahora = new Date().toISOString();
+    const correl = correlacionarGrafo(org, envelope, plan, geo.resueltas, leidos, ahora);
+    const proof = { fingerprintOk: correl.fingerprintOk, expectedOperations: correl.expectedOperations, recoveredResourceCount: correl.recoveredResourceCount, matchedOperationCount: correl.matchedOperationCount, unmatchedOperationCount: correl.unmatchedOperationCount, ambiguousOperationCount: correl.ambiguousOperationCount };
+    if (!correl.ok) return reply.send({ ok: false, reason: correl.reason, ...proof, bindingsRegistrados: 0, newGoogleWriteCalls: 0 }); // FAIL-CLOSED: nada se persiste
+    // PERSISTENCIA IDEMPOTENTE (buscar antes de registrar). Sólo resourceNames REALES. Sin writes a Google.
+    let registrados = 0; let yaExistian = 0;
+    for (const b of correl.bindings) {
+      const existente = await bindingSvc.buscar(org, envelope.id, b.materialFingerprint);
+      if (existente) { yaExistian += 1; continue; }
+      await bindingSvc.registrar(b); registrados += 1;
+    }
+    const cw = ctxAppend(c);
+    const sidP = `provider-recovery:${org}`;
+    const prevP = await store.readStream(cw, sidP);
+    await store.append(cw, sidP, prevP.length, [{ type: 'provider-recovery', payload: { at: ahora, envelopeId: envelope.id, planHash: envelope.planHash, campaignId: String(campaignId), method: 'PROVIDER_READ_RECOVERY', campaignResourceName: correl.campaignResourceName, matched: correl.matchedOperationCount, bindingsRegistrados: registrados, bindingsYaExistian: yaExistian, resourceNames: correl.bindings.map((b) => ({ entityType: b.entityType, resourceName: b.providerResourceId })) }, attribution: ATR_CANARY, occurredAt: ahora }]).catch(() => undefined);
+    return reply.send({ ok: true, reason: null, ...proof, method: 'PROVIDER_READ_RECOVERY', campaignResourceName: correl.campaignResourceName, bindingsRegistrados: registrados, bindingsYaExistian: yaExistian, providerBindingsTotal: (await bindingSvc.listar(org)).filter((b) => b.envelopeId === envelope.id).length, newGoogleWriteCalls: 0 });
   });
 
   // Lectura DURABLE de los intentos de write reales (errores de Google sanitizados). Auth + business.manage.

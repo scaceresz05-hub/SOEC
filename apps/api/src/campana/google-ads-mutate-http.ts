@@ -283,4 +283,27 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
       return { name: g.name ?? '', canonicalName: g.canonicalName ?? '', criterionId, targetType: g.targetType ?? '', countryCode: g.countryCode ?? '', status: g.status ?? '' };
     });
   }
+
+  /**
+   * GoogleAdsService.SearchStream (READ ONLY). Ejecuta una consulta GAQL y devuelve las filas APLANADAS (cada fila
+   * = objeto con los recursos seleccionados). NO muta NADA (recuperación de identidad). Host allowlist + token por
+   * conexión. searchStream responde un array de batches [{results:[…]}]; se tolera también {results:[…]}.
+   */
+  async buscar(customerId: string, query: string): Promise<Array<Record<string, unknown>>> {
+    const accessToken = await this.deps.resolverAccessToken();
+    if (!accessToken) throw new Error('NO_ACCESS_TOKEN');
+    const url = urlAutorizada(`${this.apiBaseUrl}/${API_VERSION}/customers/${customerId}/googleAds:searchStream`);
+    if (url === null) throw new Error('HOST_NO_AUTORIZADO');
+    const res = await this.fetchFn(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': this.deps.developerToken, 'login-customer-id': this.deps.loginCustomerId, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+    if (!res.ok) throw new Error(`GOOGLE_SEARCH_HTTP_${res.status}`);
+    const parsed = JSON.parse(await res.text()) as unknown;
+    const batches = Array.isArray(parsed) ? parsed : [parsed];
+    const filas: Array<Record<string, unknown>> = [];
+    for (const b of batches) { const rs = (b as { results?: Array<Record<string, unknown>> }).results; if (Array.isArray(rs)) filas.push(...rs); }
+    return filas;
+  }
 }
