@@ -27,13 +27,18 @@ describe('persistencia canary-validate-attempt', () => {
     const store = new InMemoryEventStore();
     const cw = ctxAppend(ctxRead);
     const prev = await store.readStream(cw, sid);
-    await store.append(cw, sid, prev.length, [{ type: 'canary-validate-attempt', payload: { ok: false, httpStatus: 400, errorStatus: 'INVALID_ARGUMENT', errorCode: null, errorMessage: MSG, operationCount: 65 }, attribution: ATR, occurredAt: '2026-08-27T00:00:00.000Z' }]);
+    const googleErrors = [{ errorCode: 'fieldError:REQUIRED', message: 'The required field was not present.', trigger: null, fieldPathElements: [{ fieldName: 'mutate_operations', index: 1 }, { fieldName: 'campaign_operation' }, { fieldName: 'create' }, { fieldName: 'target_spend' }], errorPath: 'mutate_operations[1].campaign_operation.create.target_spend', operationIndex: 1 }];
+    await store.append(cw, sid, prev.length, [{ type: 'canary-validate-attempt', payload: { ok: false, httpStatus: 400, errorStatus: 'INVALID_ARGUMENT', errorCode: 'fieldError:REQUIRED', errorMessage: MSG, requestId: 'CDywt8', operationCount: 65, googleErrors }, attribution: ATR, occurredAt: '2026-08-27T00:00:00.000Z' }]);
     // Lectura como la del GET: filtra por type y devuelve el payload.
     const eventos = await store.readStream(ctxRead, sid);
-    const validateAttempts = eventos.filter((e) => e.type === 'canary-validate-attempt').map((e) => e.payload as { errorMessage: string; operationCount: number });
+    const validateAttempts = eventos.filter((e) => e.type === 'canary-validate-attempt').map((e) => e.payload as { errorMessage: string; operationCount: number; requestId: string; googleErrors: Array<{ errorPath: string; operationIndex: number; fieldPathElements: unknown[] }> });
     expect(validateAttempts).toHaveLength(1);
     expect(validateAttempts[0]!.operationCount).toBe(65);
-    expect(validateAttempts[0]!.errorMessage).toBe(MSG); // el nombre del campo + path sobreviven íntegros
-    expect(validateAttempts[0]!.errorMessage).toContain('Unknown name "startDate"');
+    expect(validateAttempts[0]!.requestId).toBe('CDywt8');   // I: requestId sobrevive en la persistencia
+    expect(validateAttempts[0]!.errorMessage).toBe(MSG);
+    // H: la evidencia detallada (path derivado + fieldPathElements) sobrevive el round-trip del store.
+    expect(validateAttempts[0]!.googleErrors[0]!.errorPath).toBe('mutate_operations[1].campaign_operation.create.target_spend');
+    expect(validateAttempts[0]!.googleErrors[0]!.operationIndex).toBe(1);
+    expect(validateAttempts[0]!.googleErrors[0]!.fieldPathElements).toHaveLength(4);
   });
 });

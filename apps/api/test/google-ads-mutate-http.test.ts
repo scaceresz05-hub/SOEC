@@ -95,6 +95,30 @@ describe('GoogleAdsMutateHttpClient', () => {
     expect(r2.errorCode).toContain('campaignError');
   });
 
+  it('GoogleAdsFailure: preserva location.fieldPathElements + trigger + deriva errorPath/operationIndex; múltiples errores en orden', async () => {
+    // Fixture realista v25: fieldError:REQUIRED en Campaign.create (op 1) + un 2º error, con paths reales.
+    const body = { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Request contains an invalid argument.', details: [{ '@type': 'type.googleapis.com/google.ads.googleads.v25.errors.GoogleAdsFailure', errors: [
+      { errorCode: { fieldError: 'REQUIRED' }, message: 'The required field was not present.', trigger: { stringValue: '' }, location: { fieldPathElements: [{ fieldName: 'mutate_operations', index: 1 }, { fieldName: 'campaign_operation' }, { fieldName: 'create' }, { fieldName: 'target_spend' }] } },
+      { errorCode: { campaignError: 'DUPLICATE_NAME' }, message: 'Duplicate campaign name.', location: { fieldPathElements: [{ fieldName: 'mutate_operations', index: 1 }, { fieldName: 'campaign_operation' }, { fieldName: 'create' }, { fieldName: 'name' }] } },
+    ] }] } };
+    const f = fakeFetch({ ok: false, status: 400, requestId: 'CDywt8', text: JSON.stringify(body) });
+    const req = { mutateOperations: [{ campaignOperation: { create: {} } }], partialFailure: false as const, validateOnly: true as const };
+    const r = await client({ fetchFn: f.fn as unknown as typeof fetch }).mutarGrafo('8605539300', req);
+    expect(r.ok).toBe(false);
+    expect(r.requestId).toBe('CDywt8');                         // I: requestId sobrevive
+    expect(r.googleErrors).toHaveLength(2);                     // G: múltiples errores completos y en orden
+    const e0 = r.googleErrors[0]!;
+    expect(e0.errorCode).toBe('fieldError:REQUIRED');           // A
+    expect(e0.message).toBe('The required field was not present.'); // B
+    expect(e0.trigger).toBe('{"stringValue":""}');              // C: trigger sanitizado, sobrevive
+    expect(e0.fieldPathElements).toEqual([{ fieldName: 'mutate_operations', index: 1 }, { fieldName: 'campaign_operation' }, { fieldName: 'create' }, { fieldName: 'target_spend' }]); // D
+    expect(e0.errorPath).toBe('mutate_operations[1].campaign_operation.create.target_spend'); // E: derivado del path
+    expect(e0.operationIndex).toBe(1);                          // F: sólo desde el index de Google
+    expect(r.googleErrors[1]!.errorCode).toBe('campaignError:DUPLICATE_NAME');
+    expect(r.googleErrors[1]!.errorPath).toBe('mutate_operations[1].campaign_operation.create.name');
+    expect(JSON.stringify(r)).not.toMatch(/AT-123|DEV-TOKEN|Bearer/); // J: sin secretos
+  });
+
   it('sugerirGeoTargets: parsea geoTargetConstantSuggestions → criterionId/canonicalName/targetType', async () => {
     const f = fakeFetch({ ok: true, status: 200, body: { geoTargetConstantSuggestions: [{ geoTargetConstant: { resourceName: 'geoTargetConstants/20154', id: '20154', name: 'Tarapacá', canonicalName: 'Tarapaca,Chile', targetType: 'Region', countryCode: 'CL', status: 'ENABLED' } }] } });
     const r = await client({ fetchFn: f.fn as unknown as typeof fetch }).sugerirGeoTargets(['Tarapacá'], 'CL');

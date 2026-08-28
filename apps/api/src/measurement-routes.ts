@@ -610,7 +610,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       const sid = `canary-attempts:${org}`;
       const cw = ctxAppend(c); // events:append — sin esto el append lanzaba y `validateAttempts` salía vacío
       const prev = await store.readStream(cw, sid);
-      await store.append(cw, sid, prev.length, [{ type: 'canary-validate-attempt', payload: { at, ok: r.ok, httpStatus: r.httpStatus, requestId: r.requestId, operationCount: r.operationCount, errorStatus: r.errorStatus, errorCode: r.errorCode, errorMessage: r.errorMessage, geoResolved: geo.resueltas.map((g) => ({ nombre: g.nombre, criterionId: g.criterionId, negativa: g.negativa })) }, attribution: ATR_CANARY, occurredAt: at }]).catch(() => undefined);
+      await store.append(cw, sid, prev.length, [{ type: 'canary-validate-attempt', payload: { at, ok: r.ok, httpStatus: r.httpStatus, requestId: r.requestId, operationCount: r.operationCount, errorStatus: r.errorStatus, errorCode: r.errorCode, errorMessage: r.errorMessage, googleErrors: r.googleErrors, geoResolved: geo.resueltas.map((g) => ({ nombre: g.nombre, criterionId: g.criterionId, negativa: g.negativa })) }, attribution: ATR_CANARY, occurredAt: at }]).catch(() => undefined);
       return reply.send({
         ok: r.ok, validateOnly: true, mode: 'GoogleAdsService.Mutate', partialFailure: false,
         operationCount: request.mutateOperations.length,

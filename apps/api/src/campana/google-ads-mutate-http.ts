@@ -14,6 +14,26 @@
 import type { GoogleAdsApiClient, GoogleAdsOperation } from './google-ads-real-port';
 import type { GoogleAdsMutateRequest } from './google-ads-materializer';
 
+/** Un elemento del path de campo del GoogleAdsFailure (`errors[].location.fieldPathElements[]`). */
+export interface FieldPathElement {
+  readonly fieldName: string;
+  /** Presente sólo para campos repetidos (p.ej. `mutate_operations[1]`). */
+  readonly index?: number;
+}
+
+/**
+ * Un error del `GoogleAdsFailure` preservado SANITIZADO. `errorPath`/`operationIndex` se DERIVAN de
+ * `fieldPathElements` (nunca por orden): son la evidencia que dice qué campo/operación falló.
+ */
+export interface GoogleAdsErrorDetalle {
+  readonly errorCode: string | null;   // p.ej. "fieldError:REQUIRED"
+  readonly message: string | null;
+  readonly trigger: string | null;     // valor ofensivo que Google eco (sanitizado, cap 200)
+  readonly fieldPathElements: readonly FieldPathElement[];
+  readonly errorPath: string | null;   // "mutate_operations[1].campaign_operation.create.<campo>"
+  readonly operationIndex: number | null; // índice de la operación (sólo si Google da el index)
+}
+
 /** Resultado sanitizado de una llamada al proveedor (validate o real). Sin secretos. */
 export interface ResultadoProveedor {
   readonly ok: boolean;
@@ -25,6 +45,8 @@ export interface ResultadoProveedor {
   readonly errorStatus: string | null;
   readonly errorCode: string | null;
   readonly errorMessage: string | null;
+  /** TODOS los errores de Google en orden (evidencia completa: path, trigger, code, message). */
+  readonly googleErrors: readonly GoogleAdsErrorDetalle[];
   readonly partialFailure: boolean;
 }
 
@@ -94,16 +116,51 @@ function urlAutorizada(raw: string): URL | null {
   return HOSTS_AUTORIZADOS.has(url.host) ? url : null;
 }
 
-/** Extrae status/code/message del cuerpo de error de Google Ads (sin exponer secretos). */
-function parseGoogleAdsError(texto: string): { status: string | null; code: string | null; message: string | null } {
+interface RawGoogleError {
+  readonly errorCode?: Record<string, unknown>;
+  readonly message?: string;
+  readonly trigger?: unknown;
+  readonly location?: { fieldPathElements?: Array<{ fieldName?: string; index?: number }> };
+}
+
+function cap(s: string | null | undefined, n = 600): string | null {
+  return s ? s.slice(0, n) : null;
+}
+
+/** El `trigger` (google.protobuf.Value) puede ser cualquier tipo; lo sanitizamos a string acotado. */
+function triggerSanitizado(t: unknown): string | null {
+  if (t === null || t === undefined) return null;
+  return cap(typeof t === 'string' ? t : JSON.stringify(t), 200);
+}
+
+/** Un error crudo → detalle preservado. `errorPath`/`operationIndex` se DERIVAN de fieldPathElements. */
+function mapearError(e: RawGoogleError): GoogleAdsErrorDetalle {
+  const errorCode = e.errorCode && Object.keys(e.errorCode).length > 0 ? Object.entries(e.errorCode).map(([k, v]) => `${k}:${String(v)}`).join('|') : null;
+  const fieldPathElements: FieldPathElement[] = (e.location?.fieldPathElements ?? []).map((p) => (typeof p.index === 'number' ? { fieldName: String(p.fieldName ?? ''), index: p.index } : { fieldName: String(p.fieldName ?? '') }));
+  // NO se trunca el path ni los nombres de campo (son la evidencia que necesitamos).
+  const errorPath = fieldPathElements.length > 0 ? fieldPathElements.map((p) => (p.index !== undefined ? `${p.fieldName}[${p.index}]` : p.fieldName)).join('.') : null;
+  const opEl = fieldPathElements.find((p) => p.fieldName === 'mutate_operations');
+  const operationIndex = opEl && opEl.index !== undefined ? opEl.index : null; // sólo desde el index de Google
+  return { errorCode, message: cap(e.message), trigger: triggerSanitizado(e.trigger), fieldPathElements, errorPath, operationIndex };
+}
+
+/**
+ * Parsea el `GoogleAdsFailure` COMPLETO del cuerpo de error (sin exponer secretos): TODOS los errores en
+ * orden, cada uno con code/message/trigger/fieldPathElements + path/index derivados. Para un error de
+ * transcoding (sin `details[].errors[]`, p.ej. "Unknown name X") sintetiza un único detalle desde `error.message`.
+ */
+function parseGoogleAdsFailure(texto: string): { status: string | null; googleErrors: GoogleAdsErrorDetalle[] } {
   try {
-    const j = JSON.parse(texto) as { error?: { status?: string; message?: string; details?: Array<{ errors?: Array<{ errorCode?: Record<string, unknown>; message?: string }> }> } };
+    const j = JSON.parse(texto) as { error?: { status?: string; message?: string; details?: Array<{ errors?: RawGoogleError[] }> } };
     const err = j.error;
-    const primero = err?.details?.[0]?.errors?.[0];
-    const code = primero?.errorCode ? Object.entries(primero.errorCode).map(([k, v]) => `${k}:${String(v)}`).join('|') : null;
-    return { status: err?.status ?? null, code, message: primero?.message ?? err?.message ?? null };
+    const crudos: RawGoogleError[] = (err?.details ?? []).flatMap((d) => d.errors ?? []);
+    if (crudos.length === 0) {
+      const message = cap(err?.message);
+      return { status: err?.status ?? null, googleErrors: message ? [{ errorCode: null, message, trigger: null, fieldPathElements: [], errorPath: null, operationIndex: null }] : [] };
+    }
+    return { status: err?.status ?? null, googleErrors: crudos.map(mapearError) };
   } catch {
-    return { status: null, code: null, message: null };
+    return { status: null, googleErrors: [] };
   }
 }
 
@@ -137,10 +194,11 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
     const logBase = { service: coleccion, endpoint: `${coleccion}:mutate`, customerId: op.customerId, loginCustomerId: this.deps.loginCustomerId, httpStatus: res.status, requestId, validateOnly };
 
     if (!res.ok) {
-      const err = parseGoogleAdsError(await res.text());
-      this.deps.logger?.({ ...logBase, errorStatus: err.status, errorCode: err.code, errorMessage: mensajeSanitizado(err.message), ok: false });
+      const f = parseGoogleAdsFailure(await res.text());
+      const primero = f.googleErrors[0];
+      this.deps.logger?.({ ...logBase, errorStatus: f.status, errorCode: primero?.errorCode ?? null, errorMessage: mensajeSanitizado(primero?.message ?? null), ok: false });
       // El mensaje NO lleva secretos: sólo status HTTP, errorCode de Google y request-id (para trazar el fallo).
-      throw new Error(`GOOGLE_MUTATE_HTTP_${res.status}${err.status ? `:${err.status}` : ''}${err.code ? `:${err.code}` : ''}${requestId ? `:req=${requestId}` : ''}`);
+      throw new Error(`GOOGLE_MUTATE_HTTP_${res.status}${f.status ? `:${f.status}` : ''}${primero?.errorCode ? `:${primero.errorCode}` : ''}${requestId ? `:req=${requestId}` : ''}`);
     }
     this.deps.logger?.({ ...logBase, errorStatus: null, errorCode: null, errorMessage: null, ok: true });
     // validate_only exitoso ⇒ Google NO crea recurso (results vacío): sentinela, nunca un resourceName inventado.
@@ -175,12 +233,14 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
       try { const j = JSON.parse(texto) as { results?: unknown[] }; resultsCount = Array.isArray(j.results) ? j.results.length : 0; } catch { /* validate ⇒ body vacío/sin results */ }
       this.deps.logger?.({ ...logBase, errorStatus: null, errorCode: null, errorMessage: null, ok: true });
     } else {
-      const err = parseGoogleAdsError(texto);
-      // errorMessage al LOG durable: para "Unknown name X" (transcoding) el nombre del campo vive SÓLO aquí.
-      this.deps.logger?.({ ...logBase, errorStatus: err.status, errorCode: err.code, errorMessage: mensajeSanitizado(err.message), ok: false });
-      return { ok: false, httpStatus: res.status, requestId, validateOnly, operationCount: request.mutateOperations.length, resultsCount: 0, errorStatus: err.status, errorCode: err.code, errorMessage: mensajeSanitizado(err.message), partialFailure: false };
+      const f = parseGoogleAdsFailure(texto);
+      const primero = f.googleErrors[0];
+      // El GoogleAdsFailure COMPLETO (todos los errores, con fieldPathElements/trigger/path) se devuelve para
+      // persistir. El log durable conserva el resumen (status/code/message del primero).
+      this.deps.logger?.({ ...logBase, errorStatus: f.status, errorCode: primero?.errorCode ?? null, errorMessage: mensajeSanitizado(primero?.message ?? null), ok: false });
+      return { ok: false, httpStatus: res.status, requestId, validateOnly, operationCount: request.mutateOperations.length, resultsCount: 0, errorStatus: f.status, errorCode: primero?.errorCode ?? null, errorMessage: mensajeSanitizado(primero?.message ?? null), googleErrors: f.googleErrors, partialFailure: false };
     }
-    return { ok: true, httpStatus: res.status, requestId, validateOnly, operationCount: request.mutateOperations.length, resultsCount, errorStatus: null, errorCode: null, errorMessage: null, partialFailure: false };
+    return { ok: true, httpStatus: res.status, requestId, validateOnly, operationCount: request.mutateOperations.length, resultsCount, errorStatus: null, errorCode: null, errorMessage: null, googleErrors: [], partialFailure: false };
   }
 
   /**
