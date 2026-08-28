@@ -58,6 +58,22 @@ describe('GoogleAdsMutateHttpClient', () => {
     await expect(client({ fetchFn: f.fn as unknown as typeof fetch, logger: (l) => logs.push(l) }).aplicar(budgetOp)).rejects.toThrow(/GOOGLE_MUTATE_HTTP_400.*INVALID_ARGUMENT.*fieldError.*req=REQ-ERR-9/);
     expect(logs[0]).toMatchObject({ httpStatus: 400, requestId: 'REQ-ERR-9', errorStatus: 'INVALID_ARGUMENT', ok: false, loginCustomerId: LOGIN });
     expect(logs[0]!.errorCode).toContain('fieldError');
+    expect(logs[0]!.errorMessage).toBe('field required'); // el mensaje de Google queda en el log durable
+  });
+
+  it('TRANSCODING "Unknown name": errorCode=null pero errorMessage CONSERVA el nombre del campo (punto ciego reparado)', async () => {
+    // Un error de transcoding JSON de Google NO trae details[].errors[] (no hay errorCode); el nombre del campo
+    // inválido vive SÓLO en error.message. Antes se descartaba → imposible diagnosticar. Ahora es durable.
+    const msg = 'Invalid JSON payload received. Unknown name "foo" at \'mutate_operations[2].campaign_operation.create\': Cannot find field.';
+    const f = fakeFetch({ ok: false, status: 400, requestId: 'REQ-TC', text: JSON.stringify({ error: { code: 400, status: 'INVALID_ARGUMENT', message: msg } }) });
+    const logs: GoogleAdsWriteLog[] = [];
+    const req = { mutateOperations: [{ campaignOperation: { create: {} } }], partialFailure: false as const, validateOnly: true as const };
+    const r = await client({ fetchFn: f.fn as unknown as typeof fetch, logger: (l) => logs.push(l) }).mutarGrafo('8605539300', req);
+    expect(r.ok).toBe(false);
+    expect(r.errorStatus).toBe('INVALID_ARGUMENT');
+    expect(r.errorCode).toBeNull();                       // transcoding ⇒ sin errorCode
+    expect(r.errorMessage).toContain('Unknown name "foo"'); // el campo inválido queda expuesto
+    expect(logs[0]!.errorMessage).toContain('mutate_operations[2].campaign_operation.create'); // y en el log durable
   });
 
   it('NO_ACCESS_TOKEN: sin token (causa del fallo previo) ⇒ falla cerrado ANTES de llamar a Google', async () => {

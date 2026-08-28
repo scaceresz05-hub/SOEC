@@ -60,8 +60,20 @@ export interface GoogleAdsWriteLog {
   readonly requestId: string | null;
   readonly errorStatus: string | null;
   readonly errorCode: string | null;
+  /**
+   * Mensaje de error de Google (SANITIZADO, cap 600 chars). Para un error de TRANSCODING JSON
+   * ("Invalid JSON payload received. Unknown name X at '<path>'") NO hay `errorCode` — el nombre del
+   * campo inválido vive SÓLO aquí. Antes se descartaba, y ese fue el punto ciego que impidió el
+   * diagnóstico. No contiene secretos (es la queja de schema de Google: path + nombre de campo).
+   */
+  readonly errorMessage: string | null;
   readonly validateOnly: boolean;
   readonly ok: boolean;
+}
+
+/** Recorta el mensaje de Google para el log durable (evita payloads patológicos; no expone secretos). */
+function mensajeSanitizado(m: string | null): string | null {
+  return m ? m.slice(0, 600) : null;
 }
 
 export interface DepsGoogleAdsMutateHttp {
@@ -126,11 +138,11 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
 
     if (!res.ok) {
       const err = parseGoogleAdsError(await res.text());
-      this.deps.logger?.({ ...logBase, errorStatus: err.status, errorCode: err.code, ok: false });
+      this.deps.logger?.({ ...logBase, errorStatus: err.status, errorCode: err.code, errorMessage: mensajeSanitizado(err.message), ok: false });
       // El mensaje NO lleva secretos: sólo status HTTP, errorCode de Google y request-id (para trazar el fallo).
       throw new Error(`GOOGLE_MUTATE_HTTP_${res.status}${err.status ? `:${err.status}` : ''}${err.code ? `:${err.code}` : ''}${requestId ? `:req=${requestId}` : ''}`);
     }
-    this.deps.logger?.({ ...logBase, errorStatus: null, errorCode: null, ok: true });
+    this.deps.logger?.({ ...logBase, errorStatus: null, errorCode: null, errorMessage: null, ok: true });
     // validate_only exitoso ⇒ Google NO crea recurso (results vacío): sentinela, nunca un resourceName inventado.
     if (validateOnly) return { resourceName: 'VALIDATE_ONLY_OK' };
     const json = (await res.json()) as { results?: Array<{ resourceName?: string }> };
@@ -161,11 +173,12 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
     let resultsCount = 0;
     if (res.ok) {
       try { const j = JSON.parse(texto) as { results?: unknown[] }; resultsCount = Array.isArray(j.results) ? j.results.length : 0; } catch { /* validate ⇒ body vacío/sin results */ }
-      this.deps.logger?.({ ...logBase, errorStatus: null, errorCode: null, ok: true });
+      this.deps.logger?.({ ...logBase, errorStatus: null, errorCode: null, errorMessage: null, ok: true });
     } else {
       const err = parseGoogleAdsError(texto);
-      this.deps.logger?.({ ...logBase, errorStatus: err.status, errorCode: err.code, ok: false });
-      return { ok: false, httpStatus: res.status, requestId, validateOnly, operationCount: request.mutateOperations.length, resultsCount: 0, errorStatus: err.status, errorCode: err.code, errorMessage: err.message, partialFailure: false };
+      // errorMessage al LOG durable: para "Unknown name X" (transcoding) el nombre del campo vive SÓLO aquí.
+      this.deps.logger?.({ ...logBase, errorStatus: err.status, errorCode: err.code, errorMessage: mensajeSanitizado(err.message), ok: false });
+      return { ok: false, httpStatus: res.status, requestId, validateOnly, operationCount: request.mutateOperations.length, resultsCount: 0, errorStatus: err.status, errorCode: err.code, errorMessage: mensajeSanitizado(err.message), partialFailure: false };
     }
     return { ok: true, httpStatus: res.status, requestId, validateOnly, operationCount: request.mutateOperations.length, resultsCount, errorStatus: null, errorCode: null, errorMessage: null, partialFailure: false };
   }

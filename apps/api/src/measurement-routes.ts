@@ -554,7 +554,13 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const { ctx: c, org } = real(req, 'autonomia-ads');
     if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
     const eventos = await store.readStream(c, `canary-attempts:${org}`);
-    return reply.send({ organizationId: org, attempts: eventos.filter((e) => e.type === 'canary-attempt').map((e) => e.payload) });
+    return reply.send({
+      organizationId: org,
+      attempts: eventos.filter((e) => e.type === 'canary-attempt').map((e) => e.payload),
+      // Intentos de VALIDATE (full-graph validateOnly): incluyen `errorMessage` con el nombre exacto del campo
+      // inválido de Google en un fallo de transcoding (el punto ciego del diagnóstico anterior).
+      validateAttempts: eventos.filter((e) => e.type === 'canary-validate-attempt').map((e) => e.payload),
+    });
   });
 
   // DIAGNÓSTICO SEGURO — FULL GRAPH validate_only (V2): valida contra Google el GRAFO COMPLETO candidato
@@ -562,7 +568,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
   // geo real (SuggestGeoTargetConstants). Auth + business.manage + contexto canónico. NO usa el envelope viejo para
   // mutar ni crea envelope nuevo. Materialización COMPARTIDA con el path real (sólo cambia validateOnly).
   app.post('/medicion/canary-validate', async (req, reply) => {
-    const { org } = real(req, 'autonomia-ads');
+    const { ctx: c, org } = real(req, 'autonomia-ads');
     if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
     if (org !== CONTEXTO_CANARY.org) return reply.send({ ok: false, error: 'CONTEXT_ORG_NOT_AUTHORIZED' });
     const plan = (await campaignOperator.leerUltimo(org))?.plan ?? null;
@@ -586,6 +592,13 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     if (!request) return reply.send({ ok: false, error: 'MATERIALIZE_FAILED' });
     try {
       const r = await cliente.mutarGrafo(customerId, request);
+      // PERSISTENCIA DURABLE del validate (event store): el error de Google (incl. `errorMessage` con el nombre
+      // exacto del campo inválido en un fallo de transcoding "Unknown name X") queda consultable aunque el cliente
+      // TRUNQUE la respuesta o los logs de Railway ya no estén. Fue el punto ciego que impidió el diagnóstico previo.
+      const at = new Date().toISOString();
+      const sid = `canary-attempts:${org}`;
+      const prev = await store.readStream(c, sid);
+      await store.append(c, sid, prev.length, [{ type: 'canary-validate-attempt', payload: { at, ok: r.ok, httpStatus: r.httpStatus, requestId: r.requestId, operationCount: r.operationCount, errorStatus: r.errorStatus, errorCode: r.errorCode, errorMessage: r.errorMessage, geoResolved: geo.resueltas.map((g) => ({ nombre: g.nombre, criterionId: g.criterionId, negativa: g.negativa })) }, attribution: ATR_CANARY, occurredAt: at }]).catch(() => undefined);
       return reply.send({
         ok: r.ok, validateOnly: true, mode: 'GoogleAdsService.Mutate', partialFailure: false,
         operationCount: request.mutateOperations.length,
