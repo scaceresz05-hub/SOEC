@@ -53,10 +53,11 @@ function leidosDe(): RecursosLeidos {
   };
 }
 // Extras (campaign_criterion NO plan-owned) para las pruebas de clasificación.
-function conExtras(extras: Array<{ type: string; keyword?: { text: string; matchType: string }; location?: { geoTargetConstant: string } }>): RecursosLeidos {
+function conExtras(extras: Array<{ type: string; criterionId?: string; negative?: boolean; keyword?: { text: string; matchType: string }; location?: { geoTargetConstant: string } }>): RecursosLeidos {
   const l = leidosDe();
-  return { ...l, campaignCriterion: [...l.campaignCriterion, ...extras.map((e, i) => ({ campaignCriterion: { resourceName: `customers/${C}/campaignCriteria/EX${i}`, criterionId: `9${i}`, type: e.type, negative: false, ...(e.keyword ? { keyword: e.keyword } : {}), ...(e.location ? { location: e.location } : {}) } }))] };
+  return { ...l, campaignCriterion: [...l.campaignCriterion, ...extras.map((e, i) => ({ campaignCriterion: { resourceName: `customers/${C}/campaignCriteria/24194332264~${e.criterionId ?? `EX${i}`}`, criterionId: e.criterionId ?? `EX${i}`, type: e.type, negative: e.negative ?? false, ...(e.keyword ? { keyword: e.keyword } : {}), ...(e.location ? { location: e.location } : {}) } }))] };
 }
+const DEVICE_DEFAULTS = [{ type: 'DEVICE', criterionId: '30000' }, { type: 'DEVICE', criterionId: '30001' }, { type: 'DEVICE', criterionId: '30002' }];
 
 describe('recuperación read-only de bindings desde Google', () => {
   it('A/consistencia: match completo ⇒ ok, matched=expected, bindings de entidades accionables (no geo/budget)', () => {
@@ -109,35 +110,43 @@ describe('recuperación read-only de bindings desde Google', () => {
     expect(p2).toBe(0);
     expect((await svc.listar(ORG)).length).toBe(r.bindings.length);
   });
-  it('§9-B: 61 plan-owned + 3 provider-generated defaults DEMOSTRADOS ⇒ ok, 61 matched, 3 extras observados, SIN bindings extra', () => {
-    const wl = new Set(['LANGUAGE']); // whitelist demostrada (sólo para el test)
-    const leidos = conExtras([{ type: 'LANGUAGE' }, { type: 'LANGUAGE' }, { type: 'LANGUAGE' }]);
-    const r = correlacionarGrafo(ORG, ENV, PLAN, GEO, leidos, T, wl);
+  it('H/§3: 61 plan-owned + los 3 DEVICE defaults exactos (30000/30001/30002) ⇒ ok, 61 matched, 3 extras, SIN bindings extra', () => {
+    const r = correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras(DEVICE_DEFAULTS), T);
     expect(r.ok).toBe(true);
     expect(r.planOwnedMatchedOperationCount).toBe(EXPECTED);
     expect(r.rawRecoveredResourceCount).toBe(EXPECTED + 3);
     expect(r.providerGeneratedExtraCount).toBe(3);
-    expect(r.providerGeneratedExtrasByType).toEqual({ LANGUAGE: 3 });
-    // los extras NO reciben binding (ni campaign, ni negative, etc.)
-    expect(r.bindings.some((b) => b.providerResourceId?.includes('campaignCriteria/EX'))).toBe(false);
+    expect(r.providerGeneratedExtrasByType).toEqual({ DEVICE: 3 });
+    expect(r.extras.every((e) => e.classification === 'PROVIDER_GENERATED_DEFAULT')).toBe(true);
+    expect(r.bindings.some((b) => b.providerResourceId?.includes('~3000'))).toBe(false); // los device NO se bindean
+    expect(r.bindings.some((b) => b.entityType === 'campaign')).toBe(true); // el campaign binding SÍ
   });
-  it('§9-D: un extra de tipo DESCONOCIDO (no whitelisted) ⇒ FAIL-CLOSED con detalle, 0 bindings', () => {
-    const r = correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras([{ type: 'WEBPAGE' }]), T, new Set(['LANGUAGE']));
+  it('B: sólo 2 de los 3 defaults ⇒ ok con 2 extras (NO se fabrica el tercero)', () => {
+    const r = correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras([DEVICE_DEFAULTS[0]!, DEVICE_DEFAULTS[1]!]), T);
+    expect(r.ok).toBe(true);
+    expect(r.providerGeneratedExtraCount).toBe(2);
+  });
+  it('C/D: DEVICE 30004 (Connected TV) o id arbitrario ⇒ FAIL-CLOSED, 0 bindings', () => {
+    expect(correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras([{ type: 'DEVICE', criterionId: '30004' }]), T).ok).toBe(false);
+    const r = correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras([{ type: 'DEVICE', criterionId: '99999' }]), T);
     expect(r.ok).toBe(false); expect(r.reason).toBe('CAMPAIGN_CRITERION_MISMATCH'); expect(r.bindings).toHaveLength(0);
-    expect(r.extras.some((e) => e.type === 'WEBPAGE' && e.classification === 'USER_CREATED_UNKNOWN')).toBe(true);
+    expect(r.extras.some((e) => e.criterionId === '99999' && e.classification === 'USER_CREATED_UNKNOWN')).toBe(true);
   });
-  it('§9-E: un extra AMBIGUO (misma semántica que una op del plan: keyword) ⇒ FAIL-CLOSED', () => {
-    const r = correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras([{ type: 'KEYWORD', keyword: { text: 'zzz extra', matchType: 'EXACT' } }]), T, new Set(['LANGUAGE', 'KEYWORD']));
-    expect(r.ok).toBe(false); expect(r.reason).toBe('CAMPAIGN_CRITERION_MISMATCH');
-    expect(r.extras.some((e) => e.classification === 'AMBIGUOUS')).toBe(true);
+  it('E: DEVICE 30000 con negative=true ⇒ FAIL-CLOSED (el predicado exige negative=false)', () => {
+    const r = correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras([{ type: 'DEVICE', criterionId: '30000', negative: true }]), T);
+    expect(r.ok).toBe(false);
   });
-  it('diagnóstico: recoveredCampaignCriteriaByType desglosa los tipos leídos', () => {
-    const r = correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras([{ type: 'LANGUAGE' }]), T);
+  it('F/G: un LOCATION o KEYWORD extra ⇒ AMBIGUOUS ⇒ FAIL-CLOSED', () => {
+    expect(correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras([{ type: 'LOCATION', location: { geoTargetConstant: 'geoTargetConstants/2152' } }]), T).ok).toBe(false);
+    const rk = correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras([{ type: 'KEYWORD', keyword: { text: 'zzz extra', matchType: 'EXACT' } }]), T);
+    expect(rk.ok).toBe(false);
+    expect(rk.extras.some((e) => e.classification === 'AMBIGUOUS')).toBe(true);
+  });
+  it('diagnóstico: recoveredCampaignCriteriaByType desglosa los tipos leídos (KEYWORD/LOCATION/DEVICE)', () => {
+    const r = correlacionarGrafo(ORG, ENV, PLAN, GEO, conExtras(DEVICE_DEFAULTS), T);
     expect(r.recoveredCampaignCriteriaByType.KEYWORD ?? 0).toBe((c0.negativeKeywords ?? []).length);
     expect(r.recoveredCampaignCriteriaByType.LOCATION).toBe(GEO.length);
-    expect(r.recoveredCampaignCriteriaByType.LANGUAGE).toBe(1);
-    // sin whitelist ⇒ el extra LANGUAGE es USER_CREATED_UNKNOWN ⇒ fail-closed (no se ignora "porque sobra")
-    expect(r.ok).toBe(false);
+    expect(r.recoveredCampaignCriteriaByType.DEVICE).toBe(3);
   });
   it('G: consultas de LECTURA (SELECT…FROM), sin :mutate, y SIN el bug `FROM campaign_budget WHERE campaign.id`', () => {
     const q = consultasRecuperacion('24194332264');

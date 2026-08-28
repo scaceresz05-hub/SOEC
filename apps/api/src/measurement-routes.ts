@@ -41,7 +41,7 @@ import { ResourceBindingService } from './campana/resource-binding';
 import { CONTEXTO_CANARY } from './campana/canary-execution';
 import { ejecutarCanaryAtomico, TRANSPORT_ATOMICO } from './campana/canary-atomic-execution';
 import { reconciliarBindings } from './campana/canary-reconciliation';
-import { correlacionarGrafo, consultasRecuperacion, TIPOS_PROVIDER_GENERATED_DEFAULT, type RecursosLeidos } from './campana/canary-provider-recovery';
+import { correlacionarGrafo, consultasRecuperacion, type RecursosLeidos } from './campana/canary-provider-recovery';
 import { hashPlan } from './campana/plan-hash';
 import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
 import { GoogleSearchError } from './campana/google-ads-mutate-http';
@@ -635,7 +635,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       adGroupCriterion: (filas.adGroupCriterion ?? []) as never, campaignCriterion: (filas.campaignCriterion ?? []) as never,
     };
     const ahora = new Date().toISOString();
-    const correl = correlacionarGrafo(org, envelope, plan, geo.resueltas, leidos, ahora, TIPOS_PROVIDER_GENERATED_DEFAULT);
+    const correl = correlacionarGrafo(org, envelope, plan, geo.resueltas, leidos, ahora);
     const proof = {
       fingerprintOk: correl.fingerprintOk, expectedOperations: correl.expectedOperations,
       rawRecoveredResourceCount: correl.rawRecoveredResourceCount, planOwnedMatchedOperationCount: correl.planOwnedMatchedOperationCount,

@@ -12,11 +12,21 @@ import type { ProviderResourceBinding } from './resource-binding';
 import type { AuthorizedExecutionEnvelope } from './authorized-execution-envelope';
 
 /**
- * Tipos de `campaign_criterion` DEMOSTRADOS como provider-generated/default para esta campaña (se ignoran del grafo:
- * observación, no bindings). VACÍO por diseño: ningún tipo se acepta sin evidencia durable del recovery real. Se
- * poblará SÓLO tras demostrar (por `campaign_criterion.type` + contrato Google) que un tipo es siempre auto-generado.
+ * Los ÚNICOS `campaign_criterion` DEVICE que Google agrega por defecto a una campaña SEARCH (targets de plataforma
+ * presentes de fábrica, usados para bid modifiers): Desktop=30000, Mobile/HighEndMobile=30001, Tablet=30002.
+ * NO incluye 30004 (Connected TV) ni ningún otro id. Contrato Google demostrado + evidencia real del recovery.
  */
-export const TIPOS_PROVIDER_GENERATED_DEFAULT: ReadonlySet<string> = new Set<string>();
+const DEVICE_DEFAULTS_SEARCH: ReadonlySet<string> = new Set(['30000', '30001', '30002']);
+
+/** PREDICADO EXACTO (no `type===DEVICE` a secas): true SÓLO para los 3 device defaults de una campaña SEARCH. */
+export function esDefaultPlataformaSearchGoogle(c: { channelType: string | null | undefined; type: string | null; criterionId: string | null; negative: boolean; keywordText: string | null; locationGeoTargetConstant: string | null }): boolean {
+  return c.channelType === 'SEARCH'
+    && c.type === 'DEVICE'
+    && !!c.criterionId && DEVICE_DEFAULTS_SEARCH.has(c.criterionId)
+    && c.negative === false
+    && c.keywordText === null
+    && c.locationGeoTargetConstant === null;
+}
 
 /** Consultas GAQL READ-ONLY ancladas a la campaña. Los campos verifican/correlacionan; ningún write. */
 export function consultasRecuperacion(campaignId: string): Record<string, string> {
@@ -106,7 +116,7 @@ function binding(org: string, env: AuthorizedExecutionEnvelope, entityType: Enti
  * criterios propios (defaults) que NO pertenecen al grafo, pero eso NO debe impedir recuperar los del plan — SIEMPRE
  * que cada extra quede DEMOSTRADO como provider-generated (por `tiposProviderGenerated`); si no, fail-closed.
  */
-export function correlacionarGrafo(org: string, env: AuthorizedExecutionEnvelope, plan: MarketingPlan, geoResueltas: readonly GeoRegionResuelta[], leidos: RecursosLeidos, ahora: string, tiposProviderGenerated: ReadonlySet<string> = new Set()): ResultadoCorrelacion {
+export function correlacionarGrafo(org: string, env: AuthorizedExecutionEnvelope, plan: MarketingPlan, geoResueltas: readonly GeoRegionResuelta[], leidos: RecursosLeidos, ahora: string): ResultadoCorrelacion {
   const recoveredResourceCount = leidos.campaign.length + leidos.campaignBudget.length + leidos.adGroup.length + leidos.adGroupAd.length + leidos.adGroupCriterion.length + leidos.campaignCriterion.length;
   const recoveredCampaignCriteriaByType: Record<string, number> = {};
   for (const c of leidos.campaignCriterion) { const t = c.campaignCriterion?.type ?? 'UNKNOWN'; recoveredCampaignCriteriaByType[t] = (recoveredCampaignCriteriaByType[t] ?? 0) + 1; }
@@ -163,11 +173,14 @@ export function correlacionarGrafo(org: string, env: AuthorizedExecutionEnvelope
     const keywordText = cc.keyword?.text ?? null;
     const location = cc.location?.geoTargetConstant ?? null;
     const type = cc.type ?? null;
+    const criterionId = cc.criterionId != null ? String(cc.criterionId) : null;
+    const negative = cc.negative === true;
     // Un extra con SEMÁNTICA de plan (keyword/location) que sobró ⇒ AMBIGUOUS (indistinguible de una op del plan) ⇒
-    // fail-closed (§6). Uno SIN esa semántica sólo es seguro si su TYPE está DEMOSTRADO como provider-generated.
+    // fail-closed (§6). Uno SIN esa semántica sólo es seguro si cumple el PREDICADO EXACTO de device-default SEARCH.
     const classification: ExtraCriterion['classification'] = (keywordText || location) ? 'AMBIGUOUS'
-      : (type && tiposProviderGenerated.has(type)) ? 'PROVIDER_GENERATED_DEFAULT' : 'USER_CREATED_UNKNOWN';
-    return { resourceName: cc.resourceName ?? null, criterionId: cc.criterionId != null ? String(cc.criterionId) : null, type, negative: cc.negative === true, keywordText, locationGeoTargetConstant: location, classification };
+      : esDefaultPlataformaSearchGoogle({ channelType: camp.advertisingChannelType, type, criterionId, negative, keywordText, locationGeoTargetConstant: location }) ? 'PROVIDER_GENERATED_DEFAULT'
+        : 'USER_CREATED_UNKNOWN';
+    return { resourceName: cc.resourceName ?? null, criterionId, type, negative, keywordText, locationGeoTargetConstant: location, classification };
   });
   const providerGeneratedExtras = extras.filter((e) => e.classification === 'PROVIDER_GENERATED_DEFAULT');
   const providerGeneratedExtrasByType: Record<string, number> = {};
