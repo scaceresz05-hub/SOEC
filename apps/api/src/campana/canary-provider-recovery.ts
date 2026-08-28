@@ -14,9 +14,10 @@ import type { AuthorizedExecutionEnvelope } from './authorized-execution-envelop
 /** Consultas GAQL READ-ONLY ancladas a la campaña. Los campos verifican/correlacionan; ningún write. */
 export function consultasRecuperacion(campaignId: string): Record<string, string> {
   const wc = `WHERE campaign.id = ${campaignId}`;
+  // campaign_budget es un RECURSO ATRIBUIDO de campaign: se selecciona DESDE campaign (no `FROM campaign_budget
+  // WHERE campaign.id`, que es INVALID_ARGUMENT porque campaign_budget no atribuye a campaign — puede ser compartido).
   return {
-    campaign: `SELECT campaign.resource_name, campaign.name, campaign.advertising_channel_type, campaign.campaign_budget, campaign.status FROM campaign ${wc}`,
-    campaignBudget: `SELECT campaign_budget.resource_name, campaign_budget.total_amount_micros, campaign_budget.period FROM campaign_budget ${wc}`,
+    campaign: `SELECT campaign.resource_name, campaign.name, campaign.advertising_channel_type, campaign.status, campaign_budget.resource_name, campaign_budget.total_amount_micros FROM campaign ${wc}`,
     adGroup: `SELECT ad_group.resource_name, ad_group.name FROM ad_group ${wc}`,
     adGroupAd: `SELECT ad_group_ad.resource_name, ad_group_ad.ad.responsive_search_ad.headlines, ad_group.resource_name FROM ad_group_ad ${wc}`,
     adGroupCriterion: `SELECT ad_group_criterion.resource_name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group.resource_name FROM ad_group_criterion ${wc} AND ad_group_criterion.type = KEYWORD`,

@@ -39,9 +39,10 @@ function leidosDe(): RecursosLeidos {
   const rnGrupo = new Map<string, string>();
   c0.adGroups.forEach((g, i) => rnGrupo.set(g.action, `customers/${C}/adGroups/${200 + i}`));
   let n = 0;
+    // Fila de campaign con el budget ATRIBUIDO (como devuelve GAQL: campaign + campaign_budget en la misma fila).
+  const campRow = { campaign: { resourceName: `customers/${C}/campaigns/24194332264`, name: c0.campaignName, advertisingChannelType: 'SEARCH' }, campaignBudget: { resourceName: `customers/${C}/campaignBudgets/1`, totalAmountMicros: String(c0.budgetPolicy.totalAmount * 1_000_000) } };
   return {
-    campaign: [{ campaign: { resourceName: `customers/${C}/campaigns/24194332264`, name: c0.campaignName, advertisingChannelType: 'SEARCH', campaignBudget: `customers/${C}/campaignBudgets/1` } }],
-    campaignBudget: [{ campaignBudget: { resourceName: `customers/${C}/campaignBudgets/1`, totalAmountMicros: String(c0.budgetPolicy.totalAmount * 1_000_000) } }],
+    campaign: [campRow], campaignBudget: [campRow], // misma fila, ambos recursos (budget atribuido)
     adGroup: c0.adGroups.map((g) => ({ adGroup: { resourceName: rnGrupo.get(g.action)!, name: g.name } })),
     adGroupAd: c0.adGroups.flatMap((g) => g.ads.map((a) => ({ adGroupAd: { resourceName: `customers/${C}/adGroupAds/${300 + n++}`, ad: { responsiveSearchAd: { headlines: a.headlines.map((t) => ({ text: t })) } } }, adGroup: { resourceName: rnGrupo.get(g.action)! } }))),
     adGroupCriterion: PLAN.activeKeywords.map((k) => ({ adGroupCriterion: { resourceName: `customers/${C}/adGroupCriteria/${400 + n++}`, keyword: { text: k.text, matchType: k.matchType } }, adGroup: { resourceName: rnGrupo.get(k.action)! } })),
@@ -103,8 +104,12 @@ describe('recuperación read-only de bindings desde Google', () => {
     expect(p2).toBe(0);
     expect((await svc.listar(ORG)).length).toBe(r.bindings.length);
   });
-  it('G: las consultas de recuperación son de LECTURA (FROM …), sin ningún :mutate', () => {
+  it('G: consultas de LECTURA (SELECT…FROM), sin :mutate, y SIN el bug `FROM campaign_budget WHERE campaign.id`', () => {
     const q = consultasRecuperacion('24194332264');
     for (const gaql of Object.values(q)) { expect(gaql).toMatch(/^SELECT .+ FROM /); expect(gaql.toLowerCase()).not.toContain('mutate'); }
+    // El budget se lee ATRIBUIDO desde campaign (no hay query separada `FROM campaign_budget`, que era INVALID_ARGUMENT).
+    expect(Object.values(q).some((gaql) => /FROM campaign_budget/.test(gaql))).toBe(false);
+    expect(q.campaign).toContain('campaign_budget.total_amount_micros');
+    expect(q.campaign).toMatch(/FROM campaign\s+WHERE campaign\.id/);
   });
 });

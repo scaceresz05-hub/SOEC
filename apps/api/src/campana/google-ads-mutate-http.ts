@@ -52,6 +52,23 @@ export interface ResultadoProveedor {
   readonly partialFailure: boolean;
 }
 
+/** Error ESTRUCTURADO de una lectura (SearchStream). Sanitizado: sin tokens/secretos. */
+export interface SearchErrorDetalle {
+  readonly httpStatus: number;
+  readonly requestId: string | null;
+  readonly status: string | null;
+  readonly code: string | null;
+  readonly message: string | null;
+  readonly errorPath: string | null;
+  readonly fieldPathElements: readonly FieldPathElement[];
+}
+export class GoogleSearchError extends Error {
+  constructor(public readonly detalle: SearchErrorDetalle) {
+    super(`GOOGLE_SEARCH_HTTP_${detalle.httpStatus}${detalle.status ? `:${detalle.status}` : ''}${detalle.code ? `:${detalle.code}` : ''}${detalle.errorPath ? ` @${detalle.errorPath}` : ''}${detalle.requestId ? `:req=${detalle.requestId}` : ''}`);
+    this.name = 'GoogleSearchError';
+  }
+}
+
 /** Región geo resuelta por Google (SuggestGeoTargetConstants). */
 export interface GeoTargetSugerido {
   readonly name: string;
@@ -299,7 +316,13 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
       headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': this.deps.developerToken, 'login-customer-id': this.deps.loginCustomerId, 'Content-Type': 'application/json' },
       body: JSON.stringify({ query }),
     });
-    if (!res.ok) throw new Error(`GOOGLE_SEARCH_HTTP_${res.status}`);
+    const requestId = res.headers.get('request-id') ?? res.headers.get('x-request-id') ?? null;
+    if (!res.ok) {
+      // ERROR ESTRUCTURADO (no colapsado): status/code/message/path/requestId de Google, sin secretos.
+      const f = parseGoogleAdsFailure(await res.text());
+      const primero = f.googleErrors[0];
+      throw new GoogleSearchError({ httpStatus: res.status, requestId, status: f.status, code: primero?.errorCode ?? null, message: mensajeSanitizado(primero?.message ?? null), errorPath: primero?.errorPath ?? null, fieldPathElements: primero?.fieldPathElements ?? [] });
+    }
     const parsed = JSON.parse(await res.text()) as unknown;
     const batches = Array.isArray(parsed) ? parsed : [parsed];
     const filas: Array<Record<string, unknown>> = [];

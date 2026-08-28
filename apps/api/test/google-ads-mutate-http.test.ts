@@ -141,6 +141,27 @@ describe('GoogleAdsMutateHttpClient', () => {
     expect(r[0]).toEqual({ name: 'Tarapacá', canonicalName: 'Tarapaca,Chile', criterionId: '20154', targetType: 'Region', countryCode: 'CL', status: 'ENABLED' });
   });
 
+  it('buscar (SearchStream READ): URL/body/headers correctos y aplana los batches en filas', async () => {
+    const f = fakeFetch({ ok: true, status: 200, body: [{ results: [{ campaign: { resourceName: 'customers/8605539300/campaigns/24194332264' } }] }, { results: [{ campaign: { resourceName: 'customers/8605539300/campaigns/24194332264' } }] }] });
+    const filas = await client({ fetchFn: f.fn as unknown as typeof fetch }).buscar('8605539300', 'SELECT campaign.resource_name FROM campaign WHERE campaign.id = 24194332264');
+    const { url, init } = f.last();
+    expect(url).toContain('googleads.googleapis.com/v25/customers/8605539300/googleAds:searchStream');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string).query).toContain('FROM campaign');
+    const h = init.headers as Record<string, string>;
+    expect(h.Authorization).toBe('Bearer AT-123'); expect(h['developer-token']).toBe('DEV-TOKEN'); expect(h['login-customer-id']).toBe(LOGIN);
+    expect(filas).toHaveLength(2); // 2 batches aplanados
+  });
+
+  it('buscar 400 ⇒ GoogleSearchError ESTRUCTURADO (status/code/message/path/requestId), NO colapsado', async () => {
+    const body = { error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Error in query', details: [{ errors: [{ errorCode: { queryError: 'UNRECOGNIZED_FIELD' }, message: "Unrecognized field 'campaign.id' for resource 'campaign_budget'.", location: { fieldPathElements: [{ fieldName: 'campaign.id' }] } }] }] } };
+    const f = fakeFetch({ ok: false, status: 400, requestId: 'REQ-SS', text: JSON.stringify(body) });
+    await expect(client({ fetchFn: f.fn as unknown as typeof fetch }).buscar('8605539300', 'SELECT x FROM campaign_budget WHERE campaign.id = 1')).rejects.toMatchObject({
+      name: 'GoogleSearchError',
+      detalle: { httpStatus: 400, requestId: 'REQ-SS', status: 'INVALID_ARGUMENT', code: 'queryError:UNRECOGNIZED_FIELD', errorPath: 'campaign.id' },
+    });
+  });
+
   it('validate exitoso no expone secretos en el log', async () => {
     const f = fakeFetch({ ok: true, status: 200, requestId: 'REQ-OK', body: { results: [] } });
     const logs: GoogleAdsWriteLog[] = [];

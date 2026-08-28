@@ -44,6 +44,7 @@ import { reconciliarBindings } from './campana/canary-reconciliation';
 import { correlacionarGrafo, consultasRecuperacion, type RecursosLeidos } from './campana/canary-provider-recovery';
 import { hashPlan } from './campana/plan-hash';
 import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
+import { GoogleSearchError } from './campana/google-ads-mutate-http';
 import { construirClienteEscrituraGoogleAds, resolverGeoRegiones } from './campana/google-ads-write-runtime';
 import { materializarGoogleAdsMutate, ventanaFechasDesdeActivacion, contarOperaciones } from './campana/google-ads-materializer';
 import { GEO_SMILEFLOW_V2, type GeoRegionResuelta } from './campana/geo-policy';
@@ -612,19 +613,27 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     let geo: Awaited<ReturnType<typeof resolverGeoRegiones>>;
     try { geo = await resolverGeoRegiones(cliente, GEO_SMILEFLOW_V2); } catch (e) { return reply.send({ ok: false, error: 'GEO_RESOLVE_FAILED', detalle: e instanceof Error ? e.message : String(e), newGoogleWriteCalls: 0 }); }
     if (geo.faltantes.length > 0) return reply.send({ ok: false, error: 'GEO_UNRESOLVED', newGoogleWriteCalls: 0 });
-    // LECTURAS GAQL (READ ONLY). Ningún write. Si Google falla ⇒ 0 persistencia.
+    // LECTURAS GAQL (READ ONLY). Ningún write. Si Google falla ⇒ 0 persistencia + diagnóstico ESTRUCTURADO durable
+    // (status/code/message/path/requestId + query que falló), no un simple GOOGLE_SEARCH_HTTP_400.
     const q = consultasRecuperacion(String(campaignId));
-    let leidos: RecursosLeidos;
-    try {
-      leidos = {
-        campaign: (await cliente.buscar(customerId, q.campaign!)) as never,
-        campaignBudget: (await cliente.buscar(customerId, q.campaignBudget!)) as never,
-        adGroup: (await cliente.buscar(customerId, q.adGroup!)) as never,
-        adGroupAd: (await cliente.buscar(customerId, q.adGroupAd!)) as never,
-        adGroupCriterion: (await cliente.buscar(customerId, q.adGroupCriterion!)) as never,
-        campaignCriterion: (await cliente.buscar(customerId, q.campaignCriterion!)) as never,
-      };
-    } catch (e) { return reply.send({ ok: false, error: 'PROVIDER_READ_FAILED', detalle: e instanceof Error ? e.message : String(e), newGoogleWriteCalls: 0 }); }
+    const filas: Record<string, Array<Record<string, unknown>>> = {};
+    for (const [qid, gaql] of Object.entries(q)) {
+      try { filas[qid] = await cliente.buscar(customerId, gaql); }
+      catch (e) {
+        const det = e instanceof GoogleSearchError ? e.detalle : null;
+        const errAt = new Date().toISOString();
+        const cwErr = ctxAppend(c);
+        const prevE = await store.readStream(cwErr, `provider-recovery:${org}`);
+        await store.append(cwErr, `provider-recovery:${org}`, prevE.length, [{ type: 'provider-recovery-error', payload: { at: errAt, envelopeId: envelope.id, campaignId: String(campaignId), failedQuery: qid, gaql, googleError: det }, attribution: ATR_CANARY, occurredAt: errAt }]).catch(() => undefined);
+        return reply.send({ ok: false, error: 'PROVIDER_READ_FAILED', failedQuery: qid, googleError: det, detalle: e instanceof Error ? e.message : String(e), newGoogleWriteCalls: 0 });
+      }
+    }
+    // El budget viene ATRIBUIDO en las mismas filas de campaign (no hay query separada de campaign_budget).
+    const leidos: RecursosLeidos = {
+      campaign: (filas.campaign ?? []) as never, campaignBudget: (filas.campaign ?? []) as never,
+      adGroup: (filas.adGroup ?? []) as never, adGroupAd: (filas.adGroupAd ?? []) as never,
+      adGroupCriterion: (filas.adGroupCriterion ?? []) as never, campaignCriterion: (filas.campaignCriterion ?? []) as never,
+    };
     const ahora = new Date().toISOString();
     const correl = correlacionarGrafo(org, envelope, plan, geo.resueltas, leidos, ahora);
     const proof = { fingerprintOk: correl.fingerprintOk, expectedOperations: correl.expectedOperations, recoveredResourceCount: correl.recoveredResourceCount, matchedOperationCount: correl.matchedOperationCount, unmatchedOperationCount: correl.unmatchedOperationCount, ambiguousOperationCount: correl.ambiguousOperationCount };
