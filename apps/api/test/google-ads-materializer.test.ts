@@ -39,6 +39,7 @@ const GEO: GeoRegionResuelta[] = [
 const VENTANA = ventanaFechasDesdeActivacion('2026-09-01');
 const req = materializarGoogleAdsMutate(PLAN, GEO_SMILEFLOW_V2, GEO, { customerId: CID, ...VENTANA, validateOnly: true })!;
 const opDe = (clave: string): Record<string, unknown> => (req.mutateOperations.find((o) => Object.keys(o)[0] === clave) as Record<string, { create: Record<string, unknown> }>)[clave]!.create;
+const opDe2 = (o: { readonly [k: string]: unknown }): Record<string, unknown> => { const k = Object.keys(o)[0]!; return (o as Record<string, { create: Record<string, unknown> }>)[k]!.create; };
 const budget = opDe('campaignBudgetOperation');
 const campaign = opDe('campaignOperation');
 
@@ -103,6 +104,47 @@ describe('materializador Google-native V2', () => {
     const real = materializarGoogleAdsMutate(PLAN, GEO_SMILEFLOW_V2, GEO, { customerId: CID, ...VENTANA, validateOnly: false })!;
     expect(real.validateOnly).toBeUndefined();
     expect(real.mutateOperations).toEqual(req.mutateOperations); // mismo grafo
+  });
+  it('A: Campaign declara containsEuPoliticalAdvertising = DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING', () => {
+    expect(campaign.containsEuPoliticalAdvertising).toBe('DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING');
+  });
+  it('B/C/D: budget, campaign y 2 ad groups tienen temp resource name COMPLETO (customers/.../-N)', () => {
+    expect(String(budget.resourceName)).toMatch(/^customers\/8605539300\/campaignBudgets\/-\d+$/);
+    expect(String(campaign.resourceName)).toMatch(/^customers\/8605539300\/campaigns\/-\d+$/);
+    const ags = req.mutateOperations.filter((o) => Object.keys(o)[0] === 'adGroupOperation').map((o) => opDe2(o).resourceName);
+    expect(ags).toHaveLength(2);
+    ags.forEach((rn) => expect(String(rn)).toMatch(/^customers\/8605539300\/adGroups\/-\d+$/));
+  });
+  it('E/F/G: adGroupAds, adGroupCriteria y campaignCriteria NO llevan resourceName propio (hojas)', () => {
+    for (const t of ['adGroupAdOperation', 'adGroupCriterionOperation', 'campaignCriterionOperation']) {
+      const creates = req.mutateOperations.filter((o) => Object.keys(o)[0] === t).map(opDe2);
+      expect(creates.length).toBeGreaterThan(0);
+      creates.forEach((c) => expect('resourceName' in c).toBe(false));
+    }
+  });
+  it('K: NINGÚN resourceName bare /^-\\d+$/ en todo el payload (era el BAD_RESOURCE_ID)', () => {
+    req.mutateOperations.map(opDe2).forEach((c) => { if ('resourceName' in c) expect(String(c.resourceName)).not.toMatch(/^-\d+$/); });
+  });
+  it('L: los temp resource names (sólo padres) son 4, únicos y negativos', () => {
+    const temps = req.mutateOperations.map(opDe2).filter((c) => 'resourceName' in c).map((c) => String(c.resourceName));
+    expect(temps).toHaveLength(4); // budget + campaign + 2 adGroups
+    expect(new Set(temps).size).toBe(4);
+    temps.forEach((t) => expect(t).toMatch(/\/-\d+$/));
+  });
+  it('H/I/J/M: refs padre válidas y DEFINIDAS antes de usarse (ads/criteria→adGroup, campaignCriteria→campaign)', () => {
+    const creates = req.mutateOperations.map((o) => ({ type: Object.keys(o)[0]!, c: opDe2(o) }));
+    const idxDe = (rn: string): number => creates.findIndex((x) => x.c.resourceName === rn);
+    const agRNs = new Set(creates.filter((x) => x.type === 'adGroupOperation').map((x) => String(x.c.resourceName)));
+    creates.forEach((x, i) => {
+      if (x.type === 'adGroupAdOperation' || x.type === 'adGroupCriterionOperation') {
+        expect(agRNs.has(String(x.c.adGroup))).toBe(true);           // referencia un ad group real
+        expect(idxDe(String(x.c.adGroup))).toBeLessThan(i);          // definido ANTES
+      }
+      if (x.type === 'campaignCriterionOperation') {
+        expect(String(x.c.campaign)).toBe(String(campaign.resourceName));
+        expect(idxDe(String(x.c.campaign))).toBeLessThan(i);
+      }
+    });
   });
   it('conteo de operaciones (budget+campaign separados) + geo=5', () => {
     const c = contarOperaciones(req);

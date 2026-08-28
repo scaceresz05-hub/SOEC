@@ -64,6 +64,10 @@ export function materializarGoogleAdsMutate(plan: MarketingPlan, geo: GeoPolicy,
 
   const cid = opts.customerId;
   let temp = 0;
+  // Temporary resource name COMPLETO (`customers/{cid}/{coleccion}/-N`) — SÓLO para recursos PADRE que otra
+  // operación posterior referencia (budget, campaign, ad groups). Los recursos HOJA (adGroupAds, adGroupCriteria,
+  // campaignCriteria) NO se referencian y NO llevan resourceName propio: su id real es COMPUESTO
+  // (`{parentId}~{childId}`), así que un temp escalar `-N` es BAD_RESOURCE_ID. Google se lo asigna al crearlos.
   const rn = (coleccion: string): string => `customers/${cid}/${coleccion}/-${(temp += 1)}`;
   const ops: MutateOperationGoogle[] = [];
 
@@ -78,6 +82,8 @@ export function materializarGoogleAdsMutate(plan: MarketingPlan, geo: GeoPolicy,
     resourceName: campaignRN,
     name: c0.campaignName,
     advertisingChannelType: 'SEARCH',
+    // Obligatorio desde v21+ (regulación UE de publicidad política). SmileFlow es SaaS dental: no la contiene.
+    containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
     status: opts.campaignStatus ?? 'ENABLED',
     campaignBudget: budgetRN,
     [bidding.field]: {},
@@ -94,9 +100,9 @@ export function materializarGoogleAdsMutate(plan: MarketingPlan, geo: GeoPolicy,
     const agRN = rn('adGroups');
     adGroupRNPorAccion.set(g.action, agRN);
     ops.push({ adGroupOperation: { create: { resourceName: agRN, name: g.name, campaign: campaignRN, status: 'ENABLED', type: 'SEARCH_STANDARD' } } });
-    // 4) Ads (RSA) del grupo.
+    // 4) Ads (RSA) del grupo. HOJA: sin resourceName propio; sólo referencia a su ad group padre.
     g.ads.forEach((a) => {
-      ops.push({ adGroupAdOperation: { create: { resourceName: rn('adGroupAds'), adGroup: agRN, status: 'ENABLED', ad: { responsiveSearchAd: { headlines: a.headlines.map((t) => ({ text: t })), descriptions: a.descriptions.map((t) => ({ text: t })) }, finalUrls: [g.finalDestination] } } } });
+      ops.push({ adGroupAdOperation: { create: { adGroup: agRN, status: 'ENABLED', ad: { responsiveSearchAd: { headlines: a.headlines.map((t) => ({ text: t })), descriptions: a.descriptions.map((t) => ({ text: t })) }, finalUrls: [g.finalDestination] } } } });
     });
   });
 
@@ -104,17 +110,18 @@ export function materializarGoogleAdsMutate(plan: MarketingPlan, geo: GeoPolicy,
   plan.activeKeywords.forEach((k) => {
     const agRN = adGroupRNPorAccion.get(k.action);
     if (!agRN) return;
-    ops.push({ adGroupCriterionOperation: { create: { resourceName: rn('adGroupCriteria'), adGroup: agRN, status: 'ENABLED', keyword: { text: k.text, matchType: k.matchType } } } });
+    // HOJA: sin resourceName propio; sólo referencia a su ad group padre.
+    ops.push({ adGroupCriterionOperation: { create: { adGroup: agRN, status: 'ENABLED', keyword: { text: k.text, matchType: k.matchType } } } });
   });
 
-  // 6) Negativas (a nivel campaña).
+  // 6) Negativas (a nivel campaña). HOJA: sin resourceName propio; sólo referencia a la campaña padre.
   (c0.negativeKeywords ?? []).forEach((n) => {
-    ops.push({ campaignCriterionOperation: { create: { resourceName: rn('campaignCriteria'), campaign: campaignRN, negative: true, keyword: { text: n.text, matchType: n.matchType } } } });
+    ops.push({ campaignCriterionOperation: { create: { campaign: campaignRN, negative: true, keyword: { text: n.text, matchType: n.matchType } } } });
   });
 
-  // 7) GEO: locations positivas (4 regiones) + RM negativa explícita.
+  // 7) GEO: locations positivas (4 regiones) + RM negativa explícita. HOJA: sin resourceName propio.
   geoResueltas.forEach((r) => {
-    ops.push({ campaignCriterionOperation: { create: { resourceName: rn('campaignCriteria'), campaign: campaignRN, ...(r.negativa ? { negative: true } : {}), location: { geoTargetConstant: `geoTargetConstants/${r.criterionId}` } } } });
+    ops.push({ campaignCriterionOperation: { create: { campaign: campaignRN, ...(r.negativa ? { negative: true } : {}), location: { geoTargetConstant: `geoTargetConstants/${r.criterionId}` } } } });
   });
 
   return { mutateOperations: ops, partialFailure: false, ...(opts.validateOnly ? { validateOnly: true } : {}) };
