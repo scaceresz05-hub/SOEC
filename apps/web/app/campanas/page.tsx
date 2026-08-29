@@ -15,6 +15,8 @@ import {
 } from '../../lib/campana-client';
 import { conexion, activos } from '../../lib/meta-client';
 import { Badge, Callout, EmptyState, Metric, PageHeader, TechDetails, type Tono } from '../../components/ui';
+import { CampaniaVigente } from '../../components/campana-vigente';
+import Link from 'next/link';
 
 interface OpcionActivo { externalId: string; nombre: string }
 
@@ -66,6 +68,11 @@ export default function CampanasPage(): React.ReactElement {
   return (
     <div className="wrap">
       <PageHeader eyebrow="Campañas · modo seguro" title="Prepara tu campaña" right={mandato ? <Badge tono={estadoTono(mandato.status)}>{mandato.status}</Badge> : undefined} />
+      {/* Campaña Google Ads vigente (read-only). La creación/edición no vive aquí; sólo la vista de estado. */}
+      <div className="section">Google Ads <span className="hint">campaña vigente · solo lectura</span></div>
+      <CampaniaVigente org={org} compact />
+      <p className="s" style={{ margin: '4px 0 14px' }}><Link href="/negocios">Ver detalle completo →</Link></p>
+      <div className="section">Meta <span className="hint">preparación en modo seguro</span></div>
       <Callout tono={wstatus?.real ? 'warn' : 'info'} ico="🛡️">
         {wstatus?.real
           ? <><b>Modo real activo.</b> SOEC puede publicar cambios en Meta dentro de tu tope autorizado.</>

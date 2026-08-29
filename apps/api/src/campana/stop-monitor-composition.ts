@@ -14,7 +14,18 @@ import type { DepsStopMonitor, MetricasCampania, UltimoStop } from './stop-monit
 const GROWTH = 'smileflow-growth';
 const EVENTO_CONTACTO = 'lead_created';
 export const EVENTO_STOP = 'stop-monitor.stop';
+export const EVENTO_STOP_TICK = 'stop-monitor.tick';
 export function stopMonitorStreamId(org: string): string { return `stop-monitor:${org}`; }
+export function stopMonitorTickStreamId(org: string): string { return `stop-monitor-tick:${org}`; }
+
+/** Último tick del monitor (heartbeat durable) — para que la UI pruebe que está VIVO, no sólo configurado. */
+export async function leerUltimoTick(store: EventStore, org: string): Promise<{ at: string; action: string; reason: string | null; outcome: string } | null> {
+  const o = OrganizationId(org);
+  const ctx: RequestContext = { organizationId: o, actor: ActorId('stop-monitor-read'), scope: { organizationId: o, permissions: ['events:read'] }, correlationId: `stop-monitor-read-${org}` };
+  const eventos = await store.readStream(ctx, stopMonitorTickStreamId(org));
+  const u = eventos.filter((e) => e.type === EVENTO_STOP_TICK).map((e) => e.payload as { at: string; action: string; reason: string | null; outcome: string }).slice(-1)[0];
+  return u ?? null;
+}
 
 const ATR: Attribution = { source: 'stop-monitor', purpose: 'pausa automática por regla de stop autorizada (reducción de riesgo)', assumptions: ['única acción provider = PAUSE; nunca create/enable/budget/targeting'], claimType: 'observational', regime: 'empirical', uncertainty: 'baja' };
 
@@ -78,6 +89,11 @@ export function crearDepsStopMonitor(store: EventStore, pauseAdapter: GoogleAdsP
       return ultimo ? { campaignId: ultimo.campaignId, outcome: ultimo.outcome } : null;
     },
     ...(pauseAdapter ? { pausarCampania: (customerId: string, resourceName: string) => pauseAdapter.pausarCampania(customerId, resourceName).then((r) => ({ ok: r.ok, requestId: r.requestId, resourceName: r.resourceName, errorStatus: r.errorStatus, errorMessage: r.errorMessage })) } : {}),
+    registrarTick: async (org, decision, outcome, at) => {
+      const c = ctx(org); const sid = stopMonitorTickStreamId(org);
+      const prev = await store.readStream(c, sid);
+      await store.append(c, sid, prev.length, [{ type: EVENTO_STOP_TICK, payload: { at, action: decision.action, reason: decision.reason, outcome, campaignId: decision.campaignId }, attribution: ATR, occurredAt: at }]).catch(() => undefined);
+    },
     registrarStop: async (org, decision, metricas, outcome, pausa, at) => {
       const c = ctx(org);
       const sid = stopMonitorStreamId(org);

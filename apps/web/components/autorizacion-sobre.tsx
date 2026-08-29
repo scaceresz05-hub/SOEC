@@ -52,6 +52,8 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
   const [confirmando, setConfirmando] = useState(false);
   const [ejecEnviada, setEjecEnviada] = useState(false);
   const [ejecMsg, setEjecMsg] = useState<string | null>(null);
+  // Estado REAL de creación: si existe una campaña vigente vinculada, el plan YA se ejecutó y no puede recrear.
+  const [ejecutado, setEjecutado] = useState<{ id: string; bindings: number; status: string | null } | null>(null);
   const enviadoRef = useRef(false); // guard SÍNCRONO anti doble-submit (el estado no se actualiza dentro del mismo tick)
 
   // HIDRATACIÓN read-only: al montar / cambiar de tenant / re-simular, se lee el envelope PERSISTIDO (GET) y el
@@ -65,11 +67,14 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
       setResp((await r.json()) as Resp);
       const e = await fetch('/api/medicion/execution-plan?detail=intents', { headers: cabecerasOrg(org), cache: 'no-store' });
       if (e.ok) setExec((await e.json()) as ExecPlan);
+      // Estado real: ¿ya existe una campaña vigente vinculada? ⇒ plan ejecutado (no re-creable).
+      const cl = await fetch('/api/medicion/campaign-live', { headers: cabecerasOrg(org), cache: 'no-store' });
+      if (cl.ok) { const j = (await cl.json()) as { ok?: boolean; campaign?: { id: string; status: string | null }; providerBindingsCount?: number }; setEjecutado(j.ok && j.campaign ? { id: j.campaign.id, bindings: j.providerBindingsCount ?? 0, status: j.campaign.status } : null); }
     } catch { setError('No pudimos contactar el servicio.'); }
     finally { setCargandoInicial(false); }
   }, [org]);
   // Reset al cambiar de org/nonce (tenant scoping): limpia el envelope anterior ANTES de cargar el nuevo.
-  useEffect(() => { setResp(null); setError(null); setCargandoInicial(true); void cargar(); }, [cargar, nonce]);
+  useEffect(() => { setResp(null); setError(null); setEjecutado(null); setCargandoInicial(true); void cargar(); }, [cargar, nonce]);
 
   const accion = useCallback(async (ruta: string) => {
     if (!org) return;
@@ -173,7 +178,20 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
             </>
           )}
 
-          {exec?.shadowPlanCreated && exec.summary && (
+          {/* PLAN YA EJECUTADO: la campaña real existe. No se ofrece re-ejecutar (el backend lo bloquea con ALREADY_EXECUTED). */}
+          {ejecutado && (
+            <div className="card" style={{ marginTop: 12, borderLeft: '4px solid var(--ok, #2F7D57)' }}>
+              <div className="stophead"><strong>Plan ejecutado</strong><Badge tono="ok">COMPLETADA</Badge></div>
+              <ul className="s" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                <li><b>Campaña creada:</b> <code>{ejecutado.id}</code>{ejecutado.status ? ` · ${ejecutado.status === 'PAUSED' ? 'pausada' : ejecutado.status === 'ENABLED' ? 'habilitada' : ejecutado.status}` : ''}</li>
+                <li><b>Recursos reales creados (bindings):</b> {ejecutado.bindings}</li>
+                <li><b>Estado de creación:</b> COMPLETADA</li>
+              </ul>
+              <Callout tono="info" ico="✅">Este plan ya fue ejecutado y no puede volver a crear recursos. Para operar la campaña existente se usan acciones sobre ella (p.ej. pausa automática), no una nueva creación.</Callout>
+            </div>
+          )}
+
+          {!ejecutado && exec?.shadowPlanCreated && exec.summary && (
             <div style={{ marginTop: 12 }}>
               <div className="section">Plan de ejecución <span className="hint">SHADOW · sólo lectura · sin escrituras reales</span></div>
               <ul className="s" style={{ margin: '4px 0 0', paddingLeft: 18 }}>
@@ -210,8 +228,8 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
             <div style={{ marginTop: 8 }}>
               <p className="s">Autorizado por <b>{env.approvedBy}</b> el {env.approvedAt?.slice(0, 10)}. La ejecución real permanece bloqueada por el gate externo y por los interruptores de seguridad.</p>
 
-              {/* TRIGGER HUMANO del plan autorizado. Requiere click humano + confirmación; los agentes no lo pulsan. */}
-              <div className="card" style={{ marginTop: 10, borderLeft: '4px solid var(--line-strong, #cbd5e1)' }}>
+              {/* TRIGGER HUMANO del plan autorizado — SÓLO si el plan NO fue ejecutado aún. Si ya existe campaña, se oculta. */}
+              {!ejecutado && (<div className="card" style={{ marginTop: 10, borderLeft: '4px solid var(--line-strong, #cbd5e1)' }}>
                 <div className="section" style={{ margin: 0 }}>Ejecución del plan autorizado <span className="hint">acción humana · un solo click</span></div>
                 <ul className="s" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
                   <li><b>Sobre:</b> <code>{env.id}</code></li>
@@ -247,7 +265,7 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
                 )}
 
                 {ejecEnviada && <Callout tono="info" ico="🛰">{ejecMsg}</Callout>}
-              </div>
+              </div>)}
 
               <button type="button" className="btn" style={{ marginTop: 10 }} disabled={cargando} onClick={() => void accion('envelope-revoke')}>Revocar autorización</button>
             </div>

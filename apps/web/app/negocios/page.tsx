@@ -14,6 +14,7 @@ import { estadoAds, lineaObjetivoAds, midiendoContactos } from '../../lib/ads-es
 import { BotonActualizarAds } from '../../components/boton-actualizar-ads';
 import { CampaignOperator } from '../../components/campaign-operator';
 import { GoogleAdsConexion } from '../../components/google-ads-conexion';
+import { CampaniaVigente } from '../../components/campana-vigente';
 import {
   Badge, Callout, clp, colorDeNegocio, DirectorCard, EmptyState, Funnel, iniciales, Metric, num,
   PriorityList, SourceRow, TechDetails, TrendBars, valor, type Desconocible, type Tono,
@@ -295,7 +296,9 @@ export default function Panel(): React.ReactElement {
           )}
           {!esEcom && panel && (
             <>
-              <div className="section">Publicidad <span className="hint">{FUENTE_ADS} · histórico de la campaña</span></div>
+              <div className="section">Campaña vigente <span className="hint">Google Ads · en tiempo real</span></div>
+              {org && <CampaniaVigente org={org} />}
+              <div className="section" style={{ marginTop: 18 }}>Histórico Google Ads <span className="hint">SmileFlow Search Chile · solo lectura, no es la campaña vigente</span></div>
               {adsVacio(panel) ? (
                 <Callout tono="info" ico="🔌">
                   {adsConectado
@@ -502,7 +505,9 @@ export default function Panel(): React.ReactElement {
       {tab === 'marketing' && (
         !esEcom && panel ? (
           <>
-            <div className="section">Marketing pagado <span className="hint">{FUENTE_ADS} · histórico de la campaña · solo lectura</span></div>
+            <div className="section">Campaña vigente <span className="hint">Google Ads · centro de mando</span></div>
+            {org && <CampaniaVigente org={org} />}
+            <div className="section" style={{ marginTop: 18 }}>Histórico Google Ads <span className="hint">SmileFlow Search Chile · solo lectura</span></div>
             {org && <GoogleAdsConexion org={org} />}
             {adsVacio(panel) ? (
               <Callout tono="info" ico="🔌">

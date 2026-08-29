@@ -42,6 +42,8 @@ import { CONTEXTO_CANARY } from './campana/canary-execution';
 import { ejecutarCanaryAtomico, envelopeYaEjecutado, TRANSPORT_ATOMICO } from './campana/canary-atomic-execution';
 import { reconciliarBindings } from './campana/canary-reconciliation';
 import { correlacionarGrafo, consultasRecuperacion, type RecursosLeidos } from './campana/canary-provider-recovery';
+import { construirCampaignLive, construirLectorCampaignProvider, type ProviderCampaignData } from './campana/campaign-live';
+import { leerUltimoTick } from './campana/stop-monitor-composition';
 import { hashPlan } from './campana/plan-hash';
 import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
 import { GoogleSearchError } from './campana/google-ads-mutate-http';
@@ -857,6 +859,47 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       budgetPolicy: c0?.budgetPolicy?.type ?? null, experimentTotalCommitmentMaxClp: c0?.budgetPolicy?.totalAmount ?? null, globalNewSpendCapClp: envelope.totalCap, zeroContactStopClp: envelope.maxSpendWithoutContact, dailyBudgetPresent: false, authorizedDurationDays: envelope.authorizedDurationDays,
       historicalResourceReferences: 0, provenance,
     });
+  });
+
+  // READ-MODEL de la CAMPAÑA VIGENTE (single source of truth para la UI). Resuelve envelope→binding→campaña y compone
+  // estado/gasto/rendimiento/stops/monitor/evolución. READ-ONLY: no ejecuta, no muta, no cambia reglas. La histórica
+  // se marca aparte (campaignRole) y su gasto NUNCA entra al experimento. Fail visible: sin binding ⇒ NO_ACTIVE_CAMPAIGN.
+  app.get('/medicion/campaign-live', async (req, reply) => {
+    const { ctx: c, org } = real(req, 'autonomia-ads');
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    const envelope = await envelopeSvc.leerUltimo(org);
+    const todosBindings = envelope ? await bindingSvc.listar(org) : [];
+    const campaignBinding = envelope ? todosBindings.find((b) => b.envelopeId === envelope.id && b.entityType === 'campaign') ?? null : null;
+    if (!envelope || !campaignBinding?.providerResourceId) return reply.send({ ok: false, error: 'NO_ACTIVE_CAMPAIGN', message: 'No hay una campaña vigente vinculada.' });
+    const providerBindingsCount = todosBindings.filter((b) => b.envelopeId === envelope.id).length;
+    const resourceName = campaignBinding.providerResourceId;
+    const campaignId = resourceName.match(/campaigns\/(\d+)$/)?.[1] ?? null;
+    const customerId = resourceName.match(/^customers\/(\d+)\//)?.[1] ?? null;
+    const now = new Date().toISOString();
+    // Lectura provider READ-ONLY de LA campaña vigente (fail-soft). Si Google falla ⇒ campos null, NO fallback a histórica.
+    const cliente = construirClienteEscrituraGoogleAds(process.env, org, googleAdsComp, {});
+    let provider: ProviderCampaignData = { core: null, dates: null, metrics: null, evolution: [] };
+    let lastGoogleReadAt: string | null = null;
+    if (cliente && customerId && campaignId) { try { provider = await construirLectorCampaignProvider((cid, q) => cliente.buscar(cid, q))(customerId, campaignId); lastGoogleReadAt = now; } catch { /* fail-soft */ } }
+    // contactos first-party (Growth) — no usa gasto histórico.
+    const obs = new ObservacionService(store, {} as never); let contacts = 0;
+    for (const id of await obs.listarIds(c)) { const st = await obs.cargar(c, id); const p = st.datos?.provenanciaReal; if (st.datos?.naturaleza === 'REAL' && p?.provider === 'smileflow-growth' && !p.diagnostico && p.eventName === 'lead_created') contacts += 1; }
+    const readiness = await diagnosisEvidence.leerUltima(org);
+    const ultimoTick = await leerUltimoTick(store, org);
+    const historicalId = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(org)))?.campaignId ?? null;
+    const re = (id: string): boolean => envelope.stopRules.find((s) => s.id === id)?.enabled !== false; // default habilitada
+    const model = construirCampaignLive({
+      campaign: { id: campaignId ?? '', resourceName, name: provider.core?.name ?? null, status: provider.core?.status ?? null, channelType: provider.core?.channelType ?? null, startDate: provider.dates?.startDate ?? null, endDate: provider.dates?.endDate ?? null },
+      experimentTotalClp: envelope.experimentBudget, globalCapClp: envelope.totalCap, zeroContactStopClp: envelope.maxSpendWithoutContact,
+      authorizedEndDate: provider.dates?.endDate ?? envelope.expiresAt ?? null,
+      stopRulesEnabled: { zeroContact: re('STOP_ZERO_CONVERSION'), budget: re('STOP_BUDGET'), period: re('STOP_PERIOD'), tracking: re('STOP_TRACKING'), landing: re('STOP_LANDING') },
+      metrics: { spendClp: provider.metrics?.spendClp ?? null, impressions: provider.metrics?.impressions ?? null, clicks: provider.metrics?.clicks ?? null, conversions: provider.metrics?.conversions ?? null },
+      contacts, evolution: provider.evolution,
+      trackingValid: readiness?.firstPartyTracking?.status === 'PASS', landingAvailable: readiness?.landing?.status === 'PASS',
+      monitor: { configured: process.env.SOEC_STOP_MONITOR_ENABLED !== 'false', pauseWired: cliente !== null, intervalSeconds: 300, lastTickAt: ultimoTick?.at ?? null, lastDecision: ultimoTick?.action ?? null, lastDecisionReason: ultimoTick?.reason ?? null },
+      lastGoogleReadAt, lastFirstPartyReadAt: now, now, historicalCampaignId: historicalId ?? 'HISTORICAL',
+    });
+    return reply.send({ ...model, providerBindingsCount });
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {

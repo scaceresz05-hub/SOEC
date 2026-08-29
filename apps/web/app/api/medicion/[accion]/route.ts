@@ -15,6 +15,7 @@ const GET_ACCIONES = new Set([
   'canary-attempts',
   'canary-candidate',
   'candidate-final',
+  'campaign-live',
 ]);
 const POST_ACCIONES = new Set([
   'preparar',

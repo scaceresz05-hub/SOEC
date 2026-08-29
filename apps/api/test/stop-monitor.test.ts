@@ -118,7 +118,7 @@ describe('métricas del monitor desde la campaña del binding (no la histórica)
 });
 
 describe('GoogleAdsPauseAdapter — PAUSE-ONLY', () => {
-  const fake = (res: { ok: boolean; status: number; body?: unknown }) => { const fn = vi.fn(async () => ({ ok: res.ok, status: res.status, headers: { get: (k: string) => (k.toLowerCase() === 'request-id' ? 'REQ-PA' : null) }, text: async () => JSON.stringify(res.body ?? {}), json: async () => res.body ?? {} })); return fn; };
+  const fake = (res: { ok: boolean; status: number; body?: unknown }) => vi.fn(async (_url: string, _init: RequestInit) => ({ ok: res.ok, status: res.status, headers: { get: (k: string) => (k.toLowerCase() === 'request-id' ? 'REQ-PA' : null) }, text: async () => JSON.stringify(res.body ?? {}), json: async () => res.body ?? {} }));
   const adapter = (fn: ReturnType<typeof fake>) => new GoogleAdsPauseAdapter({ resolverAccessToken: async () => 'AT', developerToken: 'DT', loginCustomerId: '1742063041', fetchFn: fn as unknown as typeof fetch });
   it('I: única operación = status→PAUSED (updateMask=status); URL campaigns:mutate; nunca enable/create', async () => {
     const fn = fake({ ok: true, status: 200, body: { results: [{ resourceName: CAMP }] } });
@@ -126,7 +126,7 @@ describe('GoogleAdsPauseAdapter — PAUSE-ONLY', () => {
     expect(r.ok).toBe(true); expect(r.resourceName).toBe(CAMP); expect(r.requestId).toBe('REQ-PA');
     const call = fn.mock.calls[0]!;
     expect(String(call[0])).toContain('/customers/8605539300/campaigns:mutate');
-    const body = JSON.parse((call[1] as { body: string }).body);
+    const body = JSON.parse((call[1] as RequestInit).body as string);
     expect(body.operations[0].update).toEqual({ resourceName: CAMP, status: 'PAUSED' });
     expect(body.operations[0].updateMask).toBe('status');
     expect(JSON.stringify(body)).not.toContain('ENABLED'); // jamás habilita

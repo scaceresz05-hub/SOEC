@@ -93,6 +93,8 @@ export interface DepsStopMonitor {
   readonly pausarCampania?: (customerId: string, resourceName: string) => Promise<ResultadoPausaProvider>;
   /** Persiste el resultado de un STOP ejecutado (regla, métricas, resourceName, requestId, outcome, at). */
   readonly registrarStop: (org: string, decision: DecisionMonitor, metricas: MetricasCampania, outcome: OutcomeStop, pausa: ResultadoPausaProvider | null, at: string) => Promise<void>;
+  /** Heartbeat durable de CADA tick (para que la UI pruebe que el monitor está vivo). Opcional. */
+  readonly registrarTick?: (org: string, decision: DecisionMonitor, outcome: OutcomeStop, at: string) => Promise<void>;
   readonly ahora: () => string;
 }
 
@@ -108,6 +110,12 @@ export class StopMonitorService {
    */
   async correrUnaVez(org: string): Promise<ResultadoTick> {
     const at = this.deps.ahora();
+    const r = await this.decidir(org, at);
+    await this.deps.registrarTick?.(org, r.decision, r.outcome, at); // heartbeat de CADA tick (prueba de vida para la UI)
+    return r;
+  }
+
+  private async decidir(org: string, at: string): Promise<ResultadoTick> {
     const envelope = await this.deps.leerEnvelope(org);
     if (!envelope) return { decision: { action: 'NOOP', reason: 'NO_ENVELOPE', firedRuleIds: [], campaignId: null }, outcome: 'NOOP' };
     const bindingRN = await this.deps.leerCampaignBindingResourceName(org, envelope.id);
