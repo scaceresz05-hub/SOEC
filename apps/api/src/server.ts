@@ -16,6 +16,9 @@ import { GoogleAdsScheduler } from './ingesta/google-ads-scheduler';
 import { StopMonitorService, iniciarStopMonitor } from './campana/stop-monitor';
 import { crearDepsStopMonitor, construirLectorMetricasCampania } from './campana/stop-monitor-composition';
 import { construirAdapterPausaGoogleAds, construirClienteEscrituraGoogleAds } from './campana/google-ads-write-runtime';
+import { EnvelopeService } from './campana/envelope-service';
+import { ResourceBindingService } from './campana/resource-binding';
+import { fechaCalendario } from './campana/campaign-live';
 import { ejecutarBootstrap } from '@soec/identity';
 import { DeterministicIntelligenceProvider } from '@soec/intelligence';
 import { buildApp } from './app';
@@ -140,6 +143,22 @@ async function main(): Promise<void> {
     const intervaloMs = 5 * 60_000;
     iniciarStopMonitor(svc, 'org-smileflow', intervaloMs, (e) => console.log(JSON.stringify(e)));
     console.log(JSON.stringify({ stopMonitor: 'started', intervaloMs, org: 'org-smileflow', pauseWired: pauseAdapter !== null, metricsWired: lectorMetricas !== null }));
+    // SONDA DE FECHAS (READ-ONLY, boot): confirma que campaign.start_date/end_date (v25) se leen de LA campaña vigente.
+    // Observabilidad honesta de la fuente de fechas; ninguna escritura, ningún efecto sobre la campaña.
+    if (readClient) void (async (): Promise<void> => {
+      try {
+        const st = new PgEventStore(pool);
+        const env = await new EnvelopeService(st).leerUltimo('org-smileflow');
+        const binds = env ? await new ResourceBindingService(st).listar('org-smileflow') : [];
+        const rn = env ? binds.find((b) => b.envelopeId === env.id && b.entityType === 'campaign')?.providerResourceId ?? null : null;
+        const cid = rn?.match(/^customers\/(\d+)\//)?.[1] ?? null;
+        const campId = rn?.match(/campaigns\/(\d+)$/)?.[1] ?? null;
+        if (!cid || !campId) { console.log(JSON.stringify({ campaignDatesProbe: 'no_binding' })); return; }
+        const rows = await readClient.buscar(cid, `SELECT campaign.id, campaign.start_date, campaign.end_date FROM campaign WHERE campaign.id = ${campId}`);
+        const c = (rows[0] as { campaign?: { startDate?: unknown; endDate?: unknown } } | undefined)?.campaign;
+        console.log(JSON.stringify({ campaignDatesProbe: { campaignId: campId, startDateRaw: c?.startDate ?? null, endDateRaw: c?.endDate ?? null, startDate: fechaCalendario(c?.startDate), endDate: fechaCalendario(c?.endDate) } }));
+      } catch (e) { console.log(JSON.stringify({ campaignDatesProbe: 'error', error: e instanceof Error ? e.message : String(e) })); }
+    })();
   } else {
     console.log(JSON.stringify({ stopMonitor: 'disabled' }));
   }

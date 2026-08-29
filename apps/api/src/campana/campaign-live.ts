@@ -6,6 +6,16 @@
  */
 export type CampaignRole = 'ACTIVE' | 'HISTORICAL';
 
+/** Extrae la FECHA CALENDARIO (YYYY-MM-DD) de un valor Google, VERBATIM: toma los primeros 10 caracteres tal cual
+ * (la API entrega la fecha en la zona del customer). NUNCA parsea a Date ni convierte a UTC ⇒ no hay off-by-one
+ * (28-ago no se vuelve 27-ago). El centinela de "sin fecha de término" de Google (2037-12-30) ⇒ null. */
+export function fechaCalendario(v: unknown): string | null {
+  if (v == null) return null;
+  const d = String(v).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  return d === '2037-12-30' ? null : d;
+}
+
 export interface EntradaCampaignLive {
   readonly campaign: { readonly id: string; readonly resourceName: string; readonly name: string | null; readonly status: string | null; readonly channelType: string | null; readonly startDate: string | null; readonly endDate: string | null } | null;
   /** Presupuesto TOTAL de la campaña (experimento) y cap global del envelope. */
@@ -47,14 +57,17 @@ export interface ProviderCampaignData {
  * (ver `gaqlCampanias` en ingesta). El acumulado (lifetime) se obtiene SIN filtro de fecha (ver GAQL_CAMPANIA_SNAPSHOT):
  * devuelve la fila de la campaña aunque no haya actividad ⇒ cost/impresiones/clics = 0 reales (no null). Un `DURING`
  * suelto rompía la consulta (HTTP 400) y hacía que 0 se leyera como null — corregido aquí.
- * `campaign.start_date/end_date` NO se consultan: rompen la query (HTTP 400) en esta versión ⇒ las fechas provienen
- * del envelope autorizado, con `dateSource` marcado en el caller. */
+ * `campaign.start_date/end_date` (Google Ads API v25) SÍ se consultan en una query aislada, atributos-solos y filtrada
+ * por campaign.id (lo que rompía era la consulta all-time con métricas, no ésta). Vienen como fecha calendario
+ * "YYYY-MM-DD" en la zona horaria del customer: se toman VERBATIM (sin parseo/UTC) para NO desplazar 28-ago→27-ago.
+ * El centinela de "sin fin" (2037-12-30) se mapea a null. Si la query fallara ⇒ dates=null (fallback en el caller). */
 export function construirLectorCampaignProvider(buscar: (customerId: string, query: string) => Promise<Array<Record<string, unknown>>>): (customerId: string, campaignId: string, ventana: { readonly desde: string; readonly hasta: string }) => Promise<ProviderCampaignData> {
   const camp = (rows: Array<Record<string, unknown>>): Record<string, unknown> | undefined => (rows[0] as { campaign?: Record<string, unknown> } | undefined)?.campaign;
   const n = (v: unknown): number => Number(v ?? 0); // 0 válido: la ausencia del campo métrico en una fila devuelta es 0 real
   return async (customerId, campaignId, ventana) => {
-    let core: ProviderCampaignData['core'] = null; const dates: ProviderCampaignData['dates'] = null; let metrics: ProviderCampaignData['metrics'] = null; let evolution: DiaEvolucion[] = [];
+    let core: ProviderCampaignData['core'] = null; let dates: ProviderCampaignData['dates'] = null; let metrics: ProviderCampaignData['metrics'] = null; let evolution: DiaEvolucion[] = [];
     try { const c = camp(await buscar(customerId, `SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type FROM campaign WHERE campaign.id = ${campaignId}`)); if (c) core = { status: (c.status as string) ?? null, name: (c.name as string) ?? null, channelType: (c.advertisingChannelType as string) ?? null }; } catch { /* fail-soft */ }
+    try { const c = camp(await buscar(customerId, `SELECT campaign.id, campaign.start_date, campaign.end_date FROM campaign WHERE campaign.id = ${campaignId}`)); if (c) { const sd = fechaCalendario(c.startDate); const ed = fechaCalendario(c.endDate); if (sd || ed) dates = { startDate: sd, endDate: ed }; } } catch { /* fail-soft ⇒ dates=null, fallback a fechas autorizadas en el caller */ }
     // Acumulado (lifetime) de LA campaña: sin filtro de fecha ⇒ una fila con métricas totales (0 si aún no sirve). El
     // caller distingue A) Google devolvió fila con 0 ⇒ 0; B) la consulta falló ⇒ metrics=null (indisponible).
     try { const m = (await buscar(customerId, `SELECT campaign.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE campaign.id = ${campaignId}`))[0] as { metrics?: Record<string, unknown> } | undefined; const mm = m?.metrics; metrics = { spendClp: n(mm?.costMicros) / 1_000_000, impressions: n(mm?.impressions), clicks: n(mm?.clicks), conversions: n(mm?.conversions) }; } catch { /* fail-soft ⇒ metrics=null (indisponible, NO 0 inventado) */ }
@@ -67,14 +80,32 @@ const div = (a: number | null, b: number | null): number | null => (a != null &&
 const round2 = (n: number | null): number | null => (n == null ? null : Math.round(n * 100) / 100);
 const diasHasta = (endDate: string | null, now: string): number | null => {
   if (!endDate) return null;
-  const ms = Date.parse(endDate) - Date.parse(now);
-  return Number.isNaN(ms) ? null : Math.max(0, Math.ceil(ms / (24 * 3600_000)));
+  // Diferencia en DÍAS CALENDARIO: se comparan sólo las fechas (YYYY-MM-DD, a medianoche UTC), sin la hora del día,
+  // para evitar off-by-one (p.ej. 2026-08-29 → 2026-09-06 = 8 días, no 9 por el desfase de horas).
+  const d1 = Date.parse(`${endDate.slice(0, 10)}T00:00:00Z`);
+  const d0 = Date.parse(`${now.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(d1) || Number.isNaN(d0) ? null : Math.max(0, Math.round((d1 - d0) / (24 * 3600_000)));
 };
 
 function monitorStatus(e: EntradaCampaignLive): 'ACTIVE' | 'STALE' | 'UNAVAILABLE' {
   if (!e.monitor.configured || e.monitor.lastTickAt == null) return 'UNAVAILABLE';
   const reciente = (Date.parse(e.now) - Date.parse(e.monitor.lastTickAt)) < e.monitor.intervalSeconds * 1000 * 2.5;
   return reciente ? 'ACTIVE' : 'STALE';
+}
+
+/** Resuelve las fechas de la campaña con PRIORIDAD ESTRICTA: 1) Google (fecha calendario real); 2) ventana de ejecución
+ * EXPLÍCITAMENTE materializada del envelope (startsAt/expiresAt, sólo YYYY-MM-DD, sin convertir a UTC); 3) null.
+ * PROHIBIDO usar createdAt (no es inicio de campaña; producía 27-ago por off-by-one de zona horaria). */
+export function resolverFechasCampania(
+  google: { readonly startDate: string | null; readonly endDate: string | null } | null,
+  autorizado: { readonly startsAt: string | null; readonly expiresAt: string | null },
+): { startDate: string | null; endDate: string | null; dateSource: 'GOOGLE' | 'AUTHORIZED' | 'NONE' } {
+  const soloFecha = (iso: string | null): string | null => (iso ? iso.slice(0, 10) : null); // YYYY-MM-DD verbatim, sin Date()/UTC
+  const gStart = google?.startDate ?? null; const gEnd = google?.endDate ?? null;
+  const authStart = soloFecha(autorizado.startsAt); const authEnd = soloFecha(autorizado.expiresAt);
+  const startDate = gStart ?? authStart; const endDate = gEnd ?? authEnd;
+  const dateSource: 'GOOGLE' | 'AUTHORIZED' | 'NONE' = (gStart || gEnd) ? 'GOOGLE' : (authStart || authEnd) ? 'AUTHORIZED' : 'NONE';
+  return { startDate, endDate, dateSource };
 }
 
 export function construirCampaignLive(e: EntradaCampaignLive): Record<string, unknown> {

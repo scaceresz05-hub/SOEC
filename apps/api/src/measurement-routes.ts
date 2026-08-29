@@ -42,7 +42,7 @@ import { CONTEXTO_CANARY } from './campana/canary-execution';
 import { ejecutarCanaryAtomico, envelopeYaEjecutado, TRANSPORT_ATOMICO } from './campana/canary-atomic-execution';
 import { reconciliarBindings } from './campana/canary-reconciliation';
 import { correlacionarGrafo, consultasRecuperacion, type RecursosLeidos } from './campana/canary-provider-recovery';
-import { construirCampaignLive, construirLectorCampaignProvider, type ProviderCampaignData } from './campana/campaign-live';
+import { construirCampaignLive, construirLectorCampaignProvider, resolverFechasCampania, type ProviderCampaignData } from './campana/campaign-live';
 import { leerUltimoTick } from './campana/stop-monitor-composition';
 import { hashPlan } from './campana/plan-hash';
 import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
@@ -900,14 +900,8 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     let lastGoogleReadAt: string | null = null;
     const ventana = { desde: new Date(Date.parse(now) - 14 * 86_400_000).toISOString().slice(0, 10), hasta: now.slice(0, 10) };
     if (cliente && customerId && campaignId) { try { provider = await construirLectorCampaignProvider((cid, q) => cliente.buscar(cid, q))(customerId, campaignId, ventana); lastGoogleReadAt = now; } catch { /* fail-soft */ } }
-    // FECHAS: Google (start_date/end_date) rompe la consulta (HTTP 400) en esta versión ⇒ se toman del envelope
-    // AUTORIZADO, con `dateSource` marcado (honestidad de origen; nunca fechas fabricadas). Si Google llegara a
-    // entregarlas, tienen prioridad y dateSource='GOOGLE'.
-    const authStart = envelope.startsAt ?? envelope.activatedAt ?? envelope.createdAt ?? null;
-    const authEnd = envelope.expiresAt ?? null;
-    const startDate = provider.dates?.startDate ?? authStart;
-    const endDate = provider.dates?.endDate ?? authEnd;
-    const dateSource: 'GOOGLE' | 'AUTHORIZED' | 'NONE' = (provider.dates?.startDate || provider.dates?.endDate) ? 'GOOGLE' : (authStart || authEnd) ? 'AUTHORIZED' : 'NONE';
+    // FECHAS — prioridad estricta Google → envelope materializado → null (helper puro, testeable). NO createdAt.
+    const { startDate, endDate, dateSource } = resolverFechasCampania(provider.dates, { startsAt: envelope.startsAt ?? null, expiresAt: envelope.expiresAt ?? null });
     // contactos first-party (Growth) — no usa gasto histórico.
     const obs = new ObservacionService(store, {} as never); let contacts = 0;
     for (const id of await obs.listarIds(c)) { const st = await obs.cargar(c, id); const p = st.datos?.provenanciaReal; if (st.datos?.naturaleza === 'REAL' && p?.provider === 'smileflow-growth' && !p.diagnostico && p.eventName === 'lead_created') contacts += 1; }

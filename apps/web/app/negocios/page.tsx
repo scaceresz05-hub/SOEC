@@ -248,7 +248,7 @@ export default function Panel(): React.ReactElement {
   const puedeRecomendar = fundamentos?.puedeRecomendarInversionPublicitaria ?? false;
   const prioridades = esEcom
     ? (fundamentos?.motivos ?? []).slice(0, 4).map((m) => ({ t: PRIORIDAD_TITULO[m.codigo] ?? m.explicacion, s: m.resuelveCon }))
-    : saasPrioridades(panel, plan);
+    : saasPrioridades(panel, plan, histCtx);
 
   // Estado de Google Ads con VERDAD REAL: la CONEXIÓN se deriva de evidencia real de credencial/autorización
   // (`panel.googleAdsConfigured` = source+recurso+credenciales presentes), NO de la declaración estática del
@@ -828,11 +828,13 @@ function SourceEmpty(props: { ico: string; nombre: string; estado: string }): Re
   );
 }
 
-function saasPrioridades(panel: Panel | null, plan: Plan | null): { t: string; s?: string }[] {
+function saasPrioridades(panel: Panel | null, plan: Plan | null, histCtx = false): { t: string; s?: string }[] {
   const out: { t: string; s?: string }[] = [];
   const leads = panel?.growthFunnel?.comercial?.lead_created ?? 0;
   const clicks = panel?.ads?.clicks ?? 0;
-  if (clicks > 0 && leads === 0) out.push({ t: 'Revisar el mensaje del anuncio y la página de destino', s: 'llega tráfico pero todavía no se convierte en clientes' });
+  // Esta recomendación deriva del rendimiento de la campaña (clics/contactos). En contexto histórico corresponde a la
+  // campaña histórica ⇒ NO se presenta como acción presente (el experimento vigente se ve en «Campaña vigente»).
+  if (!histCtx && clicks > 0 && leads === 0) out.push({ t: 'Revisar el mensaje del anuncio y la página de destino', s: 'llega tráfico pero todavía no se convierte en clientes' });
   if (plan?.oportunidadesTacticas && plan.oportunidadesTacticas.length > 0) out.push({ t: 'Revisar los anuncios de las búsquedas que no reciben clic', s: `por ejemplo «${plan.oportunidadesTacticas[0]!.termino}»` });
   out.push({ t: 'Seguir midiendo las conversiones reales del sitio', s: 'los contactos reales que deja tu sitio, no solo visitas' });
   return out;
