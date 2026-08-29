@@ -96,9 +96,9 @@ describe('construirCampaignLive', () => {
 
 describe('fechaCalendario — YYYY-MM-DD verbatim, sin off-by-one', () => {
   it('C: toma la fecha calendario tal cual; jamás convierte 28-ago a 27-ago', () => {
-    expect(fechaCalendario('2026-08-28')).toBe('2026-08-28');                 // date-only Google (customer TZ)
-    expect(fechaCalendario('2026-08-28 00:00:00')).toBe('2026-08-28');        // datetime ⇒ primeros 10 chars, sin parseo
-    expect(fechaCalendario('2026-09-06')).toBe('2026-09-06');
+    expect(fechaCalendario('2026-08-28')).toBe('2026-08-28');                 // date-only
+    expect(fechaCalendario('2026-08-28 00:00:00')).toBe('2026-08-28');        // v25 start_date_time ⇒ primeros 10 chars, sin parseo
+    expect(fechaCalendario('2026-09-06 23:59:59')).toBe('2026-09-06');        // v25 end_date_time (con hora) ⇒ fecha calendario
   });
   it('centinela "sin fin" 2037-12-30 ⇒ null; basura/null ⇒ null', () => {
     expect(fechaCalendario('2037-12-30')).toBeNull();
@@ -130,25 +130,26 @@ describe('construirLectorCampaignProvider — GAQL READ-ONLY por campaignId', ()
     const buscar = async (_cid: string, q: string) => {
       queries.push(q);
       if (q.includes('segments.date')) return [{ segments: { date: '2026-08-28' }, metrics: { costMicros: '1850000000', clicks: '20', impressions: '500' } }];
-      if (q.includes('start_date')) return [{ campaign: { id: '24194332264', startDate: '2026-08-28', endDate: '2026-09-06' } }]; // Google entrega fecha calendario
+      if (q.includes('start_date_time')) return [{ campaign: { id: '24194332264', startDateTime: '2026-08-28 00:00:00', endDateTime: '2026-09-06 23:59:59' } }]; // v25: datetime en zona del customer
       if (q.includes('metrics.cost_micros')) return [{ metrics: { costMicros: '1850000000', impressions: '500', clicks: '20', conversions: '0' } }];
       return [{ campaign: { status: 'ENABLED', name: 'Experimento', advertisingChannelType: 'SEARCH' } }];
     };
     const p = await construirLectorCampaignProvider(buscar)('8605539300', '24194332264', ventana);
     expect(p.core).toEqual({ status: 'ENABLED', name: 'Experimento', channelType: 'SEARCH' });
-    expect(p.dates).toEqual({ startDate: '2026-08-28', endDate: '2026-09-06' }); // A/B: fechas reales, C: sin off-by-one
+    expect(p.dates).toEqual({ startDate: '2026-08-28', endDate: '2026-09-06' }); // A/B: fechas reales, C: sin off-by-one (28-ago no→27)
     expect(p.metrics?.spendClp).toBe(1850);
     expect(p.evolution).toHaveLength(1);
     expect(p.evolution[0]).toEqual({ date: '2026-08-28', spendClp: 1850, clicks: 20, impressions: 500 });
     expect(queries.every((q) => q.includes('campaign.id = 24194332264'))).toBe(true);
     expect(queries.some((q) => q.includes('24120966895'))).toBe(false); // jamás la histórica
     expect(queries.some((q) => q.includes('DURING'))).toBe(false);       // métricas sin DURING (agregado lifetime)
-    expect(queries.some((q) => q.includes('campaign.start_date, campaign.end_date'))).toBe(true); // fechas v25
+    expect(queries.some((q) => q.includes('campaign.start_date_time, campaign.end_date_time'))).toBe(true); // campos de fecha v25
+    expect(queries.some((q) => q.includes('campaign.start_date,'))).toBe(false); // NO usa los campos eliminados en v23+
     expect(queries.some((q) => q.includes("BETWEEN '2026-08-15' AND '2026-08-29'"))).toBe(true);
   });
   it('dates: si la consulta de fechas falla ⇒ dates=null (fallback en el caller), core/metrics sobreviven', async () => {
     const buscar = async (_cid: string, q: string) => {
-      if (q.includes('start_date')) throw new Error('GOOGLE_SEARCH_HTTP_400');
+      if (q.includes('start_date_time')) throw new Error('GOOGLE_SEARCH_HTTP_400');
       if (q.includes('segments.date')) return [];
       if (q.includes('metrics.cost_micros')) return [{ metrics: { costMicros: '0' } }];
       return [{ campaign: { status: 'ENABLED', name: 'Experimento', advertisingChannelType: 'SEARCH' } }];

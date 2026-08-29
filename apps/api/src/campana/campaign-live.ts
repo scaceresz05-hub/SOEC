@@ -57,17 +57,17 @@ export interface ProviderCampaignData {
  * (ver `gaqlCampanias` en ingesta). El acumulado (lifetime) se obtiene SIN filtro de fecha (ver GAQL_CAMPANIA_SNAPSHOT):
  * devuelve la fila de la campaña aunque no haya actividad ⇒ cost/impresiones/clics = 0 reales (no null). Un `DURING`
  * suelto rompía la consulta (HTTP 400) y hacía que 0 se leyera como null — corregido aquí.
- * `campaign.start_date/end_date` (Google Ads API v25) SÍ se consultan en una query aislada, atributos-solos y filtrada
- * por campaign.id (lo que rompía era la consulta all-time con métricas, no ésta). Vienen como fecha calendario
- * "YYYY-MM-DD" en la zona horaria del customer: se toman VERBATIM (sin parseo/UTC) para NO desplazar 28-ago→27-ago.
- * El centinela de "sin fin" (2037-12-30) se mapea a null. Si la query fallara ⇒ dates=null (fallback en el caller). */
+ * FECHAS v25: `campaign.start_date/end_date` fueron ELIMINADOS en v23+ (dan HTTP 400 — confirmado con la sonda de
+ * boot). v25 usa `campaign.start_date_time`/`campaign.end_date_time` (formato "yyyy-MM-dd HH:mm:ss" en la zona del
+ * customer, ver google-ads-materializer). Se toma la FECHA calendario VERBATIM (primeros 10 chars, sin parseo/UTC) para
+ * NO desplazar 28-ago→27-ago. Centinela "sin fin" (2037-12-30) ⇒ null. Query falla ⇒ dates=null (fallback en el caller). */
 export function construirLectorCampaignProvider(buscar: (customerId: string, query: string) => Promise<Array<Record<string, unknown>>>): (customerId: string, campaignId: string, ventana: { readonly desde: string; readonly hasta: string }) => Promise<ProviderCampaignData> {
   const camp = (rows: Array<Record<string, unknown>>): Record<string, unknown> | undefined => (rows[0] as { campaign?: Record<string, unknown> } | undefined)?.campaign;
   const n = (v: unknown): number => Number(v ?? 0); // 0 válido: la ausencia del campo métrico en una fila devuelta es 0 real
   return async (customerId, campaignId, ventana) => {
     let core: ProviderCampaignData['core'] = null; let dates: ProviderCampaignData['dates'] = null; let metrics: ProviderCampaignData['metrics'] = null; let evolution: DiaEvolucion[] = [];
     try { const c = camp(await buscar(customerId, `SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type FROM campaign WHERE campaign.id = ${campaignId}`)); if (c) core = { status: (c.status as string) ?? null, name: (c.name as string) ?? null, channelType: (c.advertisingChannelType as string) ?? null }; } catch { /* fail-soft */ }
-    try { const c = camp(await buscar(customerId, `SELECT campaign.id, campaign.start_date, campaign.end_date FROM campaign WHERE campaign.id = ${campaignId}`)); if (c) { const sd = fechaCalendario(c.startDate); const ed = fechaCalendario(c.endDate); if (sd || ed) dates = { startDate: sd, endDate: ed }; } } catch { /* fail-soft ⇒ dates=null, fallback a fechas autorizadas en el caller */ }
+    try { const c = camp(await buscar(customerId, `SELECT campaign.id, campaign.start_date_time, campaign.end_date_time FROM campaign WHERE campaign.id = ${campaignId}`)); if (c) { const sd = fechaCalendario(c.startDateTime); const ed = fechaCalendario(c.endDateTime); if (sd || ed) dates = { startDate: sd, endDate: ed }; } } catch { /* fail-soft ⇒ dates=null, fallback a fechas autorizadas en el caller */ }
     // Acumulado (lifetime) de LA campaña: sin filtro de fecha ⇒ una fila con métricas totales (0 si aún no sirve). El
     // caller distingue A) Google devolvió fila con 0 ⇒ 0; B) la consulta falló ⇒ metrics=null (indisponible).
     try { const m = (await buscar(customerId, `SELECT campaign.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE campaign.id = ${campaignId}`))[0] as { metrics?: Record<string, unknown> } | undefined; const mm = m?.metrics; metrics = { spendClp: n(mm?.costMicros) / 1_000_000, impressions: n(mm?.impressions), clicks: n(mm?.clicks), conversions: n(mm?.conversions) }; } catch { /* fail-soft ⇒ metrics=null (indisponible, NO 0 inventado) */ }

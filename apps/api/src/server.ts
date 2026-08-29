@@ -154,9 +154,10 @@ async function main(): Promise<void> {
         const cid = rn?.match(/^customers\/(\d+)\//)?.[1] ?? null;
         const campId = rn?.match(/campaigns\/(\d+)$/)?.[1] ?? null;
         if (!cid || !campId) { console.log(JSON.stringify({ campaignDatesProbe: 'no_binding' })); return; }
-        const rows = await readClient.buscar(cid, `SELECT campaign.id, campaign.start_date, campaign.end_date FROM campaign WHERE campaign.id = ${campId}`);
-        const c = (rows[0] as { campaign?: { startDate?: unknown; endDate?: unknown } } | undefined)?.campaign;
-        console.log(JSON.stringify({ campaignDatesProbe: { campaignId: campId, startDateRaw: c?.startDate ?? null, endDateRaw: c?.endDate ?? null, startDate: fechaCalendario(c?.startDate), endDate: fechaCalendario(c?.endDate) } }));
+        // v25: los campos son start_date_time / end_date_time ("yyyy-MM-dd HH:mm:ss", zona del customer).
+        const rows = await readClient.buscar(cid, `SELECT campaign.id, campaign.start_date_time, campaign.end_date_time FROM campaign WHERE campaign.id = ${campId}`);
+        const c = (rows[0] as { campaign?: { startDateTime?: unknown; endDateTime?: unknown } } | undefined)?.campaign;
+        console.log(JSON.stringify({ campaignDatesProbe: { ok: true, campaignId: campId, startDateTimeRaw: c?.startDateTime ?? null, endDateTimeRaw: c?.endDateTime ?? null, startDate: fechaCalendario(c?.startDateTime), endDate: fechaCalendario(c?.endDateTime) } }));
       } catch (e) { console.log(JSON.stringify({ campaignDatesProbe: 'error', error: e instanceof Error ? e.message : String(e) })); }
     })();
   } else {
