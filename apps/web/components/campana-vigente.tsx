@@ -11,7 +11,7 @@ import { Badge, Metric, Callout, TrendBars, EmptyState, TechDetails, clp, num, t
 interface Stop { enabled: boolean; triggered: boolean }
 interface CampaignLive {
   ok: boolean; error?: string; message?: string;
-  campaign?: { id: string; resourceName: string; name: string | null; status: string | null; channelType: string | null; startDate: string | null; endDate: string | null } | null;
+  campaign?: { id: string; resourceName: string; name: string | null; status: string | null; channelType: string | null; startDate: string | null; endDate: string | null; dateSource?: 'GOOGLE' | 'AUTHORIZED' | 'NONE' } | null;
   budget?: { totalClp: number; spentClp: number | null; remainingClp: number | null; spentPercent: number | null };
   performance?: { impressions: number | null; clicks: number | null; ctr: number | null; averageCpcClp: number | null; contacts: number | null; conversions: number | null; costPerContactClp: number | null };
   stops?: {
@@ -20,7 +20,7 @@ interface CampaignLive {
     period: Stop & { endDate: string | null; remainingDays: number | null };
     tracking: Stop & { valid: boolean }; landing: Stop & { available: boolean };
   };
-  monitor?: { active: boolean; status: string; intervalSeconds: number; pauseWired: boolean; lastTickAt: string | null; lastDecision: string | null; lastDecisionReason: string | null };
+  monitor?: { active: boolean; status: string; intervalSeconds: number; pauseWired: boolean; lastTickAt: string | null; lastDecision: string | null; lastDecisionReason: string | null; campaignStatusObserved: string | null; spendObserved: number | null; contactsObserved: number | null };
   sync?: { lastGoogleReadAt: string | null; lastFirstPartyReadAt: string | null };
   evolution?: { date: string; spendClp: number; clicks: number; impressions: number }[];
   historical?: { id: string; note: string };
@@ -70,7 +70,7 @@ export function CampaniaVigente({ org, compact = false }: { org: string; compact
         <div>
           <p className="eyebrow">Campaña vigente · Google Ads</p>
           <h3 className="livename">{c.name ?? 'Experimento SmileFlow'}</h3>
-          <p className="livesub">ID {c.id} · {c.channelType ?? 'SEARCH'} · {fecha(c.startDate)} → {fecha(c.endDate ?? s.period.endDate)}</p>
+          <p className="livesub">ID {c.id} · {c.channelType ?? 'SEARCH'} · {fecha(c.startDate)} → {fecha(c.endDate ?? s.period.endDate)}{c.dateSource === 'AUTHORIZED' ? ' · fechas autorizadas' : ''}</p>
         </div>
         <Badge tono={est.tono}>{est.texto}</Badge>
       </div>
@@ -102,6 +102,10 @@ export function CampaniaVigente({ org, compact = false }: { org: string; compact
           <div className="protcard">
             <div className="stophead"><strong>Protección automática</strong><Badge tono={monTono}>{mon.status === 'ACTIVE' ? 'ACTIVA' : mon.status === 'STALE' ? 'DEMORADA' : 'NO DISPONIBLE'}</Badge></div>
             <p className="livesub">Monitor cada {Math.round(mon.intervalSeconds / 60)} min · último chequeo {hace(mon.lastTickAt)} · pausa automática conectada: {mon.pauseWired ? 'Sí' : 'No'}</p>
+            {mon.campaignStatusObserved && (
+              <p className="livesub">Estado observado por el monitor en el último chequeo: <b>{mon.campaignStatusObserved === 'ENABLED' ? 'HABILITADA' : mon.campaignStatusObserved === 'PAUSED' ? 'PAUSADA' : mon.campaignStatusObserved}</b>{mon.spendObserved != null ? ` · gasto ${clp(mon.spendObserved)}` : ''}{mon.contactsObserved != null ? ` · contactos ${num(mon.contactsObserved)}` : ''}.
+                {mon.campaignStatusObserved !== c.status && c.status ? ` La lectura de ahora muestra ${est.texto}: el próximo chequeo lo actualizará.` : ''}</p>
+            )}
             <ul className="stoplist">
               <li className={zc.triggered ? 'on' : ''}>${num(zc.thresholdClp)} sin contactos {zc.triggered ? '· en condición de pausa' : ''}</li>
               <li className={s.budget.triggered ? 'on' : ''}>Tope global {clp(s.budget.capClp)} {s.budget.triggered ? '· alcanzado' : ''}</li>

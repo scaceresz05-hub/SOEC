@@ -20,7 +20,11 @@ export interface EntradaCampaignLive {
   readonly evolution: readonly DiaEvolucion[];
   readonly trackingValid: boolean;
   readonly landingAvailable: boolean;
-  readonly monitor: { readonly configured: boolean; readonly pauseWired: boolean; readonly intervalSeconds: number; readonly lastTickAt: string | null; readonly lastDecision: string | null; readonly lastDecisionReason: string | null };
+  readonly monitor: { readonly configured: boolean; readonly pauseWired: boolean; readonly intervalSeconds: number; readonly lastTickAt: string | null; readonly lastDecision: string | null; readonly lastDecisionReason: string | null;
+    /** Lo que el monitor OBSERVÓ en su último tick (heartbeat enriquecido): estado/gasto/contactos de LA campaña del binding. */
+    readonly statusObserved: string | null; readonly spendObserved: number | null; readonly contactsObserved: number | null };
+  /** Origen de las fechas mostradas: GOOGLE (provider) o AUTHORIZED (envelope/plan). */
+  readonly dateSource: 'GOOGLE' | 'AUTHORIZED' | 'NONE';
   readonly lastGoogleReadAt: string | null;
   readonly lastFirstPartyReadAt: string | null;
   readonly now: string;
@@ -36,16 +40,25 @@ export interface ProviderCampaignData {
   readonly evolution: readonly DiaEvolucion[]; // serie diaria (vacía si aún no hay actividad)
 }
 
-/** Lee la campaña vigente por campaignId en 3 consultas GAQL independientes (fail-soft). El WHERE filtra por
- * campaign.id ⇒ el gasto/rendimiento es EXCLUSIVO de esa campaña (nunca la histórica). Ningún write. */
-export function construirLectorCampaignProvider(buscar: (customerId: string, query: string) => Promise<Array<Record<string, unknown>>>): (customerId: string, campaignId: string) => Promise<ProviderCampaignData> {
+/** Lee la campaña vigente por campaignId en consultas GAQL independientes (fail-soft por consulta). El WHERE filtra
+ * por campaign.id ⇒ el gasto/rendimiento es EXCLUSIVO de esa campaña (nunca la histórica). Ningún write.
+ *
+ * SINTAXIS DE FECHA GAQL: en la versión de API que usa SOEC, el filtro de rango es `segments.date BETWEEN 'a' AND 'b'`
+ * (ver `gaqlCampanias` en ingesta). El acumulado (lifetime) se obtiene SIN filtro de fecha (ver GAQL_CAMPANIA_SNAPSHOT):
+ * devuelve la fila de la campaña aunque no haya actividad ⇒ cost/impresiones/clics = 0 reales (no null). Un `DURING`
+ * suelto rompía la consulta (HTTP 400) y hacía que 0 se leyera como null — corregido aquí.
+ * `campaign.start_date/end_date` NO se consultan: rompen la query (HTTP 400) en esta versión ⇒ las fechas provienen
+ * del envelope autorizado, con `dateSource` marcado en el caller. */
+export function construirLectorCampaignProvider(buscar: (customerId: string, query: string) => Promise<Array<Record<string, unknown>>>): (customerId: string, campaignId: string, ventana: { readonly desde: string; readonly hasta: string }) => Promise<ProviderCampaignData> {
   const camp = (rows: Array<Record<string, unknown>>): Record<string, unknown> | undefined => (rows[0] as { campaign?: Record<string, unknown> } | undefined)?.campaign;
-  return async (customerId, campaignId) => {
-    let core: ProviderCampaignData['core'] = null; let dates: ProviderCampaignData['dates'] = null; let metrics: ProviderCampaignData['metrics'] = null; let evolution: DiaEvolucion[] = [];
+  const n = (v: unknown): number => Number(v ?? 0); // 0 válido: la ausencia del campo métrico en una fila devuelta es 0 real
+  return async (customerId, campaignId, ventana) => {
+    let core: ProviderCampaignData['core'] = null; const dates: ProviderCampaignData['dates'] = null; let metrics: ProviderCampaignData['metrics'] = null; let evolution: DiaEvolucion[] = [];
     try { const c = camp(await buscar(customerId, `SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type FROM campaign WHERE campaign.id = ${campaignId}`)); if (c) core = { status: (c.status as string) ?? null, name: (c.name as string) ?? null, channelType: (c.advertisingChannelType as string) ?? null }; } catch { /* fail-soft */ }
-    try { const c = camp(await buscar(customerId, `SELECT campaign.start_date, campaign.end_date FROM campaign WHERE campaign.id = ${campaignId}`)); if (c) dates = { startDate: (c.startDate as string) ?? null, endDate: (c.endDate as string) ?? null }; } catch { /* fail-soft (v23+ podría no exponer estos campos) */ }
-    try { const m = (await buscar(customerId, `SELECT metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE campaign.id = ${campaignId} DURING LAST_30_DAYS`))[0] as { metrics?: Record<string, unknown> } | undefined; const mm = m?.metrics; metrics = { spendClp: Number(mm?.costMicros ?? 0) / 1_000_000, impressions: Number(mm?.impressions ?? 0), clicks: Number(mm?.clicks ?? 0), conversions: Number(mm?.conversions ?? 0) }; } catch { /* fail-soft */ }
-    try { const rows = await buscar(customerId, `SELECT segments.date, metrics.cost_micros, metrics.clicks, metrics.impressions FROM campaign WHERE campaign.id = ${campaignId} DURING LAST_14_DAYS ORDER BY segments.date`); evolution = rows.map((r) => { const seg = (r as { segments?: { date?: string } }).segments; const mm = (r as { metrics?: Record<string, unknown> }).metrics; return { date: seg?.date ?? '', spendClp: Number(mm?.costMicros ?? 0) / 1_000_000, clicks: Number(mm?.clicks ?? 0), impressions: Number(mm?.impressions ?? 0) }; }).filter((d) => d.date); } catch { /* fail-soft ⇒ serie vacía */ }
+    // Acumulado (lifetime) de LA campaña: sin filtro de fecha ⇒ una fila con métricas totales (0 si aún no sirve). El
+    // caller distingue A) Google devolvió fila con 0 ⇒ 0; B) la consulta falló ⇒ metrics=null (indisponible).
+    try { const m = (await buscar(customerId, `SELECT campaign.id, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM campaign WHERE campaign.id = ${campaignId}`))[0] as { metrics?: Record<string, unknown> } | undefined; const mm = m?.metrics; metrics = { spendClp: n(mm?.costMicros) / 1_000_000, impressions: n(mm?.impressions), clicks: n(mm?.clicks), conversions: n(mm?.conversions) }; } catch { /* fail-soft ⇒ metrics=null (indisponible, NO 0 inventado) */ }
+    try { const rows = await buscar(customerId, `SELECT segments.date, metrics.cost_micros, metrics.clicks, metrics.impressions FROM campaign WHERE campaign.id = ${campaignId} AND segments.date BETWEEN '${ventana.desde}' AND '${ventana.hasta}' ORDER BY segments.date`); evolution = rows.map((r) => { const seg = (r as { segments?: { date?: string } }).segments; const mm = (r as { metrics?: Record<string, unknown> }).metrics; return { date: seg?.date ?? '', spendClp: n(mm?.costMicros) / 1_000_000, clicks: n(mm?.clicks), impressions: n(mm?.impressions) }; }).filter((d) => d.date); } catch { /* fail-soft ⇒ serie vacía */ }
     return { core, dates, metrics, evolution };
   };
 }
@@ -74,7 +87,7 @@ export function construirCampaignLive(e: EntradaCampaignLive): Record<string, un
   const periodTriggered = e.stopRulesEnabled.period && !!e.authorizedEndDate && e.now >= e.authorizedEndDate;
   return {
     ok: e.campaign !== null,
-    campaign: e.campaign ? { ...e.campaign, campaignRole: 'ACTIVE' as CampaignRole } : null,
+    campaign: e.campaign ? { ...e.campaign, campaignRole: 'ACTIVE' as CampaignRole, dateSource: e.dateSource } : null,
     budget: {
       totalClp: e.experimentTotalClp,
       spentClp: spend,
@@ -106,6 +119,11 @@ export function construirCampaignLive(e: EntradaCampaignLive): Record<string, un
       lastTickAt: e.monitor.lastTickAt,
       lastDecision: e.monitor.lastDecision,
       lastDecisionReason: e.monitor.lastDecisionReason,
+      // Evidencia del último tick: qué observó realmente el monitor (para explicar sin ocultar cualquier desfase con
+      // el estado leído AHORA por este read-model). null hasta que un tick registre estos campos enriquecidos.
+      campaignStatusObserved: e.monitor.statusObserved,
+      spendObserved: e.monitor.spendObserved,
+      contactsObserved: e.monitor.contactsObserved,
     },
     evolution: e.evolution,
     sync: { lastGoogleReadAt: e.lastGoogleReadAt, lastFirstPartyReadAt: e.lastFirstPartyReadAt },

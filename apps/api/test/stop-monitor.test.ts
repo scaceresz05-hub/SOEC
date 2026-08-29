@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { decidirMonitorStop, debeSaltarPausa, StopMonitorService, type EntradaMonitor, type DepsStopMonitor, type MetricasCampania, type UltimoStop, type ResultadoPausaProvider } from '../src/campana/stop-monitor';
 import { GoogleAdsPauseAdapter } from '../src/campana/google-ads-pause-adapter';
-import { construirLectorMetricasCampania, crearDepsStopMonitor } from '../src/campana/stop-monitor-composition';
+import { construirLectorMetricasCampania, crearDepsStopMonitor, leerUltimoTick } from '../src/campana/stop-monitor-composition';
 import { InMemoryEventStore } from '@soec/event-store';
 import type { AuthorizedExecutionEnvelope } from '../src/campana/authorized-execution-envelope';
 
@@ -22,8 +22,34 @@ describe('decidirMonitorStop — reglas existentes', () => {
   it('D: cap 30000 ⇒ STOP_BUDGET', () => { expect(decidirMonitorStop(entrada({ spend: 30000, contacts: 5 })).firedRuleIds).toContain('STOP_BUDGET'); });
   it('E: expiresAt vencido ⇒ STOP_PERIOD', () => { expect(decidirMonitorStop(entrada({ envelope: envDe({ expiresAt: '2026-09-06T23:59:59Z' }), now: '2026-09-07T00:00:01Z', contacts: 3 })).firedRuleIds).toContain('STOP_PERIOD'); });
   it('G: ya PAUSED ⇒ NOOP (aunque una regla dispararía)', () => { expect(decidirMonitorStop(entrada({ campaignStatus: 'PAUSED', spend: 30000 })).reason).toBe('ALREADY_PAUSED'); });
-  it('I: métricas de la histórica ⇒ NOOP (aislamiento)', () => { const d = decidirMonitorStop(entrada({ snapshotCampaignId: HIST, spend: 30000 })); expect(d.reason).toBe('METRICS_NOT_FOR_BOUND_CAMPAIGN'); });
+  it('aislamiento: métricas de la histórica ⇒ NOOP', () => { const d = decidirMonitorStop(entrada({ snapshotCampaignId: HIST, spend: 30000 })); expect(d.reason).toBe('METRICS_NOT_FOR_BOUND_CAMPAIGN'); });
   it('sin binding ⇒ NOOP', () => { expect(decidirMonitorStop(entrada({ campaignBindingResourceName: null })).reason).toBe('NO_CAMPAIGN_BINDING'); });
+  it('I: status OBSERVADO=ENABLED y sin regla ⇒ NOOP reason null (NUNCA ALREADY_PAUSED cuando la campaña está habilitada)', () => {
+    const d = decidirMonitorStop(entrada({ campaignStatus: 'ENABLED', spend: 0, contacts: 0 }));
+    expect(d.action).toBe('NOOP');
+    expect(d.reason).toBeNull();
+    expect(d.reason).not.toBe('ALREADY_PAUSED');
+  });
+});
+
+describe('H: heartbeat del monitor persiste lo OBSERVADO (status/spend/contacts) y se lee de vuelta', () => {
+  it('registrarTick guarda campaignStatusObserved/spendObserved/contactsObserved; leerUltimoTick los devuelve', async () => {
+    const store = new InMemoryEventStore();
+    const deps = crearDepsStopMonitor(store, null, async () => ({ cost: 0, status: 'ENABLED' as string }));
+    const decision = { action: 'NOOP' as const, reason: null, firedRuleIds: [], campaignId: '24194332264' };
+    const metricas: MetricasCampania = { spend: 0, contacts: 0, trackingValid: true, landingAvailable: true, campaignStatus: 'ENABLED', snapshotCampaignId: '24194332264' };
+    await deps.registrarTick?.('org-smileflow', decision, metricas, 'NOOP', '2026-08-29T12:00:00.000Z');
+    const u = await leerUltimoTick(store, 'org-smileflow');
+    expect(u).not.toBeNull();
+    expect(u?.campaignId).toBe('24194332264');
+    expect(u?.campaignStatusObserved).toBe('ENABLED');
+    expect(u?.spendObserved).toBe(0);   // 0 real, no null
+    expect(u?.contactsObserved).toBe(0);
+    // metricas null (tick sin envelope) ⇒ observed null, sin romper
+    await deps.registrarTick?.('org-smileflow', decision, null, 'NOOP', '2026-08-29T12:05:00.000Z');
+    const u2 = await leerUltimoTick(store, 'org-smileflow');
+    expect(u2?.campaignStatusObserved).toBeNull();
+  });
 });
 
 // Deps de servicio con una pausa FAKE que cuenta invocaciones.

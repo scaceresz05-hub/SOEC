@@ -197,6 +197,23 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
 
     // Snapshot acumulado vigente (stream dedicado last-wins): cabecera + cifras Ads frescas de cada sync.
     const snapshotActual = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(org)));
+    // EXPERIMENTO VIGENTE (aislamiento activo vs histórico): ¿hay una campaña vinculada al envelope activo? El snapshot
+    // del panel es el ACUMULADO histórico (p.ej. 24120966895); NO debe presentarse como decisión/estado PRESENTE cuando
+    // existe un experimento vigente DISTINTO (p.ej. 24194332264). Este read-model sólo LEE envelope+binding (0 writes).
+    const envSvc = new EnvelopeService(store);
+    const bndSvc = new ResourceBindingService(store);
+    const vEnv = await envSvc.leerUltimo(org);
+    const vBinds = vEnv ? await bndSvc.listar(org) : [];
+    const vBind = vEnv ? vBinds.find((b) => b.envelopeId === vEnv.id && b.entityType === 'campaign') ?? null : null;
+    const vigenteCampaignId = vBind?.providerResourceId?.match(/campaigns\/(\d+)$/)?.[1] ?? null;
+    const experimentoVigente = {
+      existe: vigenteCampaignId !== null,
+      campaignId: vigenteCampaignId,
+      // ¿el snapshot histórico corresponde justo a la campaña vigente? (normalmente NO: son campañas distintas)
+      snapshotEsVigente: !!snapshotActual && snapshotActual.campaignId === vigenteCampaignId,
+      capExperimentoClp: vEnv?.totalCap ?? null,
+      presupuestoExperimentoClp: vEnv?.experimentBudget ?? null,
+    };
     // Estado del último refresh a Google Ads (observabilidad: cuándo se consultó y si falló, p.ej. OAuth caducado).
     const lastRefresh = ultimoRefreshState(await store.readStream(c, adsRefreshStateStreamId(org)));
 
@@ -243,6 +260,7 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
       googleAdsConfigured: googleAdsConfigurado(process.env, org),
       googleAdsGuardrail, // { campaignStatus, dailyBudget, gastoAcumulado, capAutorizado, estado, decisionRequerida, ... } | null
       estrategiaDirector, // { funnelZeroConversion, diagnostico, hipotesis, estrategia, decisiones[], ... } | null
+      experimentoVigente, // { existe, campaignId, snapshotEsVigente, capExperimentoClp, ... }: si existe y snapshot NO es vigente, el guardrail/estrategia de arriba son HISTÓRICOS, no decisiones presentes.
     });
   });
 
@@ -880,7 +898,16 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const cliente = construirClienteEscrituraGoogleAds(process.env, org, googleAdsComp, {});
     let provider: ProviderCampaignData = { core: null, dates: null, metrics: null, evolution: [] };
     let lastGoogleReadAt: string | null = null;
-    if (cliente && customerId && campaignId) { try { provider = await construirLectorCampaignProvider((cid, q) => cliente.buscar(cid, q))(customerId, campaignId); lastGoogleReadAt = now; } catch { /* fail-soft */ } }
+    const ventana = { desde: new Date(Date.parse(now) - 14 * 86_400_000).toISOString().slice(0, 10), hasta: now.slice(0, 10) };
+    if (cliente && customerId && campaignId) { try { provider = await construirLectorCampaignProvider((cid, q) => cliente.buscar(cid, q))(customerId, campaignId, ventana); lastGoogleReadAt = now; } catch { /* fail-soft */ } }
+    // FECHAS: Google (start_date/end_date) rompe la consulta (HTTP 400) en esta versión ⇒ se toman del envelope
+    // AUTORIZADO, con `dateSource` marcado (honestidad de origen; nunca fechas fabricadas). Si Google llegara a
+    // entregarlas, tienen prioridad y dateSource='GOOGLE'.
+    const authStart = envelope.startsAt ?? envelope.activatedAt ?? envelope.createdAt ?? null;
+    const authEnd = envelope.expiresAt ?? null;
+    const startDate = provider.dates?.startDate ?? authStart;
+    const endDate = provider.dates?.endDate ?? authEnd;
+    const dateSource: 'GOOGLE' | 'AUTHORIZED' | 'NONE' = (provider.dates?.startDate || provider.dates?.endDate) ? 'GOOGLE' : (authStart || authEnd) ? 'AUTHORIZED' : 'NONE';
     // contactos first-party (Growth) — no usa gasto histórico.
     const obs = new ObservacionService(store, {} as never); let contacts = 0;
     for (const id of await obs.listarIds(c)) { const st = await obs.cargar(c, id); const p = st.datos?.provenanciaReal; if (st.datos?.naturaleza === 'REAL' && p?.provider === 'smileflow-growth' && !p.diagnostico && p.eventName === 'lead_created') contacts += 1; }
@@ -889,14 +916,16 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const historicalId = ultimoSnapshotAds(await store.readStream(c, adsSnapshotStreamId(org)))?.campaignId ?? null;
     const re = (id: string): boolean => envelope.stopRules.find((s) => s.id === id)?.enabled !== false; // default habilitada
     const model = construirCampaignLive({
-      campaign: { id: campaignId ?? '', resourceName, name: provider.core?.name ?? null, status: provider.core?.status ?? null, channelType: provider.core?.channelType ?? null, startDate: provider.dates?.startDate ?? null, endDate: provider.dates?.endDate ?? null },
+      campaign: { id: campaignId ?? '', resourceName, name: provider.core?.name ?? null, status: provider.core?.status ?? null, channelType: provider.core?.channelType ?? null, startDate, endDate },
       experimentTotalClp: envelope.experimentBudget, globalCapClp: envelope.totalCap, zeroContactStopClp: envelope.maxSpendWithoutContact,
-      authorizedEndDate: provider.dates?.endDate ?? envelope.expiresAt ?? null,
+      authorizedEndDate: endDate,
+      dateSource,
       stopRulesEnabled: { zeroContact: re('STOP_ZERO_CONVERSION'), budget: re('STOP_BUDGET'), period: re('STOP_PERIOD'), tracking: re('STOP_TRACKING'), landing: re('STOP_LANDING') },
       metrics: { spendClp: provider.metrics?.spendClp ?? null, impressions: provider.metrics?.impressions ?? null, clicks: provider.metrics?.clicks ?? null, conversions: provider.metrics?.conversions ?? null },
       contacts, evolution: provider.evolution,
       trackingValid: readiness?.firstPartyTracking?.status === 'PASS', landingAvailable: readiness?.landing?.status === 'PASS',
-      monitor: { configured: process.env.SOEC_STOP_MONITOR_ENABLED !== 'false', pauseWired: cliente !== null, intervalSeconds: 300, lastTickAt: ultimoTick?.at ?? null, lastDecision: ultimoTick?.action ?? null, lastDecisionReason: ultimoTick?.reason ?? null },
+      monitor: { configured: process.env.SOEC_STOP_MONITOR_ENABLED !== 'false', pauseWired: cliente !== null, intervalSeconds: 300, lastTickAt: ultimoTick?.at ?? null, lastDecision: ultimoTick?.action ?? null, lastDecisionReason: ultimoTick?.reason ?? null,
+        statusObserved: ultimoTick?.campaignStatusObserved ?? null, spendObserved: ultimoTick?.spendObserved ?? null, contactsObserved: ultimoTick?.contactsObserved ?? null },
       lastGoogleReadAt, lastFirstPartyReadAt: now, now, historicalCampaignId: historicalId ?? 'HISTORICAL',
     });
     return reply.send({ ...model, providerBindingsCount });

@@ -93,8 +93,9 @@ export interface DepsStopMonitor {
   readonly pausarCampania?: (customerId: string, resourceName: string) => Promise<ResultadoPausaProvider>;
   /** Persiste el resultado de un STOP ejecutado (regla, métricas, resourceName, requestId, outcome, at). */
   readonly registrarStop: (org: string, decision: DecisionMonitor, metricas: MetricasCampania, outcome: OutcomeStop, pausa: ResultadoPausaProvider | null, at: string) => Promise<void>;
-  /** Heartbeat durable de CADA tick (para que la UI pruebe que el monitor está vivo). Opcional. */
-  readonly registrarTick?: (org: string, decision: DecisionMonitor, outcome: OutcomeStop, at: string) => Promise<void>;
+  /** Heartbeat durable de CADA tick (para que la UI pruebe que el monitor está vivo Y qué OBSERVÓ). Opcional.
+   * `metricas` es null sólo cuando el tick terminó antes de leer métricas (p.ej. sin envelope). */
+  readonly registrarTick?: (org: string, decision: DecisionMonitor, metricas: MetricasCampania | null, outcome: OutcomeStop, at: string) => Promise<void>;
   readonly ahora: () => string;
 }
 
@@ -111,20 +112,20 @@ export class StopMonitorService {
   async correrUnaVez(org: string): Promise<ResultadoTick> {
     const at = this.deps.ahora();
     const r = await this.decidir(org, at);
-    await this.deps.registrarTick?.(org, r.decision, r.outcome, at); // heartbeat de CADA tick (prueba de vida para la UI)
-    return r;
+    await this.deps.registrarTick?.(org, r.decision, r.metricas, r.outcome, at); // heartbeat de CADA tick: prueba de vida + qué observó
+    return { decision: r.decision, outcome: r.outcome };
   }
 
-  private async decidir(org: string, at: string): Promise<ResultadoTick> {
+  private async decidir(org: string, at: string): Promise<ResultadoTick & { metricas: MetricasCampania | null }> {
     const envelope = await this.deps.leerEnvelope(org);
-    if (!envelope) return { decision: { action: 'NOOP', reason: 'NO_ENVELOPE', firedRuleIds: [], campaignId: null }, outcome: 'NOOP' };
+    if (!envelope) return { decision: { action: 'NOOP', reason: 'NO_ENVELOPE', firedRuleIds: [], campaignId: null }, outcome: 'NOOP', metricas: null };
     const bindingRN = await this.deps.leerCampaignBindingResourceName(org, envelope.id);
     const m = await this.deps.leerMetricas(org, bindingRN);
     const decision = decidirMonitorStop({ envelope, campaignBindingResourceName: bindingRN, snapshotCampaignId: m.snapshotCampaignId, campaignStatus: m.campaignStatus, spend: m.spend, contacts: m.contacts, trackingValid: m.trackingValid, landingAvailable: m.landingAvailable, now: at });
-    if (decision.action !== 'STOP_CAMPAIGN') return { decision, outcome: 'NOOP' }; // 0 provider writes
+    if (decision.action !== 'STOP_CAMPAIGN') return { decision, outcome: 'NOOP', metricas: m }; // 0 provider writes
     // STOP decidido ⇒ la campaña está ENABLED (decidirMonitorStop ya lo garantiza). Idempotencia de ejecución:
     const ultimo = await this.deps.leerUltimoStop(org);
-    if (debeSaltarPausa(ultimo, decision.campaignId)) return { decision, outcome: 'ALREADY_STOPPED' }; // ya pausada con éxito ⇒ 0 writes
+    if (debeSaltarPausa(ultimo, decision.campaignId)) return { decision, outcome: 'ALREADY_STOPPED', metricas: m }; // ya pausada con éxito ⇒ 0 writes
     // EJECUTAR exactamente UNA pausa real (única capacidad).
     const cid = customerIdDe(bindingRN);
     let outcome: OutcomeStop = 'NO_PAUSE_ADAPTER';
@@ -134,7 +135,7 @@ export class StopMonitorService {
       catch (e) { pausa = { ok: false, requestId: null, resourceName: null, errorStatus: null, errorMessage: e instanceof Error ? e.message : String(e) }; outcome = 'FAILED_STOP_EXECUTION'; }
     }
     await this.deps.registrarStop(org, decision, m, outcome, pausa, at);
-    return { decision, outcome };
+    return { decision, outcome, metricas: m };
   }
 }
 

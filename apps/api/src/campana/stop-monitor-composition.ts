@@ -18,13 +18,18 @@ export const EVENTO_STOP_TICK = 'stop-monitor.tick';
 export function stopMonitorStreamId(org: string): string { return `stop-monitor:${org}`; }
 export function stopMonitorTickStreamId(org: string): string { return `stop-monitor-tick:${org}`; }
 
-/** Último tick del monitor (heartbeat durable) — para que la UI pruebe que está VIVO, no sólo configurado. */
-export async function leerUltimoTick(store: EventStore, org: string): Promise<{ at: string; action: string; reason: string | null; outcome: string } | null> {
+/** Estructura del heartbeat (lo que el monitor OBSERVÓ y decidió en un tick). Campos observed null si el tick terminó
+ * antes de leer métricas (p.ej. sin envelope) o son ticks previos al enriquecimiento. */
+export interface TickHeartbeat { readonly at: string; readonly action: string; readonly reason: string | null; readonly outcome: string; readonly campaignId: string | null; readonly campaignStatusObserved: string | null; readonly spendObserved: number | null; readonly contactsObserved: number | null }
+
+/** Último tick del monitor (heartbeat durable) — para que la UI pruebe que está VIVO y qué OBSERVÓ, no sólo configurado. */
+export async function leerUltimoTick(store: EventStore, org: string): Promise<TickHeartbeat | null> {
   const o = OrganizationId(org);
   const ctx: RequestContext = { organizationId: o, actor: ActorId('stop-monitor-read'), scope: { organizationId: o, permissions: ['events:read'] }, correlationId: `stop-monitor-read-${org}` };
   const eventos = await store.readStream(ctx, stopMonitorTickStreamId(org));
-  const u = eventos.filter((e) => e.type === EVENTO_STOP_TICK).map((e) => e.payload as { at: string; action: string; reason: string | null; outcome: string }).slice(-1)[0];
-  return u ?? null;
+  const p = eventos.filter((e) => e.type === EVENTO_STOP_TICK).map((e) => e.payload as Partial<TickHeartbeat>).slice(-1)[0];
+  if (!p) return null;
+  return { at: p.at ?? '', action: p.action ?? 'NOOP', reason: p.reason ?? null, outcome: p.outcome ?? 'NOOP', campaignId: p.campaignId ?? null, campaignStatusObserved: p.campaignStatusObserved ?? null, spendObserved: p.spendObserved ?? null, contactsObserved: p.contactsObserved ?? null };
 }
 
 const ATR: Attribution = { source: 'stop-monitor', purpose: 'pausa automática por regla de stop autorizada (reducción de riesgo)', assumptions: ['única acción provider = PAUSE; nunca create/enable/budget/targeting'], claimType: 'observational', regime: 'empirical', uncertainty: 'baja' };
@@ -41,7 +46,10 @@ export function construirLectorMetricasCampania(buscar: (customerId: string, que
     const statusRows = await buscar(customerId, `SELECT campaign.id, campaign.status FROM campaign WHERE campaign.id = ${campaignId}`);
     const status = (statusRows[0] as { campaign?: { status?: string } } | undefined)?.campaign?.status ?? null;
     if (!status) return null; // campaña no encontrada ⇒ métricas indisponibles
-    const costRows = await buscar(customerId, `SELECT metrics.cost_micros FROM campaign WHERE campaign.id = ${campaignId} DURING LAST_30_DAYS`);
+    // Gasto ACUMULADO (lifetime) de LA campaña, SIN filtro de fecha. Un `DURING` suelto rompía la consulta (HTTP 400)
+    // y hacía que TODO el lector rechazara ⇒ el monitor leía status=null y decidía ALREADY_PAUSED falsamente. Como la
+    // campaña del experimento es nueva, lifetime = gasto del experimento (aislado por WHERE campaign.id, nunca histórica).
+    const costRows = await buscar(customerId, `SELECT campaign.id, metrics.cost_micros FROM campaign WHERE campaign.id = ${campaignId}`);
     const costMicros = Number((costRows[0] as { metrics?: { costMicros?: string | number } } | undefined)?.metrics?.costMicros ?? 0);
     return { cost: costMicros / 1_000_000, status };
   };
@@ -89,10 +97,12 @@ export function crearDepsStopMonitor(store: EventStore, pauseAdapter: GoogleAdsP
       return ultimo ? { campaignId: ultimo.campaignId, outcome: ultimo.outcome } : null;
     },
     ...(pauseAdapter ? { pausarCampania: (customerId: string, resourceName: string) => pauseAdapter.pausarCampania(customerId, resourceName).then((r) => ({ ok: r.ok, requestId: r.requestId, resourceName: r.resourceName, errorStatus: r.errorStatus, errorMessage: r.errorMessage })) } : {}),
-    registrarTick: async (org, decision, outcome, at) => {
+    registrarTick: async (org, decision, metricas, outcome, at) => {
       const c = ctx(org); const sid = stopMonitorTickStreamId(org);
       const prev = await store.readStream(c, sid);
-      await store.append(c, sid, prev.length, [{ type: EVENTO_STOP_TICK, payload: { at, action: decision.action, reason: decision.reason, outcome, campaignId: decision.campaignId }, attribution: ATR, occurredAt: at }]).catch(() => undefined);
+      // Heartbeat enriquecido: además de la decisión, QUÉ observó el monitor (estado/gasto/contactos de la campaña del
+      // binding) para que la UI explique honestamente cualquier desfase con la lectura hecha AHORA (sin ocultarlo).
+      await store.append(c, sid, prev.length, [{ type: EVENTO_STOP_TICK, payload: { at, action: decision.action, reason: decision.reason, outcome, campaignId: decision.campaignId, campaignStatusObserved: metricas?.campaignStatus ?? null, spendObserved: metricas?.spend ?? null, contactsObserved: metricas?.contacts ?? null }, attribution: ATR, occurredAt: at }]).catch(() => undefined);
     },
     registrarStop: async (org, decision, metricas, outcome, pausa, at) => {
       const c = ctx(org);

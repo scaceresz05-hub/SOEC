@@ -71,6 +71,9 @@ interface Panel {
     siguienteExperimento: { estado: string; cambioAProbar: string; criterioExito: string; criterioDetencion: string; requiereCapAutorizado: boolean } | null;
     terminosEvidencia: string[];
   } | null;
+  // EXPERIMENTO VIGENTE (aislamiento activo vs histórico): si `existe` y el snapshot histórico NO es la campaña
+  // vigente, el guardrail/estrategia de arriba son HISTÓRICOS — no decisiones presentes.
+  experimentoVigente?: { existe: boolean; campaignId: string | null; snapshotEsVigente: boolean; capExperimentoClp: number | null; presupuestoExperimentoClp: number | null };
 }
 /** Fuente publicitaria de este panel SaaS: Google Ads (solo lectura). Etiqueta única de origen. */
 const FUENTE_ADS = 'Google Ads';
@@ -234,6 +237,14 @@ export default function Panel(): React.ReactElement {
 
   const veredictoCrudo = esEcom ? fundamentos?.veredicto : director?.veredicto ?? fundamentos?.veredicto;
   const ver = veredictoCrudo ? VEREDICTO_HUMANO[veredictoCrudo] ?? { texto: veredictoCrudo, tono: 'mut' as Tono } : null;
+  // CONTEXTO HISTÓRICO: hay un experimento vigente y el snapshot del panel NO es esa campaña ⇒ el guardrail/estrategia
+  // de abajo describen la campaña HISTÓRICA, no una decisión PRESENTE. La verdad vigente vive en «Campaña vigente».
+  const expVig = panel?.experimentoVigente;
+  const histCtx = !!expVig?.existe && !expVig.snapshotEsVigente;
+  const histId = panel?.googleAdsGuardrail?.campaignId ?? null;
+  // Decisiones del guardrail/estrategia que cuentan como PRESENTES (en contexto histórico, ninguna lo es).
+  const decisionGuardrailPresente = !histCtx && !!panel?.googleAdsGuardrail?.decisionRequerida;
+  const decisionesDirectorPresentes = !histCtx && !!panel?.estrategiaDirector?.decisiones?.some((d) => d.decisionRequerida);
   const puedeRecomendar = fundamentos?.puedeRecomendarInversionPublicitaria ?? false;
   const prioridades = esEcom
     ? (fundamentos?.motivos ?? []).slice(0, 4).map((m) => ({ t: PRIORIDAD_TITULO[m.codigo] ?? m.explicacion, s: m.resuelveCon }))
@@ -320,22 +331,28 @@ export default function Panel(): React.ReactElement {
               </div>
               {panel.googleAdsGuardrail && (
                 <>
-                  {/* PRESUPUESTO: inversión, tope TOTAL autorizado por vos y presupuesto DIARIO de Google NO se mezclan. */}
-                  <div className="section" style={{ marginTop: 12 }}>Presupuesto <span className="hint">inversión, tope autorizado y diario · no se mezclan</span></div>
+                  {/* PRESUPUESTO: en contexto histórico se rotula como tal y NO se mezcla con el cap del experimento vigente. */}
+                  <div className="section" style={{ marginTop: 12 }}>{histCtx ? 'Presupuesto histórico' : 'Presupuesto'} <span className="hint">{histCtx ? `campaña histórica ${histId ?? ''} · no es el experimento vigente` : 'inversión, tope autorizado y diario · no se mezclan'}</span></div>
                   <div className="grid g-4">
-                    <Metric ico="💸" label="Inversión acumulada" value={clp(panel.googleAdsGuardrail.gastoAcumulado)} sub={FUENTE_ADS} />
-                    <Metric ico="🛡" label="Presupuesto total autorizado" value={panel.googleAdsGuardrail.capAutorizado != null ? clp(panel.googleAdsGuardrail.capAutorizado) : 'No registrado'} sub={panel.googleAdsGuardrail.capAutorizado != null ? 'tope que autorizaste' : 'sin tope en SOEC'} />
+                    <Metric ico="💸" label={histCtx ? 'Inversión acumulada (histórica)' : 'Inversión acumulada'} value={clp(panel.googleAdsGuardrail.gastoAcumulado)} sub={FUENTE_ADS} />
+                    <Metric ico="🛡" label={histCtx ? 'Cap histórico' : 'Presupuesto total autorizado'} value={panel.googleAdsGuardrail.capAutorizado != null ? clp(panel.googleAdsGuardrail.capAutorizado) : 'No registrado'} sub={panel.googleAdsGuardrail.capAutorizado != null ? 'tope que autorizaste' : histCtx ? 'no registrado (campaña histórica)' : 'sin tope en SOEC'} />
                     <Metric ico="📅" label="Presupuesto diario Google" value={panel.googleAdsGuardrail.dailyBudget != null ? `${clp(panel.googleAdsGuardrail.dailyBudget)}/día` : '—'} sub="lo fijás en Google Ads" />
-                    <Metric ico="📡" label="Estado campaña" value={panel.googleAdsGuardrail.campaignStatus === 'PAUSED' ? 'Pausada' : panel.googleAdsGuardrail.campaignStatus === 'ENABLED' ? 'Activa' : (panel.googleAdsGuardrail.campaignStatus ?? '—')} />
+                    <Metric ico="📡" label={histCtx ? 'Estado (histórica)' : 'Estado campaña'} value={panel.googleAdsGuardrail.campaignStatus === 'PAUSED' ? 'Pausada' : panel.googleAdsGuardrail.campaignStatus === 'ENABLED' ? 'Activa' : (panel.googleAdsGuardrail.campaignStatus ?? '—')} />
                   </div>
-                  {panel.googleAdsGuardrail.estado === 'SIN_CAP_AUTORIZADO' && (
-                    <Callout tono="info" ico="ℹ">No hay un presupuesto total autorizado registrado en SOEC. El gasto lo controla el presupuesto que fijaste en Google Ads, no SOEC.</Callout>
-                  )}
-                  {panel.googleAdsGuardrail.estado === 'WARNING' && (
-                    <Callout tono="warn" ico="⚠">{panel.googleAdsGuardrail.mensaje}</Callout>
-                  )}
-                  {panel.googleAdsGuardrail.decisionRequerida && (
-                    <Callout tono="warn" ico="🛑"><b>Decisión necesaria — presupuesto autorizado alcanzado.</b> {panel.googleAdsGuardrail.mensaje} SOEC no pausa por vos: la decisión es tuya.</Callout>
+                  {histCtx ? (
+                    <Callout tono="info" ico="🧭">Estas cifras son de la campaña histórica. El <b>experimento vigente</b> tiene su propio tope{expVig?.capExperimentoClp != null ? ` (cap global ${clp(expVig.capExperimentoClp)}` : ''}{expVig?.presupuestoExperimentoClp != null ? ` · presupuesto ${clp(expVig.presupuestoExperimentoClp)})` : expVig?.capExperimentoClp != null ? ')' : ''} y se muestra arriba en «Campaña vigente».</Callout>
+                  ) : (
+                    <>
+                      {panel.googleAdsGuardrail.estado === 'SIN_CAP_AUTORIZADO' && (
+                        <Callout tono="info" ico="ℹ">No hay un presupuesto total autorizado registrado en SOEC. El gasto lo controla el presupuesto que fijaste en Google Ads, no SOEC.</Callout>
+                      )}
+                      {panel.googleAdsGuardrail.estado === 'WARNING' && (
+                        <Callout tono="warn" ico="⚠">{panel.googleAdsGuardrail.mensaje}</Callout>
+                      )}
+                      {panel.googleAdsGuardrail.decisionRequerida && (
+                        <Callout tono="warn" ico="🛑"><b>Decisión necesaria — presupuesto autorizado alcanzado.</b> {panel.googleAdsGuardrail.mensaje} SOEC no pausa por vos: la decisión es tuya.</Callout>
+                      )}
+                    </>
                   )}
                 </>
               )}
@@ -346,7 +363,7 @@ export default function Panel(): React.ReactElement {
             <div className="grid g-main" style={{ marginTop: 22 }}>
               <DirectorCard
                 estado={<Badge tono={ver.tono}>{ver.texto}</Badge>}
-                dice={frase(esEcom, ventas, panel, puedeRecomendar)}
+                dice={frase(esEcom, ventas, panel, puedeRecomendar, histCtx)}
                 extra={puedeRecomendar
                   ? <Badge tono="ok">Listo para recomendar inversión</Badge>
                   : <span className="s">{esEcom ? 'Todavía no puedo recomendar gastar en publicidad: me faltan datos.' : 'Sigo en modo seguro: no cambio tu campaña sin tu aprobación.'}</span>}
@@ -363,9 +380,11 @@ export default function Panel(): React.ReactElement {
           {panel?.estrategiaDirector?.generada && (
             <div className="card" style={{ marginTop: 22 }}>
               <div className="spread">
-                <div className="section" style={{ margin: 0 }}>El Director dice</div>
-                {panel.estrategiaDirector.funnelZeroConversion && <Badge tono="warn">Requiere diagnóstico</Badge>}
+                <div className="section" style={{ margin: 0 }}>El Director dice {histCtx && <span className="hint">sobre la campaña histórica</span>}</div>
+                {!histCtx && panel.estrategiaDirector.funnelZeroConversion && <Badge tono="warn">Requiere diagnóstico</Badge>}
+                {histCtx && <Badge tono="mut">Antecedente histórico</Badge>}
               </div>
+              {histCtx && <Callout tono="info" ico="🧭">Este análisis corresponde a la campaña histórica {histId ?? ''}, no al experimento vigente. Se conserva como antecedente.</Callout>}
               <p className="lede" style={{ marginTop: 8 }}>{panel.estrategiaDirector.diagnostico}</p>
               <div className="section" style={{ marginTop: 14 }}>Hechos <span className="hint">lo observado</span></div>
               <ul className="s" style={{ margin: '4px 0 0', paddingLeft: 18 }}>
@@ -387,7 +406,8 @@ export default function Panel(): React.ReactElement {
                   </ul>
                 </>
               )}
-              {panel.estrategiaDirector.siguienteExperimento && (
+              {/* La propuesta de relanzamiento sólo aplica si NO hay ya un experimento vigente (ese relanzamiento ya ocurrió). */}
+              {!histCtx && panel.estrategiaDirector.siguienteExperimento && (
                 <Callout tono="info" ico="🧪">
                   <b>Siguiente experimento (propuesto):</b> {panel.estrategiaDirector.siguienteExperimento.cambioAProbar === 'PENDING_DIAGNOSIS'
                     ? 'el cambio concreto a probar queda pendiente del diagnóstico del funnel — no se inventa una estrategia.'
@@ -398,8 +418,8 @@ export default function Panel(): React.ReactElement {
             </div>
           )}
 
-          {/* "No necesitás decidir nada" sólo si NO hay decisión del guardrail NI de la estrategia del Director. */}
-          {!panel?.googleAdsGuardrail?.decisionRequerida && !panel?.estrategiaDirector?.decisiones?.some((d) => d.decisionRequerida) && (
+          {/* "No necesitás decidir nada" sólo si NO hay decisión PRESENTE (las de contexto histórico no cuentan). */}
+          {!decisionGuardrailPresente && !decisionesDirectorPresentes && (
             <div style={{ marginTop: 16 }}>
               <Callout tono="ok" ico="✓">
                 <b>No necesitás decidir nada ahora.</b> SOEC está en modo seguro: observa y te avisará en
@@ -645,7 +665,9 @@ export default function Panel(): React.ReactElement {
       {tab === 'decisiones' && (
         <>
           <div className="section">Necesita tu decisión</div>
-          {panel?.googleAdsGuardrail?.decisionRequerida && (
+          {/* Sólo decisiones PRESENTES. En contexto histórico, el guardrail/estrategia describen la campaña histórica
+              (no requieren decisión hoy) y se muestran abajo como «Antecedentes históricos». */}
+          {!histCtx && panel?.googleAdsGuardrail?.decisionRequerida && (
             <div className="decisioncard" style={{ marginBottom: 10, borderLeft: '4px solid var(--warn)' }}>
               <div className="spread"><h3>Presupuesto autorizado alcanzado — {panel.googleAdsGuardrail.campaignName ?? 'campaña'}</h3><Badge tono="warn">Alta prioridad</Badge></div>
               <p className="dwhy">{panel.googleAdsGuardrail.mensaje}</p>
@@ -653,7 +675,7 @@ export default function Panel(): React.ReactElement {
             </div>
           )}
           {/* DECISIONES DE MARKETING de la estrategia del Director (planes humanos, no mutaciones de Ads). */}
-          {panel?.estrategiaDirector?.decisiones?.map((d) => {
+          {!histCtx && panel?.estrategiaDirector?.decisiones?.map((d) => {
             const alta = d.prioridad === 'HIGH';
             return (
               <div className="decisioncard" key={d.tipo} style={{ marginBottom: 10, borderLeft: `4px solid var(--${alta ? 'warn' : 'line'})` }}>
@@ -671,9 +693,23 @@ export default function Panel(): React.ReactElement {
           })}
           {tabsBandeja > 0 ? (
             <div className="card"><p className="s">Hay {tabsBandeja} cambio(s) preparados esperando tu aprobación. Revisalos con cuidado antes de autorizar.</p></div>
+          ) : histCtx ? (
+            <EmptyState ico="✓" titulo="No hay una decisión pendiente en este momento" detalle="El experimento vigente está corriendo (lo ves en «Campaña vigente»). Lo de abajo son antecedentes históricos, no decisiones presentes." />
           ) : (!panel?.googleAdsGuardrail?.decisionRequerida && !panel?.estrategiaDirector?.decisiones?.length && (
             <EmptyState ico="✓" titulo="No necesito que decidas nada ahora" detalle="Cuando SOEC prepare un cambio real (por ejemplo, ajustar una campaña), aparecerá aquí con su porqué, su beneficio y su riesgo, y botones para autorizar o rechazar." />
           ))}
+          {/* ANTECEDENTES HISTÓRICOS: se conservan, claramente separados, sin presentarse como decisiones presentes. */}
+          {histCtx && (panel?.googleAdsGuardrail?.decisionRequerida || (panel?.estrategiaDirector?.decisiones?.length ?? 0) > 0) && (
+            <>
+              <div className="section" style={{ marginTop: 18 }}>Antecedentes históricos <span className="hint">campaña {histId ?? ''} · no requieren decisión hoy</span></div>
+              {panel?.estrategiaDirector?.decisiones?.map((d) => (
+                <div className="decisioncard" key={d.tipo} style={{ marginBottom: 10, borderLeft: '4px solid var(--line)', opacity: 0.85 }}>
+                  <div className="spread"><h3>{d.titulo}</h3><Badge tono="mut">Antecedente histórico</Badge></div>
+                  <p className="dwhy">{d.diagnostico} {d.recomendacion}</p>
+                </div>
+              ))}
+            </>
+          )}
           {!esEcom && plan?.oportunidadesTacticas && plan.oportunidadesTacticas.length > 0 && (
             <>
               <div className="section">Para que lo sepas <span className="hint">oportunidades · no requieren decisión</span></div>
@@ -802,12 +838,15 @@ function saasPrioridades(panel: Panel | null, plan: Plan | null): { t: string; s
   return out;
 }
 
-function frase(esEcom: boolean, ventas: Ventas | null, panel: Panel | null, puedeRecomendar: boolean): string {
+function frase(esEcom: boolean, ventas: Ventas | null, panel: Panel | null, puedeRecomendar: boolean, histCtx = false): string {
   if (esEcom) {
     const lb = ventas?.lineaBase;
     const base = lb ? `Ya conozco tus ventas y tu catálogo: vendiste ${valor(lb.ingresoConfirmado, clp)} en ${num(lb.pedidos)} pedidos.` : 'Todavía estoy conociendo tu tienda.';
     return puedeRecomendar ? `${base} Con esto ya puedo ayudarte a decidir dónde invertir.` : `${base} Todavía no puedo recomendarte publicidad porque no conozco tu margen ni tengo medición web instalada.`;
   }
+  // Contexto histórico: hay un experimento vigente (arriba) y las cifras de abajo son de una campaña histórica. No las
+  // narro como presente — dirijo la atención a «Campaña vigente» y aclaro que lo de abajo es antecedente.
+  if (histCtx) return `Tu experimento vigente está arriba, en «Campaña vigente»: ahí ves su estado, gasto y contactos en tiempo real. Las cifras de más abajo son de una campaña histórica ya finalizada, no del experimento actual.`;
   const a = panel?.ads;
   if (adsVacio(panel)) return `${FUENTE_ADS} todavía no está conectado en producción. No invento cifras: observo tus contactos reales del sitio y te aviso cuando haya información suficiente para decidir.`;
   if (a && (a.clicks ?? 0) > 0 && (panel?.growthFunnel?.comercial?.lead_created ?? 0) === 0)

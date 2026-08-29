@@ -112,7 +112,9 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
   }, [org]);
 
   const env = resp?.envelope;
-  const st = env ? (ESTADO[env.status] ?? { txt: env.status, tono: 'info' as const }) : null;
+  // Estado PRESENTE prioriza la realidad operativa: si el plan ya se ejecutó (campaña real vinculada), el encabezado
+  // dice COMPLETADA — no "lista para activar". Los datos de autorización pasan a ser auditoría, no estado presente.
+  const st = ejecutado ? { txt: 'Ejecutada · COMPLETADA', tono: 'ok' as const } : env ? (ESTADO[env.status] ?? { txt: env.status, tono: 'info' as const }) : null;
   const aprobado = env ? ['APPROVED_WAITING_EXTERNAL_GATE', 'APPROVED_READY_TO_ACTIVATE', 'ACTIVE'].includes(env.status) : false;
   // FAIL-CLOSED de UI: un envelope del schema ANTERIOR (incompatible con CAMPAIGN_TOTAL) NO puede presentar
   // consentimiento financiero ni habilitar la autorización. Se detecta por el execution-plan (envelopeCompatibility)
@@ -148,6 +150,18 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
 
       {!cargandoInicial && env && !incompatible && (
         <div style={{ marginTop: 10 }}>
+          {/* ESTADO PRESENTE: si el plan ya se ejecutó, esto es lo primero y lo autoritativo. No hay "listo para activar". */}
+          {ejecutado && (
+            <div className="card" style={{ marginBottom: 12, borderLeft: '4px solid var(--ok, #2F7D57)' }}>
+              <div className="stophead"><strong>Plan ejecutado</strong><Badge tono="ok">COMPLETADA</Badge></div>
+              <ul className="s" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                <li><b>Campaña creada:</b> <code>{ejecutado.id}</code>{ejecutado.status ? ` · ${ejecutado.status === 'PAUSED' ? 'pausada' : ejecutado.status === 'ENABLED' ? 'habilitada' : ejecutado.status}` : ''}</li>
+                <li><b>Recursos reales creados (bindings):</b> {ejecutado.bindings}</li>
+                <li><b>Estado de creación:</b> COMPLETADA</li>
+              </ul>
+              <Callout tono="info" ico="✅">Este plan ya fue ejecutado y no puede volver a crear recursos. Para operar la campaña existente se usan acciones sobre ella (p.ej. pausa automática), no una nueva creación.</Callout>
+            </div>
+          )}
           <ul className="s" style={{ margin: 0, paddingLeft: 18 }}>
             <li><b>Objetivo:</b> {env.objective}</li>
             <li><b>Sobre / Plan:</b> <code>{env.id}</code> · <code>{env.planId}</code></li>
@@ -166,30 +180,30 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
             <li><b>Plan (versión/hash):</b> <code>{env.planVersion}</code></li>
           </ul>
 
-          {resp && (
-            <>
+          {resp && (() => {
+            const grid = (
               <div className="grid g-4" style={{ marginTop: 8 }}>
                 <div className="s"><span className="muted">Gasto histórico (no cuenta)</span><br /><b>{clp(resp.financial.historicalSpend)}</b></div>
                 <div className="s"><span className="muted">Gasto del sobre</span><br /><b>{clp(resp.financial.envelopeSpend)}</b></div>
                 <div className="s"><span className="muted">Comprometido</span><br /><b>{clp(resp.financial.committedSpend)}</b></div>
                 <div className="s"><span className="muted">Cap restante</span><br /><b>{clp(resp.financial.remainingCap)}</b></div>
               </div>
-              <p className="s muted" style={{ marginTop: 8 }}>Ejecución real: <b>{resp.executionAllowed.decision === 'ALLOW' ? 'permitida' : 'bloqueada'}</b>{resp.executionAllowed.reasonCode ? ` (${resp.executionAllowed.reasonCode})` : ''} · supervisedReal={String(resp.supervisedReal)} · autonomousReal={String(resp.autonomousReal)}. SOEC no ejecuta ni gasta nada todavía.</p>
-            </>
-          )}
-
-          {/* PLAN YA EJECUTADO: la campaña real existe. No se ofrece re-ejecutar (el backend lo bloquea con ALREADY_EXECUTED). */}
-          {ejecutado && (
-            <div className="card" style={{ marginTop: 12, borderLeft: '4px solid var(--ok, #2F7D57)' }}>
-              <div className="stophead"><strong>Plan ejecutado</strong><Badge tono="ok">COMPLETADA</Badge></div>
-              <ul className="s" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
-                <li><b>Campaña creada:</b> <code>{ejecutado.id}</code>{ejecutado.status ? ` · ${ejecutado.status === 'PAUSED' ? 'pausada' : ejecutado.status === 'ENABLED' ? 'habilitada' : ejecutado.status}` : ''}</li>
-                <li><b>Recursos reales creados (bindings):</b> {ejecutado.bindings}</li>
-                <li><b>Estado de creación:</b> COMPLETADA</li>
-              </ul>
-              <Callout tono="info" ico="✅">Este plan ya fue ejecutado y no puede volver a crear recursos. Para operar la campaña existente se usan acciones sobre ella (p.ej. pausa automática), no una nueva creación.</Callout>
-            </div>
-          )}
+            );
+            const autoria = <>supervisedReal={String(resp.supervisedReal)} · autonomousReal={String(resp.autonomousReal)}</>;
+            // Ejecutado ⇒ estos datos son AUDITORÍA (no estado presente): colapsados y sin lenguaje "todavía".
+            return ejecutado ? (
+              <details style={{ marginTop: 8 }}>
+                <summary className="s muted" style={{ cursor: 'pointer' }}>Detalles de autorización / auditoría</summary>
+                {grid}
+                <p className="s muted" style={{ marginTop: 8 }}>Registro de autorización: gate de ejecución real = <b>{resp.executionAllowed.decision === 'ALLOW' ? 'permitida' : 'bloqueada'}</b>{resp.executionAllowed.reasonCode ? ` (${resp.executionAllowed.reasonCode})` : ''} · {autoria}.</p>
+              </details>
+            ) : (
+              <>
+                {grid}
+                <p className="s muted" style={{ marginTop: 8 }}>Ejecución real: <b>{resp.executionAllowed.decision === 'ALLOW' ? 'permitida' : 'bloqueada'}</b>{resp.executionAllowed.reasonCode ? ` (${resp.executionAllowed.reasonCode})` : ''} · {autoria}. SOEC no ejecuta ni gasta nada todavía.</p>
+              </>
+            );
+          })()}
 
           {!ejecutado && exec?.shadowPlanCreated && exec.summary && (
             <div style={{ marginTop: 12 }}>
@@ -226,7 +240,7 @@ export function AutorizacionSobre({ org, nonce = 0 }: { org: string | null | und
 
           {aprobado && (
             <div style={{ marginTop: 8 }}>
-              <p className="s">Autorizado por <b>{env.approvedBy}</b> el {env.approvedAt?.slice(0, 10)}. La ejecución real permanece bloqueada por el gate externo y por los interruptores de seguridad.</p>
+              <p className="s">Autorizado por <b>{env.approvedBy}</b> el {env.approvedAt?.slice(0, 10)}. {ejecutado ? 'El plan ya fue ejecutado: la campaña existe y no puede volver a crearse.' : 'La ejecución real permanece bloqueada por el gate externo y por los interruptores de seguridad.'}</p>
 
               {/* TRIGGER HUMANO del plan autorizado — SÓLO si el plan NO fue ejecutado aún. Si ya existe campaña, se oculta. */}
               {!ejecutado && (<div className="card" style={{ marginTop: 10, borderLeft: '4px solid var(--line-strong, #cbd5e1)' }}>
