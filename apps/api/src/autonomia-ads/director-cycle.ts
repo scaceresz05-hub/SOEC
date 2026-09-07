@@ -145,7 +145,7 @@ export class DirectorCycleService {
     const c = this.ctx(org); const now = this.ahora();
     // Idempotencia: si ya hay un resultado persistido para este experimentId, no duplicar (conserva createdAt).
     const previo = await this.leerResultado(org);
-    if (previo && previo.experimentId === experimentId) return { analisis, persistido: false, resumen };
+    if (previo && previo.experimentId === experimentId) return { analisis, persistido: false, resumen: { ...resumen, previoCreatedAt: previo.createdAt, previoRanBy: previo.ranBy } };
 
     const resultado: DirectorResultado = { experimentId, campaignId: evidencia.campaignId, campaignName, status: evidencia.status, createdAt: now, analisis, ranBy };
     const sid = directorResultStreamId(org);
