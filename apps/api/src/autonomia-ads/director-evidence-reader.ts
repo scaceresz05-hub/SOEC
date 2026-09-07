@@ -32,9 +32,13 @@ type Buscar = (customerId: string, query: string) => Promise<Array<Record<string
  */
 export function construirLectorCambiosBidding(buscar: Buscar): (customerId: string, campaignId: string, ventanaDias: number) => Promise<CambioBidding[]> {
   return async (customerId, campaignId, ventanaDias) => {
-    const during = ventanaDias <= 14 ? 'LAST_14_DAYS' : 'LAST_30_DAYS';
+    // change_event sólo retiene ~30 días; el enum DURING LAST_30_DAYS toca ese borde y Google lo rechaza (400).
+    // Usamos bounds de datetime EXPLÍCITOS (probado en prod: devuelve el historial) capando la ventana a 29 días.
+    const dias = Math.min(Math.max(Math.floor(ventanaDias), 1), 29);
+    const desde = new Date(Date.now() - dias * 86_400_000).toISOString().slice(0, 10);
+    const hasta = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
     try {
-      const rows = await buscar(customerId, `SELECT change_event.change_date_time, change_event.changed_fields, change_event.change_resource_type, change_event.new_resource FROM change_event WHERE change_event.change_date_time DURING ${during} AND change_event.campaign = 'customers/${customerId}/campaigns/${campaignId}' ORDER BY change_event.change_date_time DESC LIMIT 200`);
+      const rows = await buscar(customerId, `SELECT change_event.change_date_time, change_event.changed_fields, change_event.change_resource_type, change_event.new_resource FROM change_event WHERE change_event.change_date_time >= '${desde} 00:00:00' AND change_event.change_date_time <= '${hasta} 00:00:00' AND change_event.campaign = 'customers/${customerId}/campaigns/${campaignId}' ORDER BY change_event.change_date_time DESC LIMIT 200`);
       const out: CambioBidding[] = [];
       for (const r of rows) {
         const ce = (r as { changeEvent?: { changeDateTime?: string; changedFields?: string; newResource?: { campaign?: { biddingStrategyType?: string; targetSpend?: unknown; maximizeConversions?: unknown } } } }).changeEvent;

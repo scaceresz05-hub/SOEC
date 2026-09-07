@@ -69,7 +69,7 @@ export class DirectorCycleService {
   }
 
   /** Arma la evidencia REAL del experimento vigente (o null si no hay campaña vinculada). READ-ONLY. */
-  async armarEvidencia(org: string): Promise<{ evidencia: EvidenciaExperimento; campaignName: string | null; experimentId: string } | null> {
+  async armarEvidencia(org: string): Promise<{ evidencia: EvidenciaExperimento; campaignName: string | null; experimentId: string; diag: { biddingChanges: number; changePoint: string | null; phase2Desde: string } } | null> {
     const c = this.ctx(org);
     const envelope = await this.deps.envelopes.leerUltimo(org);
     if (!envelope) return null;
@@ -147,7 +147,7 @@ export class DirectorCycleService {
       phases, phaseSegmentation: segmentado ? 'SEGMENTED' : 'UNKNOWN', analyzedPhaseLabel: segmentado ? 'PHASE_2' : null,
     };
     const experimentId = `${campaignId}:${evidencia.stopRule ?? (periodoTerminado ? 'ended' : 'running')}`;
-    return { evidencia, campaignName: nombreVigente, experimentId };
+    return { evidencia, campaignName: nombreVigente, experimentId, diag: { biddingChanges: cambios.length, changePoint: cambioReciente, phase2Desde } };
   }
 
   /**
@@ -157,13 +157,14 @@ export class DirectorCycleService {
   async correrCiclo(org: string, ranBy: 'scheduler' | 'endpoint' = 'scheduler'): Promise<{ analisis: AnalisisDirector; persistido: boolean; resumen: Record<string, unknown> } | null> {
     const armado = await this.armarEvidencia(org);
     if (!armado) return null;
-    const { evidencia, campaignName, experimentId } = armado;
+    const { evidencia, campaignName, experimentId, diag } = armado;
     const memoria = new ExperimentMemoryService(this.store);
     const aprendizajes = await memoria.aprendizajesPrevios(org, experimentId);
     const analisis = analizarExperimento(evidencia, aprendizajes);
     const cerrado = evidencia.stopTriggered || evidencia.periodoTerminado || evidencia.status === 'PAUSED';
     const resumen = { status: evidencia.status, spend: evidencia.spend, clicks: evidencia.clicks, contacts: evidencia.contacts, keywords: evidencia.keywords.length, terminos: evidencia.terminos.length, stopTriggered: evidencia.stopTriggered, cerrado, experimentId,
       action: analisis.recomendacion.action, approval: analisis.recomendacion.humanApprovalRequired, confidence: analisis.recomendacion.confidence,
+      biddingChanges: diag.biddingChanges, changePoint: diag.changePoint, phase2Desde: diag.phase2Desde,
       phaseSeg: analisis.postMortem.phaseSegmentation, phases: analisis.postMortem.phases.length, phase2Spend: analisis.postMortem.phases[1]?.spend ?? null,
       keywordConc: analisis.postMortem.keywordConcentration.map((k) => `${k.keyword}~${Math.round(k.sharePct)}%`),
       visibleTerm: analisis.postMortem.searchTermFindings.map((t) => `${t.termino}~${t.shareCampaignPct ?? '?'}%`), unreportedPct: analisis.postMortem.searchTermPrivacy.unreportedPct };
