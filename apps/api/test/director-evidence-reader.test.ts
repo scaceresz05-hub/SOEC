@@ -71,6 +71,21 @@ describe('construirLectorCambiosBidding — change-point real de Google', () => 
     expect(cambios[0]!.at).toBe('2026-09-02 23:40:00');
     expect(cambios[0]!.biddingStrategy).toBe('TARGET_SPEND');
   });
+  it('REGRESIÓN prod: changed_fields camelCase "targetSpend.cpcBidCeilingMicros" cuenta como cambio de puja', async () => {
+    // Google REST devuelve el field mask en camelCase; el resto son status (pausa) que se ignoran. Caso real 24194332264.
+    const buscar = async (_c: string, q: string): Promise<Array<Record<string, unknown>>> => {
+      if (!q.includes('change_event')) return [];
+      return [
+        { changeEvent: { changeDateTime: '2026-09-06 21:10:15', changedFields: 'status', changeResourceType: 'CAMPAIGN' } },
+        { changeEvent: { changeDateTime: '2026-09-02 23:38:21', changedFields: 'targetSpend.cpcBidCeilingMicros', changeResourceType: 'CAMPAIGN', newResource: { campaign: { biddingStrategyType: 'TARGET_SPEND' } } } },
+        { changeEvent: { changeDateTime: '2026-08-28 10:46:46', changedFields: 'status', changeResourceType: 'CAMPAIGN' } },
+      ];
+    };
+    const cambios = await construirLectorCambiosBidding(buscar)('8605539300', '24194332264', 14);
+    expect(cambios).toHaveLength(1);
+    expect(cambios[0]!.at).toBe('2026-09-02 23:38:21');
+    expect(cambios[0]!.biddingStrategy).toBe('TARGET_SPEND');
+  });
   it('sin change_event ⇒ [] (el caller marca la fase UNKNOWN, no mezcla)', async () => {
     const cambios = await construirLectorCambiosBidding(async () => [])('c', '1', 30);
     expect(cambios).toHaveLength(0);

@@ -41,7 +41,10 @@ export function construirLectorCambiosBidding(buscar: Buscar): (customerId: stri
         if (!ce?.changeDateTime) continue;
         const campos = String(ce.changedFields ?? '');
         // SÓLO cambios de estrategia de puja (no status/pausa): el changed_fields debe mencionar la puja.
-        const tocaPuja = /bidding_strategy_type|target_spend|maximize_conversions|maximize_clicks|target_cpa|target_roas|target_cpm|manual_cpc|cpc_bid_ceiling/i.test(campos);
+        // Google devuelve el field mask en camelCase por REST (p.ej. "targetSpend.cpcBidCeilingMicros"); normalizamos
+        // (sin guiones bajos, minúsculas) para reconocerlo tanto en camelCase como en snake_case.
+        const norm = campos.replace(/_/g, '').toLowerCase();
+        const tocaPuja = /biddingstrategy|targetspend|maximizeconversions|maximizeclicks|targetcpa|targetroas|targetcpm|manualcpc|cpcbidceiling|targetimpressionshare|percentcpc|commission/.test(norm);
         if (!tocaPuja) continue;
         out.push({ at: ce.changeDateTime, biddingStrategy: ce.newResource?.campaign?.biddingStrategyType ?? null });
       }
