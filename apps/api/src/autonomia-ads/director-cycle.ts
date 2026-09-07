@@ -139,7 +139,9 @@ export class DirectorCycleService {
     const aprendizajes = await memoria.aprendizajesPrevios(org, experimentId);
     const analisis = analizarExperimento(evidencia, aprendizajes);
     const cerrado = evidencia.stopTriggered || evidencia.periodoTerminado || evidencia.status === 'PAUSED';
-    const resumen = { status: evidencia.status, spend: evidencia.spend, clicks: evidencia.clicks, contacts: evidencia.contacts, keywords: evidencia.keywords.length, terminos: evidencia.terminos.length, stopTriggered: evidencia.stopTriggered, cerrado, experimentId };
+    const resumen = { status: evidencia.status, spend: evidencia.spend, clicks: evidencia.clicks, contacts: evidencia.contacts, keywords: evidencia.keywords.length, terminos: evidencia.terminos.length, stopTriggered: evidencia.stopTriggered, cerrado, experimentId,
+      action: analisis.recomendacion.action, approval: analisis.recomendacion.humanApprovalRequired, confidence: analisis.recomendacion.confidence,
+      keywordConc: analisis.postMortem.keywordConcentration.map((k) => `${k.keyword}~${Math.round(k.sharePct)}%`), unreportedPct: analisis.postMortem.searchTermPrivacy.unreportedPct };
     if (!cerrado) return { analisis, persistido: false, resumen };
 
     const c = this.ctx(org); const now = this.ahora();
