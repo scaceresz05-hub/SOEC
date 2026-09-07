@@ -96,7 +96,7 @@ describe('DirectorCycleService — segmentación por fase, autónomo', () => {
     const r = await svc.correrCiclo('org-smileflow');
     expect(r!.persistido).toBe(true);                             // supersede la versión vieja
     const vigente = await svc.leerResultado('org-smileflow');
-    expect(vigente!.evidenceVersion).toBe('v3-phase-segmented');
+    expect(vigente!.evidenceVersion).toBe('v4-decision-loop');
     expect(vigente!.supersedes).toBe('2026-09-06T00:00:00Z');     // apunta al anterior, sin borrarlo (auditoría intacta)
     // la nueva ejecución NO vuelve a persistir en un 2º ciclo
     expect((await svc.correrCiclo('org-smileflow'))!.persistido).toBe(false);
