@@ -73,6 +73,7 @@ export interface PanelSearchTerm {
   readonly termino: string;
   readonly impresiones: number;
   readonly clics: number;
+  readonly gasto: number | null;   // CLP; null si Google no expone gasto por término (privacidad)
 }
 
 export interface PanelAtribucion {
@@ -151,19 +152,20 @@ export function construirPanel(
   };
 
   // Términos de búsqueda REALES: agregación por utmContent (sin términos ⇒ []).
-  const terminosMap = new Map<string, { impresiones: number; clics: number }>();
+  const terminosMap = new Map<string, { impresiones: number; clics: number; gasto: number; gastoVisto: boolean }>();
   for (const o of ads) {
     if (o.eventName !== 'ads_search_term') continue;
     const termino = o.utmContent;
     if (!termino) continue;
-    const acc = terminosMap.get(termino) ?? { impresiones: 0, clics: 0 };
+    const acc = terminosMap.get(termino) ?? { impresiones: 0, clics: 0, gasto: 0, gastoVisto: false };
     if (o.metrica === 'search_term_impressions') acc.impresiones += o.valor ?? 0;
     else if (o.metrica === 'search_term_clicks') acc.clics += o.valor ?? 0;
+    else if (o.metrica === 'search_term_cost') { acc.gasto += o.valor ?? 0; acc.gastoVisto = true; }
     terminosMap.set(termino, acc);
   }
   const searchTerms: PanelSearchTerm[] = [...terminosMap.entries()]
-    .map(([termino, v]) => ({ termino, impresiones: v.impresiones, clics: v.clics }))
-    .sort((a, b) => b.impresiones - a.impresiones || a.termino.localeCompare(b.termino));
+    .map(([termino, v]) => ({ termino, impresiones: v.impresiones, clics: v.clics, gasto: v.gastoVisto ? v.gasto : null }))
+    .sort((a, b) => (b.gasto ?? 0) - (a.gasto ?? 0) || b.impresiones - a.impresiones || a.termino.localeCompare(b.termino));
 
   // Atribución pagada: NO se calcula (no unimos Ads↔Growth ni inferimos origen de las demos).
   const atribucion: PanelAtribucion = { demosAtribuiblesAds: null, costePorDemo: null, estado: 'PENDIENTE' };

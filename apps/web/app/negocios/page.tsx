@@ -15,6 +15,7 @@ import { BotonActualizarAds } from '../../components/boton-actualizar-ads';
 import { CampaignOperator } from '../../components/campaign-operator';
 import { GoogleAdsConexion } from '../../components/google-ads-conexion';
 import { CampaniaVigente } from '../../components/campana-vigente';
+import { MiDirector } from '../../components/mi-director';
 import {
   Badge, Callout, clp, colorDeNegocio, DirectorCard, EmptyState, Funnel, iniciales, Metric, num,
   PriorityList, SourceRow, TechDetails, TrendBars, valor, type Desconocible, type Tono,
@@ -294,6 +295,13 @@ export default function Panel(): React.ReactElement {
       {/* ══════════════ INICIO ══════════════ */}
       {tab === 'inicio' && (
         <>
+          {/* SOEC RECOMIENDA AHORA — el Director, recomendación-primero, arriba de todo (superficie principal SaaS). */}
+          {!esEcom && org && (
+            <>
+              <div className="section">Mi director <span className="hint">SOEC observa, diagnostica y recomienda</span></div>
+              <MiDirector org={org} />
+            </>
+          )}
           {esEcom && ventas?.observado && ventas.lineaBase && (
             <>
               <div className="section">Hoy <span className="hint">lo que SOEC ve en tu tienda</span></div>

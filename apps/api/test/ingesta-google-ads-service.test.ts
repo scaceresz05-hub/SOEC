@@ -83,7 +83,7 @@ function nueva(fallar?: Set<Etiqueta>, snapshotImpr?: string) {
 }
 
 describe('IngestaGoogleAds', () => {
-  it('corrida OK: 5 métricas de campaña + 2 de término como REAL/VALIDADA; snapshot va al stream dedicado', async () => {
+  it('corrida OK: 5 métricas de campaña + 3 de término como REAL/VALIDADA; snapshot va al stream dedicado', async () => {
     const { store, observaciones, ingesta } = nueva();
     const r = await ingesta.correrUnaVez(ctx(), { ahora: AHORA });
 
@@ -91,14 +91,14 @@ describe('IngestaGoogleAds', () => {
     expect(r.snapshotFilas).toBe(1);
     expect(r.campaniasFilas).toBe(1);
     expect(r.terminosFilas).toBe(1);
-    expect(r.ingeridos).toBe(7); // 5 diarias + 2 términos (el snapshot NO es observación)
-    expect(r.nuevos).toBe(7);
+    expect(r.ingeridos).toBe(8); // 5 diarias + 3 términos (clicks/impressions/cost; el snapshot NO es observación)
+    expect(r.nuevos).toBe(8);
     expect(r.fallos).toEqual([]);
     // la ventana incluye hoy (hasta = hoy local)
     expect(r.ventana.hasta).toBe('2026-08-08');
 
     const ids = await observaciones.listarIds(ctx());
-    expect(ids).toHaveLength(7); // sin observación de snapshot
+    expect(ids).toHaveLength(8); // sin observación de snapshot
     const st = await observaciones.cargar(ctx(), 'google-ads:campaign:24120966895:2026-08-07:impressions');
     expect(st.existe).toBe(true);
     expect(st.estado).toBe('VALIDADA');
@@ -116,9 +116,9 @@ describe('IngestaGoogleAds', () => {
     const r2 = await ingesta.correrUnaVez(ctx(), { ahora: AHORA });
 
     expect(r2.estado).toBe('OK');
-    expect(r2.ingeridos).toBe(7);
+    expect(r2.ingeridos).toBe(8);
     expect(r2.nuevos).toBe(0);
-    expect(await observaciones.listarIds(ctx())).toHaveLength(7);
+    expect(await observaciones.listarIds(ctx())).toHaveLength(8);
   });
 
   it('snapshot LAST-WINS: el panel refleja el acumulado MÁS RECIENTE (fresco cada sync, no se congela)', async () => {

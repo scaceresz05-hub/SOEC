@@ -102,7 +102,7 @@ describe('construirPanel', () => {
     expect(conDatos.ads.ctr).toBeCloseTo(10 / 200, 6);
     expect(conDatos.ads.cpc).toBeCloseTo(5000 / 10, 6);
     expect(conDatos.ads.sinDatos).toBe(false);
-    expect(conDatos.searchTerms).toEqual([{ termino: 'dentista santiago', impresiones: 30, clics: 3 }]);
+    expect(conDatos.searchTerms).toEqual([{ termino: 'dentista santiago', impresiones: 30, clics: 3, gasto: null }]);
     expect(conDatos.lecturaSoec).not.toContain('Todavía no hay suficientes datos');
   });
 

@@ -75,13 +75,15 @@ describe('mapa-google-ads', () => {
     expect(imp.externalEventId).toBe('google-ads:campaign:24120966895:2026-08-07:impressions');
   });
 
-  it('mapearTerminos: 2 obs por término (clicks/impressions), guarda el término en utmContent y usa sha1 en el id', () => {
+  it('mapearTerminos: 3 obs por término (clicks/impressions/cost), guarda el término en utmContent y usa sha1 en el id', () => {
     const obs = mapearTerminos(parsearSearchStream(BODY_TERMINOS));
-    expect(obs).toHaveLength(2);
+    expect(obs).toHaveLength(3);
     const clicks = obs.find((o) => o.metrica === 'search_term_clicks')!;
     const imps = obs.find((o) => o.metrica === 'search_term_impressions')!;
+    const cost = obs.find((o) => o.metrica === 'search_term_cost')!;
     expect(clicks.valor).toBe(1);
     expect(imps.valor).toBe(10);
+    expect(cost.valor).toBeCloseTo(0.005, 6); // 5000 micros → CLP (habilita concentración de gasto del Director)
     expect(clicks.unidad).toBe('conteo');
     expect(clicks.utmContent).toBe('dentista santiago');
     expect(clicks.eventName).toBe('ads_search_term');

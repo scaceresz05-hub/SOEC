@@ -218,6 +218,8 @@ export function sha1corto(texto: string): string {
 const METRICAS_TERMINO: readonly { metric: string; valor: (m: Record<string, unknown>) => number | null }[] = [
   { metric: 'search_term_clicks', valor: (m) => num(m.clicks) },
   { metric: 'search_term_impressions', valor: (m) => num(m.impressions) },
+  // Gasto por término (cost_micros→CLP): habilita el análisis de CONCENTRACIÓN de gasto del Director (antes se descartaba).
+  { metric: 'search_term_cost', valor: (m) => { const c = num(m.costMicros); return c === null ? null : c / 1_000_000; } },
 ];
 
 /**
