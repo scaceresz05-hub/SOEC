@@ -162,6 +162,31 @@ async function main(): Promise<void> {
         console.log(JSON.stringify({ campaignDatesProbe: { ok: true, campaignId: campId, startDateTimeRaw: c?.startDateTime ?? null, endDateTimeRaw: c?.endDateTime ?? null, startDate: fechaCalendario(c?.startDateTime), endDate: fechaCalendario(c?.endDateTime) } }));
       } catch (e) { console.log(JSON.stringify({ campaignDatesProbe: 'error', error: e instanceof Error ? e.message : String(e) })); }
     })();
+    // SONDA CHANGE_EVENT (READ-ONLY, boot, TEMPORAL): diagnostica por qué el change-point no se detecta en prod.
+    // Prueba dos formulaciones (DURING vs bounds explícitos) y captura el error estructurado de Google si 400ea.
+    if (readClient) void (async (): Promise<void> => {
+      try {
+        const st = new PgEventStore(pool);
+        const env = await new EnvelopeService(st).leerUltimo('org-smileflow');
+        const binds = env ? await new ResourceBindingService(st).listar('org-smileflow') : [];
+        const rn = env ? binds.find((b) => b.envelopeId === env.id && b.entityType === 'campaign')?.providerResourceId ?? null : null;
+        const cid = rn?.match(/^customers\/(\d+)\//)?.[1] ?? null;
+        const campId = rn?.match(/campaigns\/(\d+)$/)?.[1] ?? null;
+        if (!cid || !campId) { console.log(JSON.stringify({ changeEventProbe: 'no_binding' })); return; }
+        const intentar = async (etq: string, q: string): Promise<void> => {
+          try {
+            const rows = await readClient.buscar(cid, q);
+            const campos = rows.map((r) => (r as { changeEvent?: { changeDateTime?: string; changedFields?: string; changeResourceType?: string } }).changeEvent).filter(Boolean).map((ce) => ({ at: ce?.changeDateTime ?? null, fields: ce?.changedFields ?? null, type: ce?.changeResourceType ?? null }));
+            console.log(JSON.stringify({ changeEventProbe: etq, ok: true, rows: rows.length, muestra: campos.slice(0, 6) }));
+          } catch (e) { console.log(JSON.stringify({ changeEventProbe: etq, ok: false, error: e instanceof Error ? e.message : String(e) })); }
+        };
+        await intentar('during14', `SELECT change_event.change_date_time, change_event.changed_fields, change_event.change_resource_type, change_event.new_resource FROM change_event WHERE change_event.change_date_time DURING LAST_14_DAYS AND change_event.campaign = 'customers/${cid}/campaigns/${campId}' ORDER BY change_event.change_date_time DESC LIMIT 200`);
+        const desde = new Date(Date.now() - 20 * 86_400_000).toISOString().slice(0, 10);
+        const hasta = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+        await intentar('bounds', `SELECT change_event.change_date_time, change_event.changed_fields, change_event.change_resource_type, change_event.new_resource FROM change_event WHERE change_event.change_date_time >= '${desde} 00:00:00' AND change_event.change_date_time <= '${hasta} 00:00:00' AND change_event.campaign = 'customers/${cid}/campaigns/${campId}' ORDER BY change_event.change_date_time DESC LIMIT 200`);
+        await intentar('sinCampaign', `SELECT change_event.change_date_time, change_event.changed_fields, change_event.change_resource_type FROM change_event WHERE change_event.change_date_time DURING LAST_14_DAYS ORDER BY change_event.change_date_time DESC LIMIT 50`);
+      } catch (e) { console.log(JSON.stringify({ changeEventProbe: 'error', error: e instanceof Error ? e.message : String(e) })); }
+    })();
   } else {
     console.log(JSON.stringify({ stopMonitor: 'disabled' }));
   }
