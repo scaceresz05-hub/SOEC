@@ -8,17 +8,20 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryEventStore } from '@soec/event-store';
 import {
   analizarExperimento, analizarCalidadTrafico, analizarConcentracionKeywords, contabilidadPrivacidad,
-  evaluarMuestra, esAccionReductoraDeRiesgo, intentComercial, type EvidenciaExperimento,
+  esAccionReductoraDeRiesgo, intentComercial, type EvidenciaExperimento,
 } from '../src/autonomia-ads/director-postmortem';
 import { clasificarTermino } from '../src/campana/intent-classifier';
 import { ExperimentMemoryService } from '../src/autonomia-ads/experiment-memory';
 
 const ev15 = (over: Partial<EvidenciaExperimento> = {}): EvidenciaExperimento => ({
   campaignId: '24194332264', status: 'PAUSED', periodoTerminado: false,
-  spend: 3001, experimentBudgetClp: 15000, impressions: 160, clicks: 4, contacts: 0, conversions: 0,
+  spend: 3001, campaignTotalSpendClp: 7760, experimentBudgetClp: 15000, impressions: 160, clicks: 4, contacts: 0, conversions: 0,
   avgCpcClp: 750, ctr: 2.5,
   keywords: [{ keyword: 'software de administración dental', matchType: 'BROAD', impresiones: 100, clics: 2, gasto: 2414, conversions: 0 }],
-  terminos: [{ termino: 'dentidesk inicio de sesión', impresiones: 60, clics: 1, gasto: 714 }],
+  terminos: [
+    { termino: 'dentalink inicio sesion', impresiones: 200, clics: 0, gasto: 0 },      // 0 gasto/0 clics ⇒ NO puede ser el titular
+    { termino: 'dentidesk inicio de sesión', impresiones: 60, clics: 1, gasto: 714 },   // $714, 1 clic ⇒ evidencia económica real
+  ],
   devices: [{ clave: 'MOBILE', impresiones: 120, clics: 3, gasto: 2200, conversions: 0 }],
   geos: [{ clave: 'geo:2152', impresiones: 160, clics: 4, gasto: 3001, conversions: 0 }],
   networks: [{ clave: 'SEARCH', impresiones: 160, clics: 4, gasto: 3001, conversions: 0 }],
@@ -63,6 +66,30 @@ describe('§15 — el motor reproduce el diagnóstico real separando keyword/ter
     expect(pm.phases).toHaveLength(2);
     expect(pm.analyzedPhaseLabel).toBe('PHASE_2');
     expect(pm.phases[1]!.spend).toBe(3001);
+  });
+});
+
+describe('K/L/M — semántica financiera y de tarjeta correcta', () => {
+  it('K/L: stop 7500 ≠ gasto de campaña 7760 ≠ gasto de fase 3001 (no se confunden)', () => {
+    const { postMortem: pm } = analizarExperimento(ev15());
+    expect(pm.metrics.stopThreshold).toBe(7500);
+    expect(pm.metrics.campaignTotalSpend).toBe(7760);
+    expect(pm.metrics.spend).toBe(3001);
+    expect(pm.metrics.spend).not.toBe(pm.metrics.campaignTotalSpend);
+  });
+  it('I/J: aprobar PREPARE no reutiliza el presupuesto histórico (15000): compromiso nuevo 0, 0 escrituras', () => {
+    const { decisionPack: dp } = analizarExperimento(ev15());
+    expect(dp!.maxNewCommitmentClp).toBe(0);
+    expect(dp!.providerWritesExpected).toBe(0);
+    expect(dp!.historicalCampaignBudgetClp).toBe(15000);
+    expect(dp!.historicalSpendClp).toBe(7760);
+  });
+  it('M: el titular usa evidencia económica (dentidesk $714), no dentalink $0', () => {
+    const { postMortem: pm, recomendacion: rec } = analizarExperimento(ev15());
+    const primeroNoComercial = pm.searchTermFindings.find((t) => t.intent === 'NAVIGATIONAL' || t.intent === 'IRRELEVANT')!;
+    expect(primeroNoComercial.termino).toContain('dentidesk');
+    expect(rec.why).toMatch(/dentidesk/i);
+    expect(rec.why).not.toMatch(/dentalink inicio sesion/i);
   });
 });
 

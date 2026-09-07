@@ -16,6 +16,7 @@ import { CampaignOperator } from '../../components/campaign-operator';
 import { GoogleAdsConexion } from '../../components/google-ads-conexion';
 import { CampaniaVigente } from '../../components/campana-vigente';
 import { MiDirector } from '../../components/mi-director';
+import { Decisiones } from '../../components/decisiones';
 import {
   Badge, Callout, clp, colorDeNegocio, DirectorCard, EmptyState, Funnel, iniciales, Metric, num,
   PriorityList, SourceRow, TechDetails, TrendBars, valor, type Desconocible, type Tono,
@@ -367,7 +368,9 @@ export default function Panel(): React.ReactElement {
             </>
           )}
 
-          {ver && (
+          {/* En SaaS, "Mi director" (arriba) es la ÚNICA superficie del Director: estas tarjetas legacy salen del
+              panel histórico (campaña completa) y contradirían el análisis por fase. Sólo se muestran en e-commerce. */}
+          {esEcom && ver && (
             <div className="grid g-main" style={{ marginTop: 22 }}>
               <DirectorCard
                 estado={<Badge tono={ver.tono}>{ver.texto}</Badge>}
@@ -385,7 +388,7 @@ export default function Panel(): React.ReactElement {
 
           {/* ESTRATEGIA DEL DIRECTOR: cuando hay evidencia accionable (p.ej. clics con 0 contactos), SOEC deja
               de sólo reportar y expone diagnóstico + hipótesis (separadas de los hechos) + estrategia. */}
-          {panel?.estrategiaDirector?.generada && (
+          {esEcom && panel?.estrategiaDirector?.generada && (
             <div className="card" style={{ marginTop: 22 }}>
               <div className="spread">
                 <div className="section" style={{ margin: 0 }}>El Director dice {histCtx && <span className="hint">sobre la campaña histórica</span>}</div>
@@ -426,8 +429,8 @@ export default function Panel(): React.ReactElement {
             </div>
           )}
 
-          {/* "No necesitás decidir nada" sólo si NO hay decisión PRESENTE (las de contexto histórico no cuentan). */}
-          {!decisionGuardrailPresente && !decisionesDirectorPresentes && (
+          {/* "No necesitás decidir nada": en SaaS lo dice "Mi director" según el SSOT real; acá sólo para e-commerce. */}
+          {esEcom && !decisionGuardrailPresente && !decisionesDirectorPresentes && (
             <div style={{ marginTop: 16 }}>
               <Callout tono="ok" ico="✓">
                 <b>No necesitás decidir nada ahora.</b> SOEC está en modo seguro: observa y te avisará en
@@ -672,9 +675,13 @@ export default function Panel(): React.ReactElement {
       {/* ══════════════ DECISIONES ══════════════ */}
       {tab === 'decisiones' && (
         <>
+          {/* SaaS: el bucle de decisión REAL (mismo SSOT que "Mi director"): aprobar/rechazar/ajustar + historial. */}
+          {!esEcom && org ? (
+            <Decisiones org={org} />
+          ) : (
+          <>
           <div className="section">Necesita tu decisión</div>
-          {/* Sólo decisiones PRESENTES. En contexto histórico, el guardrail/estrategia describen la campaña histórica
-              (no requieren decisión hoy) y se muestran abajo como «Antecedentes históricos». */}
+          {/* E-commerce (sin ciclo del Director): decisiones PRESENTES del guardrail/estrategia del panel. */}
           {!histCtx && panel?.googleAdsGuardrail?.decisionRequerida && (
             <div className="decisioncard" style={{ marginBottom: 10, borderLeft: '4px solid var(--warn)' }}>
               <div className="spread"><h3>Presupuesto autorizado alcanzado — {panel.googleAdsGuardrail.campaignName ?? 'campaña'}</h3><Badge tono="warn">Alta prioridad</Badge></div>
@@ -702,10 +709,12 @@ export default function Panel(): React.ReactElement {
           {tabsBandeja > 0 ? (
             <div className="card"><p className="s">Hay {tabsBandeja} cambio(s) preparados esperando tu aprobación. Revisalos con cuidado antes de autorizar.</p></div>
           ) : histCtx ? (
-            <EmptyState ico="✓" titulo="No hay una decisión pendiente en este momento" detalle="El experimento vigente está corriendo (lo ves en «Campaña vigente»). Lo de abajo son antecedentes históricos, no decisiones presentes." />
+            <EmptyState ico="✓" titulo="No hay una decisión pendiente en este momento" detalle="Lo de abajo son antecedentes históricos, no decisiones presentes." />
           ) : (!panel?.googleAdsGuardrail?.decisionRequerida && !panel?.estrategiaDirector?.decisiones?.length && (
             <EmptyState ico="✓" titulo="No necesito que decidas nada ahora" detalle="Cuando SOEC prepare un cambio real (por ejemplo, ajustar una campaña), aparecerá aquí con su porqué, su beneficio y su riesgo, y botones para autorizar o rechazar." />
           ))}
+          </>
+          )}
           {/* ANTECEDENTES HISTÓRICOS: se conservan, claramente separados, sin presentarse como decisiones presentes. */}
           {histCtx && (panel?.googleAdsGuardrail?.decisionRequerida || (panel?.estrategiaDirector?.decisiones?.length ?? 0) > 0) && (
             <>
@@ -737,8 +746,13 @@ export default function Panel(): React.ReactElement {
             </>
           )}
 
-          <div className="section">Historial</div>
-          <div className="card"><p className="s muted" style={{ margin: 0 }}>Todavía no hay decisiones registradas. Cuando autorices o rechaces un cambio, quedará aquí con su fecha y su resultado.</p></div>
+          {/* En SaaS el historial REAL lo renderiza <Decisiones>. Este es el placeholder legacy para e-commerce. */}
+          {esEcom && (
+            <>
+              <div className="section">Historial</div>
+              <div className="card"><p className="s muted" style={{ margin: 0 }}>Todavía no hay decisiones registradas. Cuando autorices o rechaces un cambio, quedará aquí con su fecha y su resultado.</p></div>
+            </>
+          )}
         </>
       )}
 

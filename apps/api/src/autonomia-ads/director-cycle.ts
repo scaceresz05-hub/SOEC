@@ -135,7 +135,7 @@ export class DirectorCycleService {
 
     const evidencia: EvidenciaExperimento = {
       campaignId, status: provider.core?.status ?? null, periodoTerminado,
-      spend, experimentBudgetClp: envelope.experimentBudget, impressions,
+      spend, campaignTotalSpendClp: spendTotal, experimentBudgetClp: envelope.experimentBudget, impressions,
       clicks, contacts, conversions: provider.metrics?.conversions ?? null,
       avgCpcClp: clicks && spend != null ? Math.round(spend / clicks) : null,
       ctr: impressions ? Math.round((clicks ?? 0) / impressions * 1000) / 10 : null,

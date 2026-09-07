@@ -57,7 +57,8 @@ export interface EvidenciaExperimento {
   readonly campaignId: string;
   readonly status: string | null;               // ENABLED | PAUSED | null
   readonly periodoTerminado: boolean;
-  readonly spend: number | null;                 // gasto total de campaña (ventana)
+  readonly spend: number | null;                 // gasto de la FASE analizada (post-cambio si segmentado; total si UNKNOWN)
+  readonly campaignTotalSpendClp: number | null; // gasto TOTAL de la campaña (todas las fases) — NO confundir con `spend`
   readonly experimentBudgetClp: number | null;
   readonly impressions: number | null;
   readonly clicks: number | null;
@@ -99,7 +100,8 @@ export function intentComercial(cat: IntentCategory, conf: Confidence): Commerci
 const ES_COMERCIAL = (i: CommercialIntent): boolean => i === 'HIGH_COMMERCIAL_INTENT' || i === 'MEDIUM_COMMERCIAL_INTENT';
 
 /** Hallazgo por SEARCH TERM visible: clasificación + gasto real del término + su share del gasto de CAMPAÑA. */
-export interface SearchTermFinding { readonly termino: string; readonly intent: CommercialIntent; readonly confidence: Confidence; readonly gasto: number | null; readonly shareCampaignPct: number | null; readonly epistemic: Epistemic }
+export interface SearchTermFinding { readonly termino: string; readonly intent: CommercialIntent; readonly confidence: Confidence; readonly clics: number; readonly gasto: number | null; readonly shareCampaignPct: number | null; readonly epistemic: Epistemic }
+const RANGO_CONF: Record<Confidence, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
 export interface CalidadTrafico { readonly quality: TrafficQuality; readonly findings: readonly SearchTermFinding[]; readonly gastoComercialPctVisible: number | null }
 
 export function analizarCalidadTrafico(terminos: readonly TermSpend[], campaignSpend: number | null, lex: IntentLexicon = LEXICO_DENTAL_POR_DEFECTO): CalidadTrafico {
@@ -108,8 +110,13 @@ export function analizarCalidadTrafico(terminos: readonly TermSpend[], campaignS
     const { category, confidence } = clasificarTermino(t.termino, lex);
     const intent = intentComercial(category, confidence);
     const shareCampaignPct = t.gasto != null && campaignSpend && campaignSpend > 0 ? Math.round((t.gasto / campaignSpend) * 1000) / 10 : null;
-    return { termino: t.termino, intent, confidence, gasto: t.gasto, shareCampaignPct, epistemic: 'OBSERVED' as Epistemic };
+    return { termino: t.termino, intent, confidence, clics: t.clics, gasto: t.gasto, shareCampaignPct, epistemic: 'OBSERVED' as Epistemic };
   });
+  // ORDEN por RELEVANCIA ECONÓMICA (no por orden de llegada): así el "titular" usa evidencia con impacto real y no un
+  // término de 0 gasto/0 clics. 1º los con clics>0 Y gasto>0; luego mayor gasto; luego mayor confianza; luego impresiones.
+  const imprDe = (termino: string): number => terminos.find((t) => t.termino === termino)?.impresiones ?? 0;
+  const econ = (f: SearchTermFinding): number => (f.clics > 0 && (f.gasto ?? 0) > 0 ? 1 : 0);
+  findings.sort((a, b) => econ(b) - econ(a) || (b.gasto ?? 0) - (a.gasto ?? 0) || RANGO_CONF[b.confidence] - RANGO_CONF[a.confidence] || imprDe(b.termino) - imprDe(a.termino));
   // Calidad de lo VISIBLE (no del total: gran parte del gasto puede ser no divulgado). Share por gasto si hay
   // gasto por término; si no, por impresiones (respaldo). Cada finding conoce su propio gasto/impresiones del término.
   const idx = new Map(terminos.map((t) => [t.termino, t]));
@@ -195,7 +202,7 @@ export function diagnosticoCausal(ev: EvidenciaExperimento, calidad: CalidadTraf
 // ── Post-mortem ──────────────────────────────────────────────────────────────────────
 export interface PostMortem {
   readonly campaignId: string;
-  readonly metrics: { spend: number | null; budget: number | null; impressions: number | null; clicks: number | null; ctr: number | null; avgCpcClp: number | null; contacts: number | null; conversions: number | null; cpaClp: number | null };
+  readonly metrics: { spend: number | null; campaignTotalSpend: number | null; stopThreshold: number | null; budget: number | null; impressions: number | null; clicks: number | null; ctr: number | null; avgCpcClp: number | null; contacts: number | null; conversions: number | null; cpaClp: number | null };
   readonly biddingBefore: number | null; readonly biddingAfter: number | null; readonly biddingControlWorked: boolean | null;
   readonly trafficQuality: TrafficQuality;
   readonly keywordConcentration: readonly KeywordFinding[];
@@ -220,7 +227,7 @@ export function construirPostMortem(ev: EvidenciaExperimento): PostMortem {
   const restartRecommended = !problemaTargeting && ev.trackingValid && ev.landingValid && (ev.contacts ?? 0) > 0;
   return {
     campaignId: ev.campaignId,
-    metrics: { spend: ev.spend, budget: ev.experimentBudgetClp, impressions: ev.impressions, clicks: ev.clicks, ctr: ev.ctr, avgCpcClp: ev.avgCpcClp, contacts: ev.contacts, conversions: ev.conversions, cpaClp: cpa },
+    metrics: { spend: ev.spend, campaignTotalSpend: ev.campaignTotalSpendClp, stopThreshold: ev.zeroContactStopClp, budget: ev.experimentBudgetClp, impressions: ev.impressions, clicks: ev.clicks, ctr: ev.ctr, avgCpcClp: ev.avgCpcClp, contacts: ev.contacts, conversions: ev.conversions, cpaClp: cpa },
     biddingBefore: ev.cpcInicialClp, biddingAfter: ev.cpcPosteriorClp, biddingControlWorked: controlPujaFunciono(ev.cpcInicialClp, ev.cpcPosteriorClp),
     trafficQuality: calidad.quality, keywordConcentration, searchTermFindings: calidad.findings, searchTermPrivacy: privacy,
     devices: ev.devices, geos: ev.geos, networks: ev.networks,
@@ -281,14 +288,25 @@ export function construirRecomendacion(pm: PostMortem, aprendizajes: readonly Ap
   if (evitar.has(action)) why += ' (Se incorporan aprendizajes previos para no repetir configuraciones que ya fallaron.)';
 
   const humanApprovalRequired = !esAccionReductoraDeRiesgo(action);
-  const estimatedCostClp = action === 'PREPARE_EXPERIMENT_2' ? (pm.metrics.budget ?? null) : null;
+  // Costo de EJECUTAR esta acción. PREPARE_EXPERIMENT_2 sólo autoriza PLANIFICAR ⇒ 0 CLP de compromiso nuevo (el
+  // presupuesto real se define y autoriza recién en la decisión LAUNCH). NUNCA reutilizar el presupuesto histórico.
+  const estimatedCostClp = action === 'PREPARE_EXPERIMENT_2' ? 0 : null;
   return { action, why, evidence, confidence: pm.causalConfidence, expectedEffect, risk, estimatedCostClp, humanApprovalRequired, usedLearnings: used };
 }
 
 // ── Decision Pack ─────────────────────────────────────────────────────────────────────
-export interface DecisionPack { readonly decision: string; readonly reason: string; readonly proposedChanges: readonly string[]; readonly maxNewCommitmentClp: number | null; readonly expectedSampleClicks: string; readonly risk: string; readonly buttons: readonly ['APROBAR', 'RECHAZAR', 'AJUSTAR']; readonly humanApprovalRequired: true }
+export interface DecisionPack {
+  readonly decision: string; readonly reason: string; readonly proposedChanges: readonly string[];
+  readonly maxNewCommitmentClp: number | null;          // COMPROMISO NUEVO que autoriza ESTA decisión (PREPARE ⇒ 0)
+  readonly historicalCampaignBudgetClp: number | null;  // presupuesto del experimento ANTERIOR (contexto, no compromiso)
+  readonly historicalSpendClp: number | null;           // gasto TOTAL ya realizado en el experimento anterior
+  readonly providerWritesExpected: number;              // escrituras a Google que produce aprobar ESTA decisión (PREPARE ⇒ 0)
+  readonly expectedSampleClicks: string; readonly risk: string; readonly buttons: readonly ['APROBAR', 'RECHAZAR', 'AJUSTAR']; readonly humanApprovalRequired: true;
+}
 export function construirDecisionPack(pm: PostMortem, rec: Recomendacion): DecisionPack | null {
   if (!rec.humanApprovalRequired) return null;
+  const historicalCampaignBudgetClp = pm.metrics.budget ?? null;
+  const historicalSpendClp = pm.metrics.campaignTotalSpend ?? null;
   if (rec.action === 'PREPARE_EXPERIMENT_2') {
     return {
       decision: 'Preparar Experimento 2 (targeting más cualificado)', reason: rec.why,
@@ -299,11 +317,13 @@ export function construirDecisionPack(pm: PostMortem, rec: Recomendacion): Decis
         'Geo acotado al mercado objetivo.',
         'Presupuesto y stop de seguridad iguales o menores al experimento anterior.',
       ],
-      maxNewCommitmentClp: rec.estimatedCostClp, expectedSampleClicks: 'Menor volumen pero más cualificado; se define al aprobar presupuesto/CPC.',
+      // Aprobar PREPARE sólo autoriza que SOEC ARME el plan del Experimento 2: 0 compromiso nuevo, 0 escrituras a Google.
+      maxNewCommitmentClp: 0, historicalCampaignBudgetClp, historicalSpendClp, providerWritesExpected: 0,
+      expectedSampleClicks: 'Menor volumen pero más cualificado; se define al aprobar presupuesto/CPC (decisión LAUNCH).',
       risk: rec.risk, buttons: ['APROBAR', 'RECHAZAR', 'AJUSTAR'], humanApprovalRequired: true,
     };
   }
-  return { decision: `Acción propuesta: ${rec.action}`, reason: rec.why, proposedChanges: [rec.expectedEffect], maxNewCommitmentClp: rec.estimatedCostClp, expectedSampleClicks: '—', risk: rec.risk, buttons: ['APROBAR', 'RECHAZAR', 'AJUSTAR'], humanApprovalRequired: true };
+  return { decision: `Acción propuesta: ${rec.action}`, reason: rec.why, proposedChanges: [rec.expectedEffect], maxNewCommitmentClp: rec.estimatedCostClp, historicalCampaignBudgetClp, historicalSpendClp, providerWritesExpected: 0, expectedSampleClicks: '—', risk: rec.risk, buttons: ['APROBAR', 'RECHAZAR', 'AJUSTAR'], humanApprovalRequired: true };
 }
 
 // ── Eventos ────────────────────────────────────────────────────────────────────────────
@@ -313,7 +333,8 @@ export function detectarEventos(ev: EvidenciaExperimento, pm: PostMortem): Event
   if (ev.stopTriggered) out.push({ evento: 'STOP_TRIGGERED', outcome: 'AUTO_PAUSE', detalle: `Stop ${ev.stopRule ?? ''} disparado.` });
   if (ev.status === 'PAUSED') out.push({ evento: 'CAMPAIGN_PAUSED', outcome: 'RECOMMENDATION', detalle: 'Campaña en pausa.' });
   if (ev.periodoTerminado) out.push({ evento: 'CAMPAIGN_ENDED', outcome: 'RECOMMENDATION', detalle: 'El período del experimento terminó.' });
-  if ((ev.contacts ?? 0) === 0 && ev.spend != null && ev.spend >= ev.zeroContactStopClp) out.push({ evento: 'ZERO_CONTACT_SPEND_THRESHOLD', outcome: 'AUTO_PAUSE', detalle: `Gasto ${Math.round(ev.spend)} sin contactos.` });
+  // El stop de "cero contactos" se evalúa contra el gasto TOTAL de campaña (no el de la fase) vs. su umbral.
+  if ((ev.contacts ?? 0) === 0 && ev.campaignTotalSpendClp != null && ev.campaignTotalSpendClp >= ev.zeroContactStopClp) out.push({ evento: 'ZERO_CONTACT_SPEND_THRESHOLD', outcome: 'AUTO_PAUSE', detalle: `Gasto de campaña ${Math.round(ev.campaignTotalSpendClp)} ≥ stop ${Math.round(ev.zeroContactStopClp)} sin contactos.` });
   if ((ev.contacts ?? 0) > 0) out.push({ evento: 'FIRST_CONTACT', outcome: 'RECOMMENDATION', detalle: 'Hay al menos un contacto real.' });
   if ((ev.conversions ?? 0) > 0) out.push({ evento: 'CONVERSION_RECEIVED', outcome: 'RECOMMENDATION', detalle: 'Conversión registrada.' });
   for (const k of pm.keywordConcentration) out.push({ evento: 'KEYWORD_SPEND_CONCENTRATION', outcome: 'HUMAN_DECISION_REQUIRED', detalle: `${k.keyword} ~${Math.round(k.sharePct)}%.` });

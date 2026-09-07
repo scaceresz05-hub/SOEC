@@ -44,6 +44,7 @@ import { reconciliarBindings } from './campana/canary-reconciliation';
 import { correlacionarGrafo, consultasRecuperacion, type RecursosLeidos } from './campana/canary-provider-recovery';
 import { construirCampaignLive, construirLectorCampaignProvider, resolverFechasCampania, type ProviderCampaignData } from './campana/campaign-live';
 import { DirectorCycleService } from './autonomia-ads/director-cycle';
+import { DecisionService } from './autonomia-ads/decision-service';
 import { leerUltimoTick } from './campana/stop-monitor-composition';
 import { hashPlan } from './campana/plan-hash';
 import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
@@ -932,13 +933,51 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     envelopes: envelopeSvc, bindings: bindingSvc, diagnosis: diagnosisEvidence,
     clienteFactory: (o) => construirClienteEscrituraGoogleAds(process.env, o, googleAdsComp, {}),
   });
+  // Servicio de DECISIONES: MISMA fuente de verdad que el Director (deriva de `leerResultado`). 0 escrituras a Google.
+  const decisionSvc = new DecisionService(store, { leerResultado: (o) => directorCycle.leerResultado(o) });
+
   app.get('/medicion/director', async (req, reply) => {
     const { org } = real(req, 'autonomia-ads');
     if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
     const resultado = await directorCycle.leerResultado(org);
     const notificaciones = await directorCycle.leerNotificaciones(org);
     if (!resultado) return reply.send({ ok: false, error: 'NO_DIRECTOR_RESULT', message: 'SOEC está observando. Aún no hay un cierre de experimento analizado.', notificaciones });
-    return reply.send({ ok: true, campaignId: resultado.campaignId, campaignName: resultado.campaignName, status: resultado.status, createdAt: resultado.createdAt, ranBy: resultado.ranBy, ...resultado.analisis, notificaciones });
+    // `decision` = decisión VIGENTE del bucle (mismo SSOT/decisionId que ve la pestaña Decisiones). Si fue rechazada
+    // o resuelta, current puede ser null ⇒ Inicio no vuelve a pedir la misma decisión.
+    const estadoDec = await decisionSvc.estado(org);
+    return reply.send({ ok: true, campaignId: resultado.campaignId, campaignName: resultado.campaignName, status: resultado.status, createdAt: resultado.createdAt, ranBy: resultado.ranBy, ...resultado.analisis, decision: estadoDec.current, notificaciones });
+  });
+
+  // BUCLE DE DECISIÓN (SSOT): estado vigente + historial real. READ-ONLY (no dispara análisis, no escribe en Google).
+  app.get('/medicion/decisiones', async (req, reply) => {
+    const { org } = real(req, 'autonomia-ads');
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    return reply.send({ ok: true, ...(await decisionSvc.estado(org)) });
+  });
+  // APROBAR / RECHAZAR / AJUSTAR — 0 escrituras a Google (sólo append al event store). Aprobar PREPARE genera LAUNCH.
+  app.post('/medicion/decisiones/aprobar', async (req, reply) => {
+    const { org, ctx } = real(req, 'autonomia-ads');
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    const { decisionId, planHash } = (req.body ?? {}) as { decisionId?: string; planHash?: string };
+    if (!decisionId || !planHash) return reply.code(400).send({ ok: false, error: 'PARAMS' });
+    const r = await decisionSvc.aprobar(org, decisionId, planHash, String(ctx.actor));
+    return reply.code(r.ok ? 201 : 409).send(r.ok ? { ok: true, generated: r.generated ?? null } : { ok: false, error: r.motivo });
+  });
+  app.post('/medicion/decisiones/rechazar', async (req, reply) => {
+    const { org, ctx } = real(req, 'autonomia-ads');
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    const { decisionId, reason } = (req.body ?? {}) as { decisionId?: string; reason?: string };
+    if (!decisionId) return reply.code(400).send({ ok: false, error: 'PARAMS' });
+    const r = await decisionSvc.rechazar(org, decisionId, String(ctx.actor), reason);
+    return reply.code(r.ok ? 201 : 409).send(r.ok ? { ok: true } : { ok: false, error: r.motivo });
+  });
+  app.post('/medicion/decisiones/ajustar', async (req, reply) => {
+    const { org, ctx } = real(req, 'autonomia-ads');
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
+    const { decisionId, changes, note } = (req.body ?? {}) as { decisionId?: string; changes?: Record<string, unknown>; note?: string };
+    if (!decisionId) return reply.code(400).send({ ok: false, error: 'PARAMS' });
+    const r = await decisionSvc.ajustar(org, decisionId, changes ?? {}, String(ctx.actor), note);
+    return reply.code(r.ok ? 201 : 409).send(r.ok ? { ok: true, generated: r.generated ?? null } : { ok: false, error: r.motivo });
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {
