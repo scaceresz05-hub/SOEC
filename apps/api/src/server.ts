@@ -18,7 +18,9 @@ import { crearDepsStopMonitor, construirLectorMetricasCampania } from './campana
 import { construirAdapterPausaGoogleAds, construirClienteEscrituraGoogleAds } from './campana/google-ads-write-runtime';
 import { EnvelopeService } from './campana/envelope-service';
 import { ResourceBindingService } from './campana/resource-binding';
+import { DiagnosisEvidenceService } from './campana/diagnosis-evidence-service';
 import { fechaCalendario } from './campana/campaign-live';
+import { DirectorCycleService, iniciarDirectorCycle } from './autonomia-ads/director-cycle';
 import { ejecutarBootstrap } from '@soec/identity';
 import { DeterministicIntelligenceProvider } from '@soec/intelligence';
 import { buildApp } from './app';
@@ -162,6 +164,22 @@ async function main(): Promise<void> {
     })();
   } else {
     console.log(JSON.stringify({ stopMonitor: 'disabled' }));
+  }
+
+  // DIRECTOR AUTÓNOMO: ciclo SERVER-SIDE (no depende de la UI). En cada ciclo lee evidencia READ-ONLY, y al cerrar
+  // un experimento (stop/pausa/fin) PERSISTE post-mortem + learning + decision pack + notificación (idempotente).
+  // 0 escrituras a Google. Cadencia 5 min + una corrida inmediata al boot (el resultado nace antes de cualquier UI).
+  if (process.env.SOEC_DIRECTOR_CYCLE_ENABLED !== 'false') {
+    const directorCycle = new DirectorCycleService(new PgEventStore(pool), {
+      envelopes: new EnvelopeService(new PgEventStore(pool)),
+      bindings: new ResourceBindingService(new PgEventStore(pool)),
+      diagnosis: new DiagnosisEvidenceService(new PgEventStore(pool)),
+      clienteFactory: (o) => construirClienteEscrituraGoogleAds(process.env, o, compGoogleAds, {}),
+    });
+    iniciarDirectorCycle(directorCycle, 'org-smileflow', 5 * 60_000, (e) => console.log(JSON.stringify(e)));
+    console.log(JSON.stringify({ directorCycle: 'started', org: 'org-smileflow' }));
+  } else {
+    console.log(JSON.stringify({ directorCycle: 'disabled' }));
   }
 }
 

@@ -17,17 +17,21 @@ interface DecisionPack { decision: string; reason: string; proposedChanges: stri
 interface PostMortem {
   metrics: { spend: number | null; budget: number | null; impressions: number | null; clicks: number | null; ctr: number | null; avgCpcClp: number | null; contacts: number | null; conversions: number | null; cpaClp: number | null };
   biddingBefore: number | null; biddingAfter: number | null; biddingControlWorked: boolean | null;
-  trafficQuality: string; gastoComercialPct: number | null;
-  concentration: { findings: { termino: string; sharePct: number; porque: string }[]; gastoNoDivulgadoPct: number | null };
-  sample: { confidence: string; suficienteParaConcluirNoConvierte: boolean; porque: string };
-  diagnosis: { factor: string; evidencia: string; confianza: string }[];
+  trafficQuality: string;
+  keywordConcentration: { keyword: string; matchType: string | null; sharePct: number; gasto: number }[];
+  searchTermFindings: { termino: string; intent: string; gasto: number | null; shareCampaignPct: number | null }[];
+  searchTermPrivacy: { reportedSpend: number | null; unreportedSpend: number | null; unreportedPct: number | null; epistemic: string };
+  sample: { confidence: string; suficienteParaConcluirNoConvierte: boolean; porque: string }; causalConfidence: string;
+  diagnosis: { factor: string; evidencia: string; confianza: string; epistemic: string }[];
   stopReason: string | null; restartRecommended: boolean;
 }
 interface DirectorResp {
-  ok: boolean; error?: string; message?: string; campaignId?: string; campaignName?: string | null; status?: string | null;
+  ok: boolean; error?: string; message?: string; campaignId?: string; campaignName?: string | null; status?: string | null; createdAt?: string;
   postMortem?: PostMortem; recomendacion?: Recomendacion; decisionPack?: DecisionPack | null;
   eventos?: { evento: string; outcome: string; detalle: string }[];
+  notificaciones?: { at: string; tipo: string; mensaje: string }[];
 }
+const NO_COMERCIAL = new Set(['NAVIGATIONAL', 'IRRELEVANT', 'LOW_COMMERCIAL_INTENT']);
 
 const ACCION_ES: Record<string, string> = {
   KEEP_RUNNING: 'Mantener la campaña', PAUSE: 'Pausar', DO_NOT_RESTART: 'No reanudar', PREPARE_EXPERIMENT_2: 'Preparar Experimento 2',
@@ -64,8 +68,10 @@ export function MiDirector({ org }: { org: string }): React.ReactElement {
   const pm = d.postMortem; const rec = d.recomendacion; const m = pm.metrics;
   const recTono: Tono = rec.humanApprovalRequired ? 'warn' : 'ok';
 
+  const notif = (d.notificaciones ?? []).find((n) => n.tipo === 'DECISION_REQUIRED');
   return (
     <div className="live">
+      {notif && <Callout tono="warn" ico="🔔">{notif.mensaje}</Callout>}
       {/* SOEC RECOMIENDA AHORA — recomendación prioritaria, arriba de todo */}
       <div className="livehead">
         <div>
@@ -89,14 +95,15 @@ export function MiDirector({ org }: { org: string }): React.ReactElement {
         {pm.stopReason && <p className="stopmsg">Motivo: {pm.stopReason === 'STOP_ZERO_CONVERSION' ? `Stop ${clp(pm.metrics.spend)} sin contactos.` : pm.stopReason}</p>}
       </div>
 
-      {/* Qué aprendimos */}
+      {/* Qué aprendimos — KEYWORD, SEARCH TERM y PRIVACIDAD por separado (nunca se confunden). */}
       <div className="protcard">
         <div className="stophead"><strong>Qué aprendimos</strong></div>
         <ul className="stoplist">
           {pm.biddingControlWorked === true && <li className="on">✓ El control de CPC funcionó: {clp(pm.biddingBefore)} → ~{clp(pm.biddingAfter)}.</li>}
-          <li>Tráfico: calidad <b>{CALIDAD_ES[pm.trafficQuality] ?? pm.trafficQuality}</b>{pm.gastoComercialPct != null ? ` · ${Math.round(pm.gastoComercialPct * 100)}% del gasto en términos comerciales` : ''}.</li>
-          {pm.concentration.findings.map((f, i) => <li key={i} className="on">⚠ «{f.termino}» concentró {f.sharePct}% del gasto sin contactos.</li>)}
-          {pm.concentration.gastoNoDivulgadoPct != null && pm.concentration.gastoNoDivulgadoPct > 0 && <li>{pm.concentration.gastoNoDivulgadoPct}% del gasto está en términos no divulgados por privacidad de Google.</li>}
+          {pm.keywordConcentration.map((k, i) => <li key={`k${i}`} className="on">⚠ La <b>keyword</b> «{k.keyword}»{k.matchType ? ` (${k.matchType})` : ''} concentró {Math.round(k.sharePct)}% del gasto sin contactos.</li>)}
+          {pm.searchTermFindings.filter((t) => NO_COMERCIAL.has(t.intent)).map((t, i) => <li key={`t${i}`}>El <b>término</b> visible «{t.termino}» = {t.intent}{t.gasto != null ? ` (${clp(t.gasto)}${t.shareCampaignPct != null ? `, ${t.shareCampaignPct}% del gasto` : ''})` : ''}.</li>)}
+          {pm.searchTermPrivacy.unreportedPct != null && pm.searchTermPrivacy.unreportedPct > 0 && <li>{pm.searchTermPrivacy.unreportedPct}% del gasto está en términos <b>no divulgados</b> por privacidad de Google (desconocido a nivel término).</li>}
+          <li>Tráfico visible: calidad <b>{CALIDAD_ES[pm.trafficQuality] ?? pm.trafficQuality}</b> · confianza causal {pm.causalConfidence}.</li>
           <li>{pm.sample.porque}</li>
         </ul>
       </div>

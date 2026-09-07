@@ -43,8 +43,7 @@ import { ejecutarCanaryAtomico, envelopeYaEjecutado, TRANSPORT_ATOMICO } from '.
 import { reconciliarBindings } from './campana/canary-reconciliation';
 import { correlacionarGrafo, consultasRecuperacion, type RecursosLeidos } from './campana/canary-provider-recovery';
 import { construirCampaignLive, construirLectorCampaignProvider, resolverFechasCampania, type ProviderCampaignData } from './campana/campaign-live';
-import { analizarExperimento, type EvidenciaExperimento, type TermSpend } from './autonomia-ads/director-postmortem';
-import { ExperimentMemoryService } from './autonomia-ads/experiment-memory';
+import { DirectorCycleService } from './autonomia-ads/director-cycle';
 import { leerUltimoTick } from './campana/stop-monitor-composition';
 import { hashPlan } from './campana/plan-hash';
 import type { GoogleAdsWriteLog } from './campana/google-ads-mutate-http';
@@ -927,81 +926,19 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     return reply.send({ ...model, providerBindingsCount });
   });
 
-  // ── DIRECTOR AUTÓNOMO V1: post-mortem + recomendación + decision pack del experimento VIGENTE ────────────────
-  // READ-ONLY sobre Google (nunca escribe). El diagnóstico sale del MOTOR (director-postmortem), no hardcodeado.
-  // Aísla la histórica: sólo usa la campaña del binding vigente y sus términos (filtrados por nombre de campaña).
+  // ── DIRECTOR AUTÓNOMO V1 — el ciclo corre SERVER-SIDE (loop del servidor, iniciarDirectorCycle en server.ts).
+  // Este endpoint SÓLO LEE el resultado ya PERSISTIDO: la UI nunca dispara el análisis. READ-ONLY.
+  const directorCycle = new DirectorCycleService(store, {
+    envelopes: envelopeSvc, bindings: bindingSvc, diagnosis: diagnosisEvidence,
+    clienteFactory: (o) => construirClienteEscrituraGoogleAds(process.env, o, googleAdsComp, {}),
+  });
   app.get('/medicion/director', async (req, reply) => {
-    const { ctx: c, org } = real(req, 'autonomia-ads');
+    const { org } = real(req, 'autonomia-ads');
     if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ ok: false, error: 'NO_AUTORIZADO' });
-    const envelope = await envelopeSvc.leerUltimo(org);
-    const todosBindings = envelope ? await bindingSvc.listar(org) : [];
-    const campaignBinding = envelope ? todosBindings.find((b) => b.envelopeId === envelope.id && b.entityType === 'campaign') ?? null : null;
-    if (!envelope || !campaignBinding?.providerResourceId) return reply.send({ ok: false, error: 'NO_ACTIVE_EXPERIMENT', message: 'No hay un experimento vigente vinculado. SOEC está observando.' });
-    const resourceName = campaignBinding.providerResourceId;
-    const campaignId = resourceName.match(/campaigns\/(\d+)$/)?.[1] ?? '';
-    const customerId = resourceName.match(/^customers\/(\d+)\//)?.[1] ?? null;
-    const now = new Date().toISOString();
-    const cliente = construirClienteEscrituraGoogleAds(process.env, org, googleAdsComp, {});
-    let provider: ProviderCampaignData = { core: null, dates: null, metrics: null, evolution: [] };
-    const ventana = { desde: new Date(Date.parse(now) - 30 * 86_400_000).toISOString().slice(0, 10), hasta: now.slice(0, 10) };
-    if (cliente && customerId && campaignId) { try { provider = await construirLectorCampaignProvider((cid, q) => cliente.buscar(cid, q))(customerId, campaignId, ventana); } catch { /* fail-soft ⇒ evidencia UNKNOWN */ } }
-    // Contactos first-party + términos de búsqueda CON gasto, AISLADOS a la campaña vigente (por nombre).
-    const obs = new ObservacionService(store, {} as never);
-    const nombreVigente = provider.core?.name ?? null;
-    let contacts = 0;
-    const terminosMap = new Map<string, { impresiones: number; clics: number; gasto: number; gastoVisto: boolean }>();
-    for (const id of await obs.listarIds(c)) {
-      const st = await obs.cargar(c, id); const d = st.datos; const p = d?.provenanciaReal;
-      if (d?.naturaleza !== 'REAL' || !p) continue;
-      if (p.provider === 'smileflow-growth' && !p.diagnostico && p.eventName === 'lead_created') { contacts += 1; continue; }
-      if (p.eventName === 'ads_search_term' && p.utmContent && (nombreVigente == null || p.utmCampaign === nombreVigente)) {
-        const acc = terminosMap.get(p.utmContent) ?? { impresiones: 0, clics: 0, gasto: 0, gastoVisto: false };
-        if (d.metrica === 'search_term_impressions') acc.impresiones += d.valor ?? 0;
-        else if (d.metrica === 'search_term_clicks') acc.clics += d.valor ?? 0;
-        else if (d.metrica === 'search_term_cost') { acc.gasto += d.valor ?? 0; acc.gastoVisto = true; }
-        terminosMap.set(p.utmContent, acc);
-      }
-    }
-    const terminos: TermSpend[] = [...terminosMap.entries()].map(([termino, v]) => ({ termino, impresiones: v.impresiones, clics: v.clics, gasto: v.gastoVisto ? v.gasto : null }));
-    const readiness = await diagnosisEvidence.leerUltima(org);
-    // CPC antes/después desde la evolución diaria (primer vs último día con clics) — control de puja real, o null.
-    const dias = provider.evolution.filter((e) => e.clicks > 0);
-    const cpcDe = (e: { spendClp: number; clicks: number }): number => e.spendClp / e.clicks;
-    const cpcInicialClp = dias.length >= 2 ? Math.round(cpcDe(dias[0]!)) : null;
-    const cpcPosteriorClp = dias.length >= 2 ? Math.round(cpcDe(dias[dias.length - 1]!)) : (provider.metrics && provider.metrics.clicks ? Math.round((provider.metrics.spendClp ?? 0) / provider.metrics.clicks) : null);
-    const spend = provider.metrics?.spendClp ?? null;
-    const clicks = provider.metrics?.clicks ?? null;
-    const zeroStopClp = envelope.maxSpendWithoutContact;
-    const reEnabled = (id: string): boolean => envelope.stopRules.find((s) => s.id === id)?.enabled !== false;
-    const stopZeroTriggered = reEnabled('STOP_ZERO_CONVERSION') && contacts === 0 && spend != null && spend >= zeroStopClp;
-    const periodoTerminado = !!envelope.expiresAt && now >= envelope.expiresAt;
-    const evidencia: EvidenciaExperimento = {
-      campaignId, status: provider.core?.status ?? null, periodoTerminado,
-      spend, experimentBudgetClp: envelope.experimentBudget, impressions: provider.metrics?.impressions ?? null,
-      clicks, contacts, conversions: provider.metrics?.conversions ?? null,
-      avgCpcClp: clicks && spend != null ? Math.round(spend / clicks) : null,
-      ctr: provider.metrics && provider.metrics.impressions ? Math.round((provider.metrics.clicks ?? 0) / provider.metrics.impressions * 1000) / 10 : null,
-      terminos, trackingValid: readiness?.firstPartyTracking?.status === 'PASS', landingValid: readiness?.landing?.status === 'PASS',
-      zeroContactStopClp: zeroStopClp, stopTriggered: stopZeroTriggered, stopRule: stopZeroTriggered ? 'STOP_ZERO_CONVERSION' : null,
-      cpcInicialClp, cpcPosteriorClp,
-    };
-    const memoria = new ExperimentMemoryService(store);
-    const aprendizajes = await memoria.aprendizajesPrevios(org);
-    const analisis = analizarExperimento(evidencia, aprendizajes);
-    // AUTONOMÍA: si el experimento cerró (stop/periodo), persistir su aprendizaje (idempotente, sin depender de la UI).
-    if (evidencia.stopTriggered || periodoTerminado) {
-      const experimentId = `${campaignId}:${evidencia.stopRule ?? 'ended'}`;
-      await memoria.registrar(org, {
-        experimentId, campaignId, at: now, hypothesis: null,
-        configuration: { experimentBudgetClp: envelope.experimentBudget, cpcCap: cpcPosteriorClp },
-        results: { spend, clicks, contacts, conversions: evidencia.conversions, avgCpc: evidencia.avgCpcClp },
-        stopReason: evidencia.stopRule, postmortemSummary: `${analisis.postMortem.trafficQuality} · ${analisis.recomendacion.action}`,
-        learning: analisis.postMortem.diagnosis.map((d) => `${d.factor}: ${d.evidencia}`).join(' '),
-        nextRecommendation: analisis.recomendacion.action,
-        avoidAction: analisis.postMortem.trafficQuality === 'POOR' || analisis.postMortem.trafficQuality === 'MIXED' ? 'KEEP_RUNNING' : null,
-      }).catch(() => undefined);
-    }
-    return reply.send({ ok: true, campaignId, campaignName: nombreVigente, status: evidencia.status, ...analisis });
+    const resultado = await directorCycle.leerResultado(org);
+    const notificaciones = await directorCycle.leerNotificaciones(org);
+    if (!resultado) return reply.send({ ok: false, error: 'NO_DIRECTOR_RESULT', message: 'SOEC está observando. Aún no hay un cierre de experimento analizado.', notificaciones });
+    return reply.send({ ok: true, campaignId: resultado.campaignId, campaignName: resultado.campaignName, status: resultado.status, createdAt: resultado.createdAt, ranBy: resultado.ranBy, ...resultado.analisis, notificaciones });
   });
 
   app.post('/medicion/preparar', async (_req, reply) => {
