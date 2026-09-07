@@ -21,6 +21,7 @@ import { ResourceBindingService } from './campana/resource-binding';
 import { DiagnosisEvidenceService } from './campana/diagnosis-evidence-service';
 import { fechaCalendario } from './campana/campaign-live';
 import { DirectorCycleService, iniciarDirectorCycle } from './autonomia-ads/director-cycle';
+import { DecisionService } from './autonomia-ads/decision-service';
 import { ejecutarBootstrap } from '@soec/identity';
 import { DeterministicIntelligenceProvider } from '@soec/intelligence';
 import { buildApp } from './app';
@@ -178,6 +179,17 @@ async function main(): Promise<void> {
     });
     iniciarDirectorCycle(directorCycle, 'org-smileflow', 5 * 60_000, (e) => console.log(JSON.stringify(e)));
     console.log(JSON.stringify({ directorCycle: 'started', org: 'org-smileflow' }));
+    // Observabilidad del BUCLE DE DECISIÓN al boot (READ-ONLY, mismo SSOT que la UI): decisión vigente + su semántica
+    // financiera. No dispara análisis ni escribe en Google; sólo lee el resultado ya persistido del ciclo.
+    void (async (): Promise<void> => {
+      try {
+        const dsvc = new DecisionService(new PgEventStore(pool), { leerResultado: (o) => directorCycle.leerResultado(o) });
+        const est = await dsvc.estado('org-smileflow'); const c = est.current;
+        console.log(JSON.stringify({ decisionProbe: c
+          ? { decisionId: c.decisionId, type: c.decisionType, status: c.decisionStatus, financialCommitmentClp: c.financialCommitmentClp, providerWritesExpected: c.providerWritesExpected, historicalBudget: c.historicalCampaignBudgetClp, historicalSpend: c.historicalSpendClp, confidence: c.confidence, historyLen: est.history.length }
+          : { current: null, historyLen: est.history.length } }));
+      } catch (e) { console.log(JSON.stringify({ decisionProbe: 'error', error: e instanceof Error ? e.message : String(e) })); }
+    })();
   } else {
     console.log(JSON.stringify({ directorCycle: 'disabled' }));
   }
