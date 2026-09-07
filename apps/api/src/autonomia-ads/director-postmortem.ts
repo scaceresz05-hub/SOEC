@@ -45,6 +45,13 @@ export interface TermSpend { readonly termino: string; readonly impresiones: num
 export interface KeywordSpend { readonly keyword: string; readonly matchType: string | null; readonly impresiones: number; readonly clics: number; readonly gasto: number | null; readonly conversions: number | null }
 /** Evidencia por dimensión (device/geo/network): fila con métricas reales. */
 export interface DimRow { readonly clave: string; readonly impresiones: number; readonly clics: number; readonly gasto: number | null; readonly conversions: number | null }
+/** Fase de la campaña (cambio de estrategia de puja). Los números salen de GAQL scopeado a la ventana de la fase. */
+export interface PhaseInfo {
+  readonly label: string; readonly startAt: string | null; readonly endAt: string | null;
+  readonly biddingStrategy: string | null; readonly maxCpc: number | null;
+  readonly spend: number | null; readonly impressions: number | null; readonly clicks: number | null; readonly avgCpcClp: number | null;
+}
+export type PhaseSegmentation = 'SEGMENTED' | 'UNKNOWN';
 
 export interface EvidenciaExperimento {
   readonly campaignId: string;
@@ -70,6 +77,9 @@ export interface EvidenciaExperimento {
   readonly stopRule: string | null;
   readonly cpcInicialClp: number | null;
   readonly cpcPosteriorClp: number | null;
+  readonly phases: readonly PhaseInfo[];
+  readonly phaseSegmentation: PhaseSegmentation;
+  readonly analyzedPhaseLabel: string | null;   // qué fase representa esta evidencia (la relevante/post-cambio)
   readonly lexico?: IntentLexicon;
 }
 
@@ -195,6 +205,7 @@ export interface PostMortem {
   readonly sample: AnalisisMuestra; readonly causalConfidence: SampleConfidence;
   readonly diagnosis: readonly FactorCausal[];
   readonly stopReason: string | null; readonly restartRecommended: boolean;
+  readonly phases: readonly PhaseInfo[]; readonly phaseSegmentation: PhaseSegmentation; readonly analyzedPhaseLabel: string | null;
 }
 
 export function construirPostMortem(ev: EvidenciaExperimento): PostMortem {
@@ -215,6 +226,7 @@ export function construirPostMortem(ev: EvidenciaExperimento): PostMortem {
     devices: ev.devices, geos: ev.geos, networks: ev.networks,
     sample, causalConfidence, diagnosis,
     stopReason: ev.stopTriggered ? ev.stopRule : null, restartRecommended,
+    phases: ev.phases, phaseSegmentation: ev.phaseSegmentation, analyzedPhaseLabel: ev.analyzedPhaseLabel,
   };
 }
 

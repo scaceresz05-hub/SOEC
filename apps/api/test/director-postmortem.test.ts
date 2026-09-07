@@ -25,6 +25,11 @@ const ev15 = (over: Partial<EvidenciaExperimento> = {}): EvidenciaExperimento =>
   trackingValid: true, landingValid: true, zeroContactStopClp: 7500,
   stopTriggered: true, stopRule: 'STOP_ZERO_CONVERSION',
   cpcInicialClp: 4759, cpcPosteriorClp: 750,
+  phases: [
+    { label: 'PHASE_1', startAt: '2026-08-28', endAt: '2026-09-02', biddingStrategy: 'PREVIOUS', maxCpc: null, spend: 4759, impressions: 112, clicks: 1, avgCpcClp: 4759 },
+    { label: 'PHASE_2', startAt: '2026-09-03', endAt: '2026-09-06', biddingStrategy: 'TARGET_SPEND', maxCpc: 900, spend: 3001, impressions: 48, clicks: 4, avgCpcClp: 750 },
+  ],
+  phaseSegmentation: 'SEGMENTED', analyzedPhaseLabel: 'PHASE_2',
   ...over,
 });
 
@@ -53,6 +58,11 @@ describe('§15 — el motor reproduce el diagnóstico real separando keyword/ter
     expect(decisionPack).not.toBeNull();
     // la recomendación NO atribuye el gasto oculto al término visible
     expect(rec.why).not.toMatch(/dentidesk[^.]*80/i);
+    // fases: 2 fases segmentadas; el análisis usa la fase POST-cambio
+    expect(pm.phaseSegmentation).toBe('SEGMENTED');
+    expect(pm.phases).toHaveLength(2);
+    expect(pm.analyzedPhaseLabel).toBe('PHASE_2');
+    expect(pm.phases[1]!.spend).toBe(3001);
   });
 });
 

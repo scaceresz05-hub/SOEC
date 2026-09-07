@@ -7,24 +7,69 @@
  * campo no soportado en la versión), esa dimensión queda vacía ⇒ el motor la trata como UNKNOWN (no se inventa).
  * NINGÚN write: sólo GAQL searchStream filtrado por campaign.id.
  */
-import type { KeywordSpend, DimRow } from './director-postmortem';
+import type { KeywordSpend, DimRow, TermSpend } from './director-postmortem';
 
 const n = (v: unknown): number => Number(v ?? 0);
 const clp = (m: unknown): number => n(m) / 1_000_000;
 
 export interface EvidenciaGoogle {
   readonly keywords: readonly KeywordSpend[];
+  readonly searchTerms: readonly TermSpend[];   // search_term_view CON gasto real (privacidad respetada)
   readonly devices: readonly DimRow[];
   readonly geos: readonly DimRow[];
   readonly networks: readonly DimRow[];
 }
 
+/** Cambio de estrategia de puja detectado en el historial de cambios de Google (durable, read-only). */
+export interface CambioBidding { readonly at: string; readonly biddingStrategy: string | null }
+
 type Buscar = (customerId: string, query: string) => Promise<Array<Record<string, unknown>>>;
+
+/**
+ * Punto(s) de cambio de estrategia de puja desde `change_event` (change history, READ-ONLY, fail-soft). Sólo cambios
+ * a nivel CAMPAIGN cuyo changed_fields toca la estrategia de puja. Devuelve datetimes reales (no hardcodeados);
+ * si Google no expone el cambio ⇒ [] (el caller marca la fase como UNKNOWN, sin mezclar toda la campaña).
+ */
+export function construirLectorCambiosBidding(buscar: Buscar): (customerId: string, campaignId: string, ventanaDias: number) => Promise<CambioBidding[]> {
+  return async (customerId, campaignId, ventanaDias) => {
+    const during = ventanaDias <= 14 ? 'LAST_14_DAYS' : 'LAST_30_DAYS';
+    try {
+      const rows = await buscar(customerId, `SELECT change_event.change_date_time, change_event.changed_fields, change_event.change_resource_type, change_event.new_resource FROM change_event WHERE change_event.change_date_time DURING ${during} AND change_event.campaign = 'customers/${customerId}/campaigns/${campaignId}' ORDER BY change_event.change_date_time DESC LIMIT 200`);
+      const out: CambioBidding[] = [];
+      for (const r of rows) {
+        const ce = (r as { changeEvent?: { changeDateTime?: string; changedFields?: string; newResource?: { campaign?: { biddingStrategyType?: string; targetSpend?: unknown; maximizeConversions?: unknown } } } }).changeEvent;
+        if (!ce?.changeDateTime) continue;
+        const campos = String(ce.changedFields ?? '');
+        // SÓLO cambios de estrategia de puja (no status/pausa): el changed_fields debe mencionar la puja.
+        const tocaPuja = /bidding_strategy_type|target_spend|maximize_conversions|maximize_clicks|target_cpa|target_roas|target_cpm|manual_cpc|cpc_bid_ceiling/i.test(campos);
+        if (!tocaPuja) continue;
+        out.push({ at: ce.changeDateTime, biddingStrategy: ce.newResource?.campaign?.biddingStrategyType ?? null });
+      }
+      return out.slice(0, 20);
+    } catch { return []; }
+  };
+}
 
 export function construirLectorEvidenciaGoogle(buscar: Buscar): (customerId: string, campaignId: string, ventana: { readonly desde: string; readonly hasta: string }) => Promise<EvidenciaGoogle> {
   return async (customerId, campaignId, ventana) => {
     const wc = `campaign.id = ${campaignId} AND segments.date BETWEEN '${ventana.desde}' AND '${ventana.hasta}'`;
-    let keywords: KeywordSpend[] = []; let devices: DimRow[] = []; let geos: DimRow[] = []; let networks: DimRow[] = [];
+    let keywords: KeywordSpend[] = []; let searchTerms: TermSpend[] = []; let devices: DimRow[] = []; let geos: DimRow[] = []; let networks: DimRow[] = [];
+
+    // SEARCH TERMS (lo tecleado) CON gasto real, directo del proveedor para ESTA ventana. Respeta la privacidad de
+    // Google: sólo devuelve términos divulgados (los ocultos no aparecen ⇒ el caller los contabiliza como no divulgados).
+    try {
+      const rows = await buscar(customerId, `SELECT search_term_view.search_term, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM search_term_view WHERE ${wc}`);
+      const agg = new Map<string, { impresiones: number; clics: number; gasto: number }>();
+      for (const r of rows) {
+        const term = (r as { searchTermView?: { searchTerm?: string } }).searchTermView?.searchTerm ?? '';
+        if (!term) continue;
+        const mm = (r as { metrics?: Record<string, unknown> }).metrics ?? {};
+        const acc = agg.get(term) ?? { impresiones: 0, clics: 0, gasto: 0 };
+        acc.impresiones += n(mm.impressions); acc.clics += n(mm.clicks); acc.gasto += clp(mm.costMicros);
+        agg.set(term, acc);
+      }
+      searchTerms = [...agg.entries()].map(([termino, v]) => ({ termino, impresiones: v.impresiones, clics: v.clics, gasto: v.gasto }));
+    } catch { /* fail-soft ⇒ sin términos visibles del proveedor (el gasto queda no divulgado) */ }
 
     // KEYWORD (lo pujado): keyword_view expone el criterio de keyword con métricas. Fail-soft.
     try {
@@ -58,6 +103,6 @@ export function construirLectorEvidenciaGoogle(buscar: Buscar): (customerId: str
     try { networks = await dim(`SELECT segments.ad_network_type, metrics.impressions, metrics.clicks, metrics.cost_micros FROM campaign WHERE ${wc}`, (r) => String((r as { segments?: { adNetworkType?: unknown } }).segments?.adNetworkType ?? '')); } catch { /* fail-soft */ }
     try { geos = await dim(`SELECT geographic_view.country_criterion_id, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM geographic_view WHERE ${wc}`, (r) => `geo:${String((r as { geographicView?: { countryCriterionId?: unknown } }).geographicView?.countryCriterionId ?? '')}`); } catch { /* fail-soft */ }
 
-    return { keywords, devices, geos, networks };
+    return { keywords, searchTerms, devices, geos, networks };
   };
 }
