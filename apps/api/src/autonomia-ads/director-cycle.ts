@@ -131,7 +131,7 @@ export class DirectorCycleService {
    * Un ciclo autónomo. Arma evidencia, analiza y —si el experimento CERRÓ— persiste resultado+learning+notificación
    * (idempotente por experimentId). Devuelve el análisis (o null si no hay campaña). NO escribe en Google.
    */
-  async correrCiclo(org: string, ranBy: 'scheduler' | 'endpoint' = 'scheduler'): Promise<{ analisis: AnalisisDirector; persistido: boolean } | null> {
+  async correrCiclo(org: string, ranBy: 'scheduler' | 'endpoint' = 'scheduler'): Promise<{ analisis: AnalisisDirector; persistido: boolean; resumen: Record<string, unknown> } | null> {
     const armado = await this.armarEvidencia(org);
     if (!armado) return null;
     const { evidencia, campaignName, experimentId } = armado;
@@ -139,12 +139,13 @@ export class DirectorCycleService {
     const aprendizajes = await memoria.aprendizajesPrevios(org, experimentId);
     const analisis = analizarExperimento(evidencia, aprendizajes);
     const cerrado = evidencia.stopTriggered || evidencia.periodoTerminado || evidencia.status === 'PAUSED';
-    if (!cerrado) return { analisis, persistido: false };
+    const resumen = { status: evidencia.status, spend: evidencia.spend, clicks: evidencia.clicks, contacts: evidencia.contacts, keywords: evidencia.keywords.length, terminos: evidencia.terminos.length, stopTriggered: evidencia.stopTriggered, cerrado, experimentId };
+    if (!cerrado) return { analisis, persistido: false, resumen };
 
     const c = this.ctx(org); const now = this.ahora();
     // Idempotencia: si ya hay un resultado persistido para este experimentId, no duplicar (conserva createdAt).
     const previo = await this.leerResultado(org);
-    if (previo && previo.experimentId === experimentId) return { analisis, persistido: false };
+    if (previo && previo.experimentId === experimentId) return { analisis, persistido: false, resumen };
 
     const resultado: DirectorResultado = { experimentId, campaignId: evidencia.campaignId, campaignName, status: evidencia.status, createdAt: now, analisis, ranBy };
     const sid = directorResultStreamId(org);
@@ -171,13 +172,13 @@ export class DirectorCycleService {
         await this.store.append(c, nsid, nprev.length, [{ type: EVENTO_DIRECTOR_NOTIF, payload: notif, attribution: ATR, occurredAt: now }]).catch(() => undefined);
       }
     }
-    return { analisis, persistido: true };
+    return { analisis, persistido: true, resumen };
   }
 }
 
 /** Arranca el ciclo del director en el loop del servidor (setInterval + una corrida inmediata al boot). */
 export function iniciarDirectorCycle(svc: DirectorCycleService, org: string, intervaloMs: number, log?: (e: unknown) => void): { detener: () => void } {
-  const tick = async (): Promise<void> => { try { const r = await svc.correrCiclo(org, 'scheduler'); log?.({ directorCycle: 'tick', org, persistido: r?.persistido ?? false, hayCampania: r !== null }); } catch (e) { log?.({ directorCycle: 'error', org, error: e instanceof Error ? e.message : String(e) }); } };
+  const tick = async (): Promise<void> => { try { const r = await svc.correrCiclo(org, 'scheduler'); log?.({ directorCycle: 'tick', org, persistido: r?.persistido ?? false, hayCampania: r !== null, resumen: r?.resumen ?? null }); } catch (e) { log?.({ directorCycle: 'error', org, error: e instanceof Error ? e.message : String(e) }); } };
   void tick(); // corrida inmediata: el resultado nace en el boot, ANTES de cualquier lectura de la UI
   const timer = setInterval(() => void tick(), intervaloMs);
   if (typeof timer === 'object' && timer && 'unref' in timer) (timer as { unref: () => void }).unref();
