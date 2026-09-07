@@ -180,8 +180,9 @@ async function main(): Promise<void> {
     iniciarDirectorCycle(directorCycle, 'org-smileflow', 5 * 60_000, (e) => console.log(JSON.stringify(e)));
     console.log(JSON.stringify({ directorCycle: 'started', org: 'org-smileflow' }));
     // Observabilidad del BUCLE DE DECISIÓN al boot (READ-ONLY, mismo SSOT que la UI): decisión vigente + su semántica
-    // financiera. No dispara análisis ni escribe en Google; sólo lee el resultado ya persistido del ciclo.
-    void (async (): Promise<void> => {
+    // financiera. Corre unos segundos DESPUÉS del boot para leer el resultado ya persistido por la corrida inmediata
+    // del ciclo (evita la carrera boot-tick/probe). No dispara análisis ni escribe en Google.
+    setTimeout(() => void (async (): Promise<void> => {
       try {
         const dsvc = new DecisionService(new PgEventStore(pool), { leerResultado: (o) => directorCycle.leerResultado(o) });
         const est = await dsvc.estado('org-smileflow'); const c = est.current;
@@ -189,7 +190,7 @@ async function main(): Promise<void> {
           ? { decisionId: c.decisionId, type: c.decisionType, status: c.decisionStatus, financialCommitmentClp: c.financialCommitmentClp, providerWritesExpected: c.providerWritesExpected, historicalBudget: c.historicalCampaignBudgetClp, historicalSpend: c.historicalSpendClp, confidence: c.confidence, historyLen: est.history.length }
           : { current: null, historyLen: est.history.length } }));
       } catch (e) { console.log(JSON.stringify({ decisionProbe: 'error', error: e instanceof Error ? e.message : String(e) })); }
-    })();
+    })(), 20_000).unref?.();
   } else {
     console.log(JSON.stringify({ directorCycle: 'disabled' }));
   }
