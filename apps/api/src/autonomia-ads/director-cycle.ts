@@ -24,7 +24,7 @@ export function directorNotifStreamId(org: string): string { return `director-no
 
 /** Versión de la evidencia/análisis. Al cambiar, una nueva corrida SUPERSEDES el post-mortem anterior (last-wins),
  * sin duplicar la decisión activa y sin borrar la auditoría (el evento previo permanece en el stream). */
-export const EVIDENCE_VERSION = 'v2-phase-segmented';
+export const EVIDENCE_VERSION = 'v3-phase-segmented';
 export interface DirectorResultado {
   readonly experimentId: string; readonly campaignId: string; readonly campaignName: string | null; readonly status: string | null;
   readonly createdAt: string; readonly analisis: AnalisisDirector; readonly ranBy: 'scheduler' | 'endpoint';
