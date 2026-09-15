@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { esDiagnostico, mapearEventoGrowth, observacionIdDe, type EventoGrowth } from '../src/ingesta/mapa-growth';
 
+/** El provider lo aporta la fuente registrada de la organización; aquí se pasa explícito. */
+const PROVIDER = 'smileflow-growth';
+
 function ev(over: Partial<EventoGrowth> = {}): EventoGrowth {
   return {
     event_id: 42,
@@ -26,11 +29,11 @@ describe('mapa-growth', () => {
   });
 
   it('observacionIdDe = provider:externalEventId', () => {
-    expect(observacionIdDe(ev({ event_id: 99 }))).toBe('smileflow-growth:99');
+    expect(observacionIdDe(ev({ event_id: 99 }), PROVIDER)).toBe('smileflow-growth:99');
   });
 
   it('mapea demo_requested a EntradaObservacionReal correcta, valor 1 por defecto, sin PII', () => {
-    const e = mapearEventoGrowth(ev());
+    const e = mapearEventoGrowth(ev(), PROVIDER);
     expect(e.provider).toBe('smileflow-growth');
     expect(e.externalEventId).toBe('42');
     expect(e.eventName).toBe('demo_requested');
@@ -53,7 +56,7 @@ describe('mapa-growth', () => {
   });
 
   it('respeta value explícito y marca diagnostico cuando corresponde', () => {
-    const e = mapearEventoGrowth(ev({ value: 250, anon_id: 'diag-9', lead_id: null }));
+    const e = mapearEventoGrowth(ev({ value: 250, anon_id: 'diag-9', lead_id: null }), PROVIDER);
     expect(e.valor).toBe(250);
     expect(e.diagnostico).toBe(true);
     expect(e.leadRef).toBeNull();

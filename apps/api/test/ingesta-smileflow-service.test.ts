@@ -60,7 +60,7 @@ describe('IngestaSmileFlowGrowth', () => {
     expect(r.cursorAntes).toBe(0);
     expect(r.cursorDespues).toBe(11);
 
-    const st = await observaciones.cargar(ctx(), observacionIdDe(EVENTOS[1]!));
+    const st = await observaciones.cargar(ctx(), observacionIdDe(EVENTOS[1]!, 'smileflow-growth'));
     expect(st.existe).toBe(true);
     expect(st.estado).toBe('VALIDADA');
     expect(st.datos?.naturaleza).toBe('REAL');

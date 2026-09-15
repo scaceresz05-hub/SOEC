@@ -14,21 +14,12 @@ import { makePool, PgEventStore, runMigrations } from '@soec/event-store/pg';
 import { ActorId, OrganizationId, type RequestContext } from '@soec/contracts';
 import { SecretStoreEnv } from '@soec/secretos';
 import { ObservacionService } from '@soec/motor-medicion';
-import type { EsquemaSalida } from '@soec/adaptadores';
-import { SmileFlowGrowthAdapter } from '../src/ingesta/smileflow-growth-adapter';
-import { IngestaSmileFlowGrowth } from '../src/ingesta/ingesta-smileflow-service';
+import { ESQUEMA_EGRESS_GROWTH, crearGrowthAdapter } from '../src/ingesta/growth-adapter';
+import { IngestaGrowth } from '../src/ingesta/ingesta-growth-service';
+import { ORG_SMILEFLOW, getFuenteGrowth } from '../src/plataforma';
 
-const ORG = 'org-smileflow';
+const ORG = process.env.SOEC_INGESTA_ORG ?? ORG_SMILEFLOW;
 const ARCHIVO_ENV = 'C:/proyectos/SOEC/.env.google-ads';
-
-const ESQUEMA_EGRESS_GROWTH: EsquemaSalida = {
-  operacion: 'growth-events',
-  campos: [
-    { nombre: 'cursor', tipo: 'string' },
-    { nombre: 'limit', tipo: 'string' },
-    { nombre: 'since', tipo: 'string' },
-  ],
-};
 
 function cargarEnv(ruta: string): void {
   let contenido: string;
@@ -57,10 +48,10 @@ async function main(): Promise<void> {
     const store = new PgEventStore(pool);
     const secretStore = new SecretStoreEnv(process.env);
     const observaciones = new ObservacionService(store, {} as never);
-    const baseUrl = process.env.SMILEFLOW_M2M_URL;
-    if (!baseUrl) throw new Error('Falta SMILEFLOW_M2M_URL');
-    const adaptadorGrowth = new SmileFlowGrowthAdapter({ secretStore, secretRef: 'env:SMILEFLOW_GROWTH_TOKEN', esquemaEgress: ESQUEMA_EGRESS_GROWTH, baseUrl });
-    const ingestaGrowth = new IngestaSmileFlowGrowth({ adaptador: adaptadorGrowth, observaciones, store, org: ORG });
+    // Fuente GROWTH registrada de la organización (provider, origen, hosts, ruta y credencial).
+    const fuenteGrowth = getFuenteGrowth(ORG);
+    const adaptadorGrowth = crearGrowthAdapter(fuenteGrowth, { secretStore, esquemaEgress: ESQUEMA_EGRESS_GROWTH, env: process.env });
+    const ingestaGrowth = new IngestaGrowth({ adaptador: adaptadorGrowth, observaciones, store, org: ORG, provider: fuenteGrowth.provider });
 
     const r = await ingestaGrowth.reconciliarDiagnostico(ctx(ORG), { ahora: new Date().toISOString() }); // sin `since` = toda la historia
     console.log(JSON.stringify({ reconcileGrowth: r }, null, 2)); // sin secretos

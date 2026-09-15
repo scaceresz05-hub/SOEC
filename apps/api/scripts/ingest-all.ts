@@ -13,15 +13,14 @@ import { makePool, PgEventStore, runMigrations } from '@soec/event-store/pg';
 import { ActorId, OrganizationId, type RequestContext } from '@soec/contracts';
 import { SecretStoreEnv } from '@soec/secretos';
 import { ObservacionService } from '@soec/motor-medicion';
-import type { EsquemaSalida } from '@soec/adaptadores';
 import { construirIngestaGoogleAds } from '../src/ingesta/google-ads-runtime';
-import { SmileFlowGrowthAdapter } from '../src/ingesta/smileflow-growth-adapter';
-import { IngestaSmileFlowGrowth } from '../src/ingesta/ingesta-smileflow-service';
+import { ESQUEMA_EGRESS_GROWTH, crearGrowthAdapter } from '../src/ingesta/growth-adapter';
+import { IngestaGrowth } from '../src/ingesta/ingesta-growth-service';
 import { SchedulerIngesta } from '../src/ingesta/scheduler';
 import { LecturaDirectorRealService } from '../src/real-director/lectura-director-real';
 import { PlanAccionDryRunService } from '../src/autonomia-ads/plan-accion-service';
 import { G2AService } from '../src/autonomia-ads/g2a-service';
-import { ORG_SMILEFLOW, buscarFuente, getBusiness } from '../src/plataforma';
+import { ORG_SMILEFLOW, buscarFuente, getBusiness, getFuenteGrowth } from '../src/plataforma';
 
 /**
  * Organización que ingiere en esta corrida. El script sigue siendo de UNA organización por
@@ -31,16 +30,6 @@ import { ORG_SMILEFLOW, buscarFuente, getBusiness } from '../src/plataforma';
  */
 const ORG = process.env.SOEC_INGESTA_ORG ?? ORG_SMILEFLOW;
 const ARCHIVO_ENV = 'C:/proyectos/SOEC/.env.google-ads';
-
-/** Egress cerrado y tipado para Growth: sólo cursor/limit/since (strings). */
-const ESQUEMA_EGRESS_GROWTH: EsquemaSalida = {
-  operacion: 'growth-events',
-  campos: [
-    { nombre: 'cursor', tipo: 'string' },
-    { nombre: 'limit', tipo: 'string' },
-    { nombre: 'since', tipo: 'string' },
-  ],
-};
 
 /** Carga un archivo KEY=VALUE a process.env sin sobrescribir lo ya seteado. Strip de \r y espacios. */
 function cargarEnv(ruta: string): void {
@@ -85,35 +74,28 @@ async function main(): Promise<void> {
     // ── Configuración registrada de la organización (lanza si no está configurada) ──
     const negocio = getBusiness(ORG);
     const fuenteAds = buscarFuente(ORG, 'google-ads');
-    const fuenteGrowth = buscarFuente(ORG, 'smileflow-growth');
+    // Fuente GROWTH por TIPO, no por nombre de proveedor: el provider es de la organización.
+    const fuenteGrowth = getFuenteGrowth(ORG);
     if (!fuenteAds)
       throw new Error(`NO_DATA_SOURCE_CONFIGURED: ${ORG} no tiene fuente 'google-ads' registrada`);
-    if (!fuenteGrowth)
-      throw new Error(
-        `NO_DATA_SOURCE_CONFIGURED: ${ORG} no tiene fuente 'smileflow-growth' registrada`,
-      );
 
     // ── Fuente: Google Ads (READ ONLY) ────────────────────────────────────────
     // MISMO caso de uso central que el refresh manual desde la UI (no se duplica el wiring).
     const ingestaAds = construirIngestaGoogleAds(store, process.env, ORG);
     if (ingestaAds === null) throw new Error(`GOOGLE_ADS_NOT_CONFIGURED: ${ORG} (fuente/credenciales incompletas)`);
 
-    // ── Fuente: SmileFlow Growth ──────────────────────────────────────────────
-    const baseUrl = process.env.SMILEFLOW_M2M_URL;
-    if (!baseUrl) throw new Error('Falta SMILEFLOW_M2M_URL');
-    const adaptadorGrowth = new SmileFlowGrowthAdapter({
+    // ── Fuente: GROWTH de la organización (provider/origen/hosts/ruta/credencial del registro) ──
+    const adaptadorGrowth = crearGrowthAdapter(fuenteGrowth, {
       secretStore,
-      secretRef:
-        fuenteGrowth.credenciales.find((c) => c.nombreLogico === 'smileflow-growth-token')
-          ?.secretRef ?? 'env:SMILEFLOW_GROWTH_TOKEN',
       esquemaEgress: ESQUEMA_EGRESS_GROWTH,
-      baseUrl,
+      env: process.env,
     });
-    const ingestaGrowth = new IngestaSmileFlowGrowth({
+    const ingestaGrowth = new IngestaGrowth({
       adaptador: adaptadorGrowth,
       observaciones,
       store,
       org: ORG,
+      provider: fuenteGrowth.provider,
     });
 
     // ── Scheduler autónomo ────────────────────────────────────────────────────

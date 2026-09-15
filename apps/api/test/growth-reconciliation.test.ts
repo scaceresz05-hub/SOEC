@@ -12,7 +12,11 @@ import type { AdaptadorExterno, SalidaAdaptador } from '@soec/adaptadores';
 import { ObservacionService } from '@soec/motor-medicion';
 import { IngestaSmileFlowGrowth } from '../src/ingesta/ingesta-smileflow-service';
 import { observacionIdDe, type EventoGrowth } from '../src/ingesta/mapa-growth';
-import { construirPanel, type ObsPanel, type Sync } from '../src/ingesta/panel-resultados';
+import { construirPanel, type ConfiguracionPanel, type ObsPanel, type Sync } from '../src/ingesta/panel-resultados';
+import { ORG_SMILEFLOW, buscarFuenteGrowth, getEmbudo } from '../src/plataforma';
+
+const PROVIDER_SF = buscarFuenteGrowth(ORG_SMILEFLOW)!.provider;
+const CONFIG_SF: ConfiguracionPanel = { growthProvider: PROVIDER_SF, embudo: getEmbudo(ORG_SMILEFLOW) };
 
 const AHORA = '2026-08-13T12:00:00.000Z';
 const ORG = 'org-smileflow';
@@ -57,7 +61,7 @@ describe('Reconciliación convergente Growth → SOEC', () => {
 
     // 1) Ingesta inicial: el lead entra como comercial (is_test=false) — reproduce el estado del bug.
     await ingesta.correrUnaVez(ctx(ORG), { ahora: AHORA });
-    const cargarLead = () => observaciones.cargar(ctx(ORG), observacionIdDe(LEAD()));
+    const cargarLead = () => observaciones.cargar(ctx(ORG), observacionIdDe(LEAD(), PROVIDER_SF));
     expect((await cargarLead()).datos?.provenanciaReal?.diagnostico).toBe(false);
 
     // 2) La FUENTE reclasifica el lead a TEST. Un tick normal NO lo re-ingiere (cursor avanzado); la
@@ -68,7 +72,7 @@ describe('Reconciliación convergente Growth → SOEC', () => {
     expect((await cargarLead()).datos?.provenanciaReal?.diagnostico).toBe(true); // INGESTION_RECONCILES_IS_TEST
 
     // REAL_EVENT_MUST_NOT_BE_RECLASSIFIED_AS_TEST: el evento REAL sigue REAL.
-    const obsReal = await observaciones.cargar(ctx(ORG), observacionIdDe(REAL));
+    const obsReal = await observaciones.cargar(ctx(ORG), observacionIdDe(REAL, PROVIDER_SF));
     expect(obsReal.datos?.provenanciaReal?.diagnostico).toBe(false);
 
     // 3) Idempotente: una segunda reconciliación no cambia nada.
@@ -76,7 +80,7 @@ describe('Reconciliación convergente Growth → SOEC', () => {
     expect(r2.reconciliados).toBe(0);
 
     // 4) El panel converge: el lead sale del embudo comercial y entra en diagnóstico; el REAL sigue comercial.
-    const panel = construirPanel([obsPanelDe(await cargarLead(), LEAD()), obsPanelDe(obsReal, REAL)], [{ provider: 'smileflow-growth', ok: true, at: AHORA, estado: 'OK' } as Sync], null);
+    const panel = construirPanel([obsPanelDe(await cargarLead(), LEAD()), obsPanelDe(obsReal, REAL)], [{ provider: 'smileflow-growth', ok: true, at: AHORA, estado: 'OK' } as Sync], null, CONFIG_SF);
     expect(panel.growthFunnel.comercial.lead_created).toBe(0);
     expect(panel.growthFunnel.diagnostico.lead_created).toBe(1);
     expect(panel.growthFunnel.comercial.demo_cta_clicked).toBe(1); // REAL preservado

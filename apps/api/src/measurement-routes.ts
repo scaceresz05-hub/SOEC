@@ -23,6 +23,8 @@ import { G2AService } from './autonomia-ads/g2a-service';
 import { contextoDe } from './superficie-auth';
 import {
   bindExperienciaReal,
+  buscarFuenteGrowth,
+  getEmbudo,
   type ExperienciaReal,
   type OrganizationExperienceBinding,
 } from './plataforma';
@@ -156,9 +158,16 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     // Estado del último refresh a Google Ads (observabilidad: cuándo se consultó y si falló, p.ej. OAuth caducado).
     const lastRefresh = ultimoRefreshState(await store.readStream(c, adsRefreshStateStreamId(org)));
 
+    // Configuración de ESTA organización: su fuente Growth y su embudo. No hay valores universales:
+    // sin embudo propio (ni derivable de su perfil) la petición falla en vez de usar el de otra.
+    const configPanel = {
+      growthProvider: buscarFuenteGrowth(org)?.provider ?? null,
+      embudo: getEmbudo(org),
+    };
+
     return reply.send({
       organizationId: org,
-      ...construirPanel(observaciones, sincronizaciones, snapshotActual, new Date().toISOString()),
+      ...construirPanel(observaciones, sincronizaciones, snapshotActual, configPanel, new Date().toISOString()),
       adsRefresh: lastRefresh, // { queriedAt, ok, estado, ventana, error, dataThrough } | null
       googleAdsConfigured: googleAdsConfigurado(process.env, org),
     });

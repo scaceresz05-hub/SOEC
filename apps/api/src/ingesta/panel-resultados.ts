@@ -8,6 +8,7 @@
  * números. La ausencia de dato es `null` (jamás 0): ctr/cpc con denominador 0 son `null`, no 0. OBSERVE_ONLY.
  */
 import type { SnapshotAdsActual } from './mapa-google-ads';
+import { eventosDelEmbudo, type EmbudoDeConversion } from '../plataforma/tipos';
 
 /** Observación REAL aplanada para el panel (subconjunto legible de `DatosObservacion` + `ProvenanciaReal`). */
 export interface ObsPanel {
@@ -57,16 +58,33 @@ export interface PanelAds {
   readonly stale: boolean; // capturedAt más viejo que el umbral (dato antiguo, no actual)
 }
 
-export interface PanelFunnelCounts {
-  readonly demo_cta_clicked: number;
-  readonly demo_form_started: number;
-  readonly demo_requested: number;
-  readonly lead_created: number;
-}
+/**
+ * Conteos del embudo, por nombre de evento. Las claves son LAS DEL EMBUDO DE LA ORGANIZACIÓN, no una
+ * lista universal: `demo_requested` pertenece a SmileFlow, no a SOEC. Todos los eventos del embudo
+ * aparecen siempre (con 0 si no hubo ninguno): la ausencia de evento es 0 observado, no dato faltante.
+ */
+export type PanelFunnelCounts = Readonly<Record<string, number>>;
 
 export interface PanelGrowthFunnel {
+  /** Provider de la fuente Growth de la organización. `null` ⇒ la organización no declara ninguna. */
+  readonly provider: string | null;
+  /** Definición del embudo de ESTA organización (orden declarado, primaria primero). */
+  readonly eventos: readonly string[];
+  readonly conversionPrimaria: string;
   readonly comercial: PanelFunnelCounts; // eventos que SÍ aprenden (diagnostico=false)
   readonly diagnostico: PanelFunnelCounts; // eventos TEST/DIAG: NO entran en los totales comerciales
+}
+
+/**
+ * Configuración de la organización que el panel NECESITA y no puede suponer. Es un parámetro obligatorio
+ * a propósito: un valor por defecto sería el embudo de SmileFlow aplicado a todo el mundo, que es
+ * exactamente el acoplamiento que este módulo deja de tener.
+ */
+export interface ConfiguracionPanel {
+  /** Provider de la fuente GROWTH de la organización. `null` ⇒ no hay eventos Growth que contar. */
+  readonly growthProvider: string | null;
+  /** Embudo declarado (o derivado del perfil) de ESTA organización. */
+  readonly embudo: EmbudoDeConversion;
 }
 
 export interface PanelSearchTerm {
@@ -93,20 +111,24 @@ export interface PanelResultados {
 }
 
 const GOOGLE_ADS = 'google-ads';
-const GROWTH = 'smileflow-growth';
-const EVENTOS_FUNNEL = ['demo_cta_clicked', 'demo_form_started', 'demo_requested', 'lead_created'] as const;
 const MUESTRA_MINIMA = 100; // impresiones mínimas para siquiera hablar de tendencia (umbral conservador)
 
-function contarFunnel(obs: readonly ObsPanel[]): PanelFunnelCounts {
-  const c: Record<(typeof EVENTOS_FUNNEL)[number], number> = {
-    demo_cta_clicked: 0, demo_form_started: 0, demo_requested: 0, lead_created: 0,
-  };
+/**
+ * Cuenta los eventos del embudo DE LA ORGANIZACIÓN. Los eventos fuera del embudo no se cuentan.
+ *
+ * Se acumula sobre un `Map`, no sobre un objeto: `eventName` llega del puente M2M externo, y un objeto
+ * literal heredaría `toString`, `constructor`, `valueOf`… de `Object.prototype`, de modo que un evento
+ * con ese nombre pasaría la comprobación de pertenencia y contaminaría la respuesta del panel con claves
+ * y valores que no son del embudo. El `Map` sólo contiene lo que el embudo declara.
+ */
+function contarFunnel(obs: readonly ObsPanel[], eventos: readonly string[]): PanelFunnelCounts {
+  const c = new Map<string, number>();
+  for (const e of eventos) c.set(e, 0); // 0 explícito: el embudo declara sus casillas, aunque estén vacías
   for (const o of obs) {
-    if ((EVENTOS_FUNNEL as readonly string[]).includes(o.eventName)) {
-      c[o.eventName as (typeof EVENTOS_FUNNEL)[number]] += 1;
-    }
+    const actual = c.get(o.eventName);
+    if (actual !== undefined) c.set(o.eventName, actual + 1);
   }
-  return c;
+  return Object.fromEntries(c);
 }
 
 /**
@@ -120,10 +142,15 @@ export function construirPanel(
   obs: readonly ObsPanel[],
   syncs: readonly Sync[],
   snapshotActual: SnapshotAdsActual | null,
+  config: ConfiguracionPanel,
   ahoraISO: string = new Date().toISOString(),
 ): PanelResultados {
   const ads = obs.filter((o) => o.provider === GOOGLE_ADS);
-  const growth = obs.filter((o) => o.provider === GROWTH);
+  // Sólo cuentan los eventos de LA fuente Growth de esta organización. Sin provider declarado no se
+  // cuenta nada: jamás se atribuyen a una organización los eventos de otra.
+  const growth =
+    config.growthProvider === null ? [] : obs.filter((o) => o.provider === config.growthProvider);
+  const eventosFunnel = eventosDelEmbudo(config.embudo);
 
   // Cabecera de campaña: del snapshot acumulado vigente. null si aún no hay snapshot.
   const campaign: PanelCampaign = snapshotActual
@@ -144,10 +171,14 @@ export function construirPanel(
   const stale = capturedAt !== null && Date.parse(ahoraISO) - Date.parse(capturedAt) > ADS_STALE_MS;
   const adsPanel: PanelAds = { source: 'GOOGLE_ADS', impressions, clicks, cost, ctr, cpc, sinDatos, capturedAt, period, stale };
 
-  // Embudo Growth: conteos por eventName, separando comercial (aprende) de diagnóstico (no aprende).
+  // Embudo Growth: conteos por eventName del embudo DE ESTA ORGANIZACIÓN, separando comercial
+  // (aprende) de diagnóstico (no aprende).
   const growthFunnel: PanelGrowthFunnel = {
-    comercial: contarFunnel(growth.filter((o) => !o.diagnostico)),
-    diagnostico: contarFunnel(growth.filter((o) => o.diagnostico)),
+    provider: config.growthProvider,
+    eventos: eventosFunnel,
+    conversionPrimaria: config.embudo.conversionPrimaria,
+    comercial: contarFunnel(growth.filter((o) => !o.diagnostico), eventosFunnel),
+    diagnostico: contarFunnel(growth.filter((o) => o.diagnostico), eventosFunnel),
   };
 
   // Términos de búsqueda REALES: agregación por utmContent (sin términos ⇒ []).
