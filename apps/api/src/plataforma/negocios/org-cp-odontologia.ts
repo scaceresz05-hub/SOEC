@@ -47,12 +47,23 @@ export const PROVIDER_GROWTH_CP_ODONTOLOGIA = 'cp-odontologia-growth' as const;
 export const SITIO_CP_ODONTOLOGIA = 'https://www.dentistaclaudiapacheco.cl' as const;
 
 /**
- * Origen del puente M2M en V1: el STAGING del sitio nuevo. El host de producción NO se autoriza
- * todavía (Gate 3.2 prohíbe tocar `dentistaclaudiapacheco.cl`): se añadirá a la allowlist cuando el
- * sitio nuevo esté en producción y el endpoint publicado.
+ * Origen EFECTIVO del puente M2M. Sigue siendo el STAGING a propósito: la allowlist ya autoriza los
+ * hosts de producción, pero el `baseUrl` no se mueve hasta que el dominio propio esté sirviendo el
+ * sitio nuevo. Separar las dos cosas es deliberado: autorizar un host no dirige tráfico hacia él, y
+ * apuntar a un host que todavía no responde dejaría la ingesta detenida sin motivo.
  */
 export const BASE_URL_GROWTH_CP_ODONTOLOGIA = 'https://cp-odontologia-stg.pages.dev' as const;
 export const HOST_GROWTH_CP_ODONTOLOGIA = 'cp-odontologia-stg.pages.dev' as const;
+
+/**
+ * Hosts de PRODUCCIÓN del sitio propio. Se autorizan los DOS —ápice y `www`— porque el canónico del
+ * artefacto validado es `www` y el ápice redirige a él: `fetch` sigue la redirección, y la allowlist
+ * se comprueba sobre la URL INICIAL, así que un origen autorizado que redirige a uno no autorizado
+ * pasaría el control sin que nadie lo note. Autorizar ambos hace que el destino real del token esté
+ * declarado en los dos casos.
+ */
+export const HOST_PRODUCCION_CP_ODONTOLOGIA = 'dentistaclaudiapacheco.cl' as const;
+export const HOST_PRODUCCION_WWW_CP_ODONTOLOGIA = 'www.dentistaclaudiapacheco.cl' as const;
 
 /**
  * Credencial de ingesta, SÓLO por referencia opaca. Su valor lo deposita una persona en el entorno;
@@ -94,7 +105,13 @@ const FUENTE_GROWTH_CP: FuenteRegistrada = {
   faltantes: ['host de producción autorizado (sólo cuando el sitio nuevo esté en producción)'],
   growth: {
     baseUrl: BASE_URL_GROWTH_CP_ODONTOLOGIA,
-    hostsAutorizados: [HOST_GROWTH_CP_ODONTOLOGIA],
+    // El staging SIGUE autorizado: es donde se validó el puente y donde apunta `baseUrl` hasta el
+    // corte. Añadir los hosts propios no cambia a dónde va el tráfico, sólo a dónde SE PERMITE ir.
+    hostsAutorizados: [
+      HOST_GROWTH_CP_ODONTOLOGIA,
+      HOST_PRODUCCION_CP_ODONTOLOGIA,
+      HOST_PRODUCCION_WWW_CP_ODONTOLOGIA,
+    ],
     rutaIngesta: '/integrations/soec/growth-events',
     nombreLogicoCredencial: CREDENCIAL_GROWTH_CP_ODONTOLOGIA.nombreLogico,
     baseUrlEnvOverride: 'CP_ODONTOLOGIA_M2M_URL',

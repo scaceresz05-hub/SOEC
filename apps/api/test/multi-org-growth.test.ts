@@ -172,6 +172,20 @@ describe('CP Odontología · configuración registrada', () => {
     expect(registrada!.faltantes.join(' ')).not.toMatch(/endpoint|token/i);
   });
 
+  it('autoriza los hosts de PRODUCCIÓN sin dejar de autorizar el staging, y sin comodines', () => {
+    const g = getFuenteGrowth(ORG_CP_ODONTOLOGIA);
+    expect([...g.hostsAutorizados].sort()).toEqual([
+      'cp-odontologia-stg.pages.dev',
+      'dentistaclaudiapacheco.cl',
+      'www.dentistaclaudiapacheco.cl',
+    ]);
+    // Allowlist CERRADA: ni comodines ni sufijos. Un '*' aquí convertiría default-deny en permitir todo.
+    for (const h of g.hostsAutorizados) expect(h).not.toMatch(/[*?]/);
+    // Autorizar no es dirigir: hasta el corte, el origen efectivo sigue siendo el staging.
+    expect(g.baseUrl).toBe('https://cp-odontologia-stg.pages.dev');
+    expect(g.rutaIngesta).toBe('/integrations/soec/growth-events');
+  });
+
   it('la configuración NO contiene el valor de ningún secreto', () => {
     const s = JSON.stringify(buscarFuenteGrowth(ORG_CP_ODONTOLOGIA));
     expect(s).not.toContain(TOKEN_CP);
