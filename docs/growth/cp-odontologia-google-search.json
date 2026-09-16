@@ -13,7 +13,9 @@
       "comunasAlcanceComercial": ["Curicó", "Teno", "Romeral", "Rauco", "Molina", "Sagrada Familia", "Hualañé", "Licantén", "Vichuquén"],
       "comunasEjecutablesGoogleAds": ["Curicó", "Molina", "Teno", "Sagrada Familia", "Rauco", "Licantén"],
       "comunasNoSegmentablesSinDesborde": ["Romeral", "Hualañé", "Vichuquén"],
-      "criterioUbicacion": "PRESENCIA"
+      "criterioUbicacion": "PRESENCIA",
+      "unidadesMayoresPermitidas": false,
+      "reglaEjecucion": "apps/api/src/plataforma/negocios/org-cp-odontologia-google-ads.ts"
     },
     "parametrosUrlFinal": "utm_source=google",
     "parametrosProhibidosHaciaSoec": ["utm_campaign", "utm_content", "utm_term", "gclid", "keyword", "search_term"],

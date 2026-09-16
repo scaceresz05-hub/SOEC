@@ -25,11 +25,17 @@ Las tres primeras (Growth 1.1) no se modifican. La cuarta se crea con el mismo f
 - **Comercial (SOEC): Provincia de Curicó, 9/9 comunas** — Curicó, Teno, Romeral, Rauco, Molina,
   Sagrada Familia, Hualañé, Licantén, Vichuquén. Es lo que declaran los 4 borradores y lo que SOEC exige.
 - **Ejecutable en Google Ads: 6/9** — Curicó, Molina, Teno, Sagrada Familia, Rauco, Licantén, con criterio
-  de presencia. Romeral, Hualañé y Vichuquén no se pueden segmentar por separado sin desbordar fuera de la
-  provincia; siguen dentro del alcance comercial.
+  de presencia. Romeral, Hualañé y Vichuquén **no se segmentan** en Google Ads: no tienen una unidad
+  geográfica utilizable sin ampliar deliberadamente fuera de la provincia. Siguen dentro del alcance
+  comercial. Nunca se usa una unidad mayor (provincia, región, país, radio) para cubrirlas.
 
-Esto **reemplaza**, para la ejecución en Google, el requisito «segmentación por las 9 comunas» que
-conservan como texto los `requisitosPrevios` de los tres borradores de Growth 1.1 (se dejan intactos).
+La regla vive en `apps/api/src/plataforma/negocios/org-cp-odontologia-google-ads.ts`
+(`validarSegmentacionGoogleAdsCp`, módulo puro sin uso en runtime todavía).
+
+**Fase 5.1:** el requisito histórico «segmentación de Google Ads por las 9 comunas» de los tres borradores
+de Growth 1.1 (y la redacción ambigua del cuarto) se reemplazó en producción por el texto canónico
+`REQUISITO_GEO_GOOGLE_ADS_CP`, mediante `PATCH /campanias/:id/borrador` (evento de actualización, versión 2).
+Nada más cambió en los borradores.
 
 ## 3. Google Ads — una sola campaña Search
 

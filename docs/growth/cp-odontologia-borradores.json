@@ -32,7 +32,7 @@
         "requisitosPrevios": [
           "Definir el presupuesto (hoy null) antes de cualquier activación.",
           "Las URLs finales de Google Search deben llevar utm_source=google: un clic que llega sólo con gclid se clasifica como orgánico.",
-          "Segmentación geográfica de Google Ads por las 9 comunas de la Provincia de Curicó, con la opción de presencia (personas ubicadas o habitualmente presentes), nunca «presencia o interés».",
+          "Territorio: alcance comercial Provincia de Curicó, 9/9 comunas. Ejecución en Google Ads: sólo Curicó, Molina, Teno, Sagrada Familia, Rauco y Licantén (6/9), con la opción de presencia (personas ubicadas o habitualmente presentes), nunca «presencia o interés». Romeral, Hualañé y Vichuquén no se segmentan en Google Ads porque no tienen una unidad geográfica utilizable sin salir de la provincia; nunca se segmenta fuera de la Provincia de Curicó.",
           "Palabras clave por intención (p. ej. «implantes dentales», «dentista implantes») sin exigir el nombre de la comuna.",
           "No enviar utm_campaign a SOEC ni asociar al contacto tratamiento, servicio, página, path, gclid, fbclid ni texto clínico.",
           "Definir criterio de éxito y de pausa con una línea base real."
@@ -103,7 +103,7 @@
         "requisitosPrevios": [
           "Definir el presupuesto (hoy null) antes de cualquier activación.",
           "Las URLs finales de Google Search deben llevar utm_source=google: un clic que llega sólo con gclid se clasifica como orgánico.",
-          "Segmentación geográfica de Google Ads por las 9 comunas de la Provincia de Curicó, con la opción de presencia (personas ubicadas o habitualmente presentes), nunca «presencia o interés».",
+          "Territorio: alcance comercial Provincia de Curicó, 9/9 comunas. Ejecución en Google Ads: sólo Curicó, Molina, Teno, Sagrada Familia, Rauco y Licantén (6/9), con la opción de presencia (personas ubicadas o habitualmente presentes), nunca «presencia o interés». Romeral, Hualañé y Vichuquén no se segmentan en Google Ads porque no tienen una unidad geográfica utilizable sin salir de la provincia; nunca se segmenta fuera de la Provincia de Curicó.",
           "Palabras clave por intención (p. ej. «prótesis dental», «coronas dentales») sin exigir el nombre de la comuna.",
           "No enviar utm_campaign a SOEC ni asociar al contacto tratamiento, servicio, página, path, gclid, fbclid ni texto clínico.",
           "Definir criterio de éxito y de pausa con una línea base real."
@@ -165,7 +165,7 @@
         "requisitosPrevios": [
           "Incorporar casos clínicos reales y anonimizados de carillas antes de invertir en tráfico pagado.",
           "Definir el presupuesto (hoy null) antes de cualquier activación.",
-          "Si en el futuro se pauta: segmentación por las 9 comunas de la Provincia de Curicó con criterio de presencia, y en Google Search URLs finales con utm_source=google.",
+          "Si en el futuro se pauta — Territorio: alcance comercial Provincia de Curicó, 9/9 comunas. Ejecución en Google Ads: sólo Curicó, Molina, Teno, Sagrada Familia, Rauco y Licantén (6/9), con la opción de presencia (personas ubicadas o habitualmente presentes), nunca «presencia o interés». Romeral, Hualañé y Vichuquén no se segmentan en Google Ads porque no tienen una unidad geográfica utilizable sin salir de la provincia; nunca se segmenta fuera de la Provincia de Curicó. En Google Search, URLs finales con utm_source=google.",
           "No enviar utm_campaign a SOEC ni asociar al contacto tratamiento, servicio, página, path, gclid, fbclid ni texto clínico."
         ],
         "alcanceGeografico": {
@@ -232,7 +232,7 @@
           "Definir el presupuesto (hoy null) antes de cualquier activación.",
           "Ejecutar en Google Ads como grupo AG1 de la campaña única «CP | Search | Provincia de Curicó» (docs/growth/cp-odontologia-fase-5-estructura-comercial.md), no como campaña independiente.",
           "Las URLs finales de Google Search deben llevar utm_source=google: un clic que llega sólo con gclid se clasifica como orgánico.",
-          "Segmentación ejecutable en Google Ads: Curicó, Molina, Teno, Sagrada Familia, Rauco y Licantén, con la opción de presencia; Romeral, Hualañé y Vichuquén siguen dentro del alcance comercial pero no se segmentan por separado.",
+          "Territorio: alcance comercial Provincia de Curicó, 9/9 comunas. Ejecución en Google Ads: sólo Curicó, Molina, Teno, Sagrada Familia, Rauco y Licantén (6/9), con la opción de presencia (personas ubicadas o habitualmente presentes), nunca «presencia o interés». Romeral, Hualañé y Vichuquén no se segmentan en Google Ads porque no tienen una unidad geográfica utilizable sin salir de la provincia; nunca se segmenta fuera de la Provincia de Curicó.",
           "Keywords válidas: dentista curico · clinica dental curico · centro dental curico · mejores dentistas en curico · odontologia general curico. Negativas: fonasa · bono fonasa · dentista fonasa · dental fonasa.",
           "No enviar utm_campaign, utm_content, gclid, keyword ni término de búsqueda a SOEC, ni asociar al contacto tratamiento, servicio, página, path o texto clínico.",
           "Definir criterio de éxito y de pausa con una línea base real."
