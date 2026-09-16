@@ -10,7 +10,6 @@ import {
   AwsKmsAutenticacionError,
   AwsKmsDescifradoError,
   AwsKmsKeyNoEncontradaError,
-  AwsKmsNoDisponibleError,
   AwsKmsPermisoError,
   AwsKmsRespuestaInvalidaError,
   AwsKmsTimeoutError,

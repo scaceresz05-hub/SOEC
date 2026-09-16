@@ -9,7 +9,6 @@
 
 import type { EventStore, RequestContext } from '@soec/contracts';
 import {
-  planificarAdquisicion,
   naturalezaDeCanal,
   CANALES_ADQUISICION,
   type CanalAdquisicion,
@@ -43,18 +42,6 @@ function objetivoDeModelo(modelo: ModeloDeNegocio): ObjetivoComercial {
       return 'GENERATE_LEADS';
     case 'SERVICIOS':
       return 'GENERATE_LEADS';
-  }
-}
-
-/** Resultado comercial principal por modelo de negocio. */
-function resultadosComercialesDeModelo(modelo: ModeloDeNegocio): readonly ResultadoAdquisicion[] {
-  switch (modelo) {
-    case 'ECOMMERCE_DISTRIBUCION':
-      return ['PURCHASE', 'CUSTOMER'];
-    case 'SAAS_FUNNEL':
-      return ['LEAD', 'DEMO', 'CUSTOMER'];
-    case 'SERVICIOS':
-      return ['LEAD', 'CUSTOMER'];
   }
 }
 

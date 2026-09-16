@@ -62,7 +62,6 @@ export function sanitizarPaging(paging: unknown): { readonly cursors?: PagingCur
   if (!paging || typeof paging !== 'object') return {};
   const p = paging as { cursors?: { before?: unknown; after?: unknown } };
   if (!p.cursors || typeof p.cursors !== 'object') return {};
-  const cursors: PagingCursors = {};
   const before = p.cursors.before;
   const after = p.cursors.after;
   return {

@@ -17,7 +17,6 @@ import {
   VentasComercioService,
   calcularLineaBaseDeVentas,
   conocido,
-  desconocido,
   huellaDeCliente,
   type CommerceOrderObserved,
   type CommerceSalesSnapshot,

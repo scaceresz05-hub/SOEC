@@ -16,7 +16,6 @@ import {
   type EntradaPlanner,
   type HipotesisContenido,
   type DecisionEstrategiaCanal,
-  type CanalDisponible,
 } from '../src/index';
 
 /** Perfil de negocio como configuración pura (lo que el motor consume; sin ramas por identidad). */

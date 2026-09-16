@@ -11,7 +11,7 @@ import { InMemoryEventStore } from '@soec/event-store';
 import { conocido, desconocido, type LineaBaseDeVentas } from '@soec/comercio';
 import { normalizarVentas } from '../src/acquisition/cyp-outcomes';
 import { contarGrowth, type ObsGrowthLite } from '../src/acquisition/smileflow-outcomes';
-import { derivarCPL, derivarROAS, derivarMER, derivarCAC, VENTANA_DESCONOCIDA, type Ventana } from '../src/acquisition/economics';
+import { derivarCPL, derivarROAS, derivarMER, derivarCAC, type Ventana } from '../src/acquisition/economics';
 import { outcomesVivosDe } from '../src/acquisition/acquisition-service';
 
 const W: Ventana = { inicio: null, fin: null, timezone: 'UTC', freshness: null };

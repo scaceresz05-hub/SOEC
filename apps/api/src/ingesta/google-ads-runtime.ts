@@ -21,7 +21,7 @@ const ESQUEMA_EGRESS_ADS: EsquemaSalida = {
   ],
 };
 
-export interface EnvGoogleAds extends NodeJS.ProcessEnv {}
+export type EnvGoogleAds = NodeJS.ProcessEnv;
 
 /** ¿Están presentes las variables mínimas para intentar OAuth de Google Ads? (no expone valores). */
 export function googleAdsConfigurado(env: EnvGoogleAds, org: string): boolean {

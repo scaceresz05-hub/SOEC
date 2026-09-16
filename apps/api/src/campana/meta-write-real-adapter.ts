@@ -13,7 +13,7 @@
  * Nunca sube presupuesto ni crea autorizaciones financieras: eso no existe como operación aquí.
  */
 import { operacionPermitida, type MetaWritePort, type OperacionMeta, type ResultadoEscrituraMeta, type SolicitudEscrituraMeta } from './meta-write-port';
-import { capacidadDe, scopesSuficientes } from './write-capability';
+import { scopesSuficientes } from './write-capability';
 import { ErrorEscrituraMeta, clasificarErrorGraph } from './meta-write-errors';
 import type { MetaWriteTransport } from './meta-write-transport';
 import type { ReconciliacionRepo } from './meta-write-reconciliation';

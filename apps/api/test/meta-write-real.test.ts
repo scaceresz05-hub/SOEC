@@ -9,7 +9,6 @@ import { seleccionarMetaWritePort } from '../src/campana/meta-write-factory';
 import { FakeWriteTransport, guionExitoso, type TransportResponse } from '../src/campana/meta-write-transport';
 import { InMemoryReconciliacionRepo } from '../src/campana/meta-write-reconciliation';
 import { SCOPES_ESCRITURA_REQUERIDOS } from '../src/campana/write-capability';
-import { ErrorEscrituraMeta } from '../src/campana/meta-write-errors';
 import type { SolicitudEscrituraMeta } from '../src/campana/meta-write-port';
 
 const SCOPES_OK = ['ads_management', 'pages_manage_posts', 'instagram_content_publish', 'pages_read_engagement'];
