@@ -18,25 +18,48 @@
  */
 import {
   BusinessProfileNoConfiguradoError,
+  EmbudoNoConfiguradoError,
   OrganizacionNoRegistradaError,
   SinFuenteDeDatosError,
 } from './errors';
 import { assertTenantIdCanonico } from './identidad-organizacion';
 import { CONFIGURACION_ORG_SMILEFLOW } from './negocios/org-smileflow';
 import { CONFIGURACION_ORG_CYP } from './negocios/org-cyp';
+import { CONFIGURACION_ORG_CP_ODONTOLOGIA } from './negocios/org-cp-odontologia';
 import type {
   BusinessEvaluationProfile,
   ConfiguracionOrganizacion,
+  EmbudoDeConversion,
   FuenteRegistrada,
   NegocioRegistrado,
   PerfilComercial,
   RecursoGoogleAds,
 } from './tipos';
 
+/**
+ * Descriptor RESUELTO de la fuente `GROWTH` de UNA organización: todo lo que la capa de composición
+ * necesita para construir su adaptador de ingesta, y NADA más. El provider, el origen, la allowlist
+ * de hosts, la ruta y la referencia de credencial salen de la FUENTE REGISTRADA, nunca del código
+ * del adaptador. Sin secretos: `credencialRef` es una referencia opaca.
+ */
+export interface DescriptorFuenteGrowth {
+  readonly organizationId: string;
+  readonly sourceId: string;
+  readonly provider: string;
+  readonly baseUrl: string;
+  readonly hostsAutorizados: readonly string[];
+  readonly rutaIngesta: string;
+  readonly credencialRef: string;
+  /** Variable de entorno que puede sustituir `baseUrl` en despliegues operativos. La declara la fuente. */
+  readonly baseUrlEnvOverride: string | null;
+  readonly estado: FuenteRegistrada['estado'];
+}
+
 /** Organizaciones registradas en ESTE despliegue. Añadir una es añadir su módulo y esta línea. */
 export const ORGANIZACIONES_DEL_DESPLIEGUE: readonly ConfiguracionOrganizacion[] = [
   CONFIGURACION_ORG_SMILEFLOW,
   CONFIGURACION_ORG_CYP,
+  CONFIGURACION_ORG_CP_ODONTOLOGIA,
 ];
 
 export interface ResolutorDeNegocios {
@@ -47,6 +70,10 @@ export interface ResolutorDeNegocios {
   buscarProfile(org: string): BusinessEvaluationProfile | null;
   buscarFuentes(org: string): readonly FuenteRegistrada[];
   buscarFuente(org: string, provider: string): FuenteRegistrada | null;
+  buscarFuenteGrowth(org: string): DescriptorFuenteGrowth | null;
+  getFuenteGrowth(org: string): DescriptorFuenteGrowth;
+  buscarEmbudo(org: string): EmbudoDeConversion | null;
+  getEmbudo(org: string): EmbudoDeConversion;
   getBusiness(org: string): NegocioRegistrado;
   getProfile(org: string): BusinessEvaluationProfile;
   getSources(org: string): readonly FuenteRegistrada[];
@@ -108,6 +135,91 @@ export function crearResolutorDeNegocios(
     return fuentes;
   };
 
+  /**
+   * Fuente `GROWTH` de la organización, RESUELTA. Reglas duras:
+   *   · sólo se consideran fuentes cuyo `organizationId` coincide con el de la organización;
+   *   · más de una fuente GROWTH ⇒ se lanza (la ingesta sería ambigua, jamás se elige una "por defecto");
+   *   · fuente GROWTH sin configuración de ingesta, sin la credencial que declara, o con allowlist de
+   *     hosts vacía ⇒ se lanza. No hay valores por defecto heredados de ningún proveedor.
+   */
+  const buscarFuenteGrowth = (org: string): DescriptorFuenteGrowth | null => {
+    const config = buscarConfiguracion(org);
+    if (!config) return null;
+    const propias = config.negocio.organizationId;
+    const growth = buscarFuentes(propias).filter(
+      (f) => f.tipo === 'GROWTH' && f.organizationId === propias,
+    );
+    if (growth.length === 0) return null;
+    if (growth.length > 1) {
+      throw new SinFuenteDeDatosError(
+        propias,
+        `hay ${growth.length} fuentes GROWTH registradas: la fuente de ingesta es ambigua`,
+      );
+    }
+    const f = growth[0]!;
+    const g = f.growth ?? null;
+    if (!g) {
+      throw new SinFuenteDeDatosError(
+        propias,
+        `la fuente GROWTH '${f.sourceId}' no declara configuración de ingesta`,
+      );
+    }
+    if (g.hostsAutorizados.length === 0) {
+      throw new SinFuenteDeDatosError(
+        propias,
+        `la fuente GROWTH '${f.sourceId}' no autoriza ningún host (egress default-deny)`,
+      );
+    }
+    const cred = f.credenciales.find((c) => c.nombreLogico === g.nombreLogicoCredencial) ?? null;
+    if (!cred) {
+      throw new SinFuenteDeDatosError(
+        propias,
+        `la fuente GROWTH '${f.sourceId}' no declara la credencial '${g.nombreLogicoCredencial}'`,
+      );
+    }
+    return {
+      organizationId: propias,
+      sourceId: f.sourceId,
+      provider: f.provider,
+      baseUrl: g.baseUrl,
+      hostsAutorizados: [...g.hostsAutorizados],
+      rutaIngesta: g.rutaIngesta,
+      credencialRef: cred.secretRef,
+      baseUrlEnvOverride: g.baseUrlEnvOverride ?? null,
+      estado: f.estado,
+    };
+  };
+
+  const getFuenteGrowth = (org: string): DescriptorFuenteGrowth => {
+    const negocio = getBusiness(org); // lanza si la organización no está registrada
+    const d = buscarFuenteGrowth(negocio.organizationId);
+    if (!d) throw new SinFuenteDeDatosError(negocio.organizationId, 'sin fuente GROWTH registrada');
+    return d;
+  };
+
+  /**
+   * Embudo de conversión de la organización: el declarado, o —si no declara uno— el que se deriva de
+   * su propio `directorContext`. Nunca el de otra organización.
+   */
+  const buscarEmbudo = (org: string): EmbudoDeConversion | null => {
+    const config = buscarConfiguracion(org);
+    if (!config) return null;
+    if (config.embudo) return config.embudo;
+    const dc = config.perfil?.directorContext ?? null;
+    if (!dc) return null;
+    return {
+      conversionPrimaria: dc.conversionPrimaria,
+      conversionesSecundarias: dc.conversionesSecundarias,
+    };
+  };
+
+  const getEmbudo = (org: string): EmbudoDeConversion => {
+    const negocio = getBusiness(org); // lanza si la organización no está registrada
+    const embudo = buscarEmbudo(negocio.organizationId);
+    if (!embudo) throw new EmbudoNoConfiguradoError(negocio.organizationId);
+    return embudo;
+  };
+
   return {
     organizacionesRegistradas: () => [...registro.keys()],
     buscarConfiguracion,
@@ -117,6 +229,10 @@ export function crearResolutorDeNegocios(
     buscarFuentes,
     buscarFuente: (org, provider) =>
       buscarFuentes(org).find((f) => f.provider === provider) ?? null,
+    buscarFuenteGrowth,
+    getFuenteGrowth,
+    buscarEmbudo,
+    getEmbudo,
     getBusiness,
     getProfile,
     getSources,
@@ -152,6 +268,16 @@ export const buscarFuentes = (org: string): readonly FuenteRegistrada[] =>
   RESOLUTOR.buscarFuentes(org);
 export const buscarFuente = (org: string, provider: string): FuenteRegistrada | null =>
   RESOLUTOR.buscarFuente(org, provider);
+/** Fuente GROWTH resuelta de la organización. `null` si no declara ninguna. */
+export const buscarFuenteGrowth = (org: string): DescriptorFuenteGrowth | null =>
+  RESOLUTOR.buscarFuenteGrowth(org);
+/** Fuente GROWTH resuelta. Lanza `NO_DATA_SOURCE_CONFIGURED` si la organización no declara ninguna. */
+export const getFuenteGrowth = (org: string): DescriptorFuenteGrowth =>
+  RESOLUTOR.getFuenteGrowth(org);
+/** Embudo de conversión de la organización. `null` si no lo declara ni lo deriva de su perfil. */
+export const buscarEmbudo = (org: string): EmbudoDeConversion | null => RESOLUTOR.buscarEmbudo(org);
+/** Embudo de conversión. Lanza `CONVERSION_FUNNEL_NOT_CONFIGURED` si la organización no tiene ninguno. */
+export const getEmbudo = (org: string): EmbudoDeConversion => RESOLUTOR.getEmbudo(org);
 
 /** Negocio de la organización. Lanza `ORGANIZATION_NOT_CONFIGURED` si no está registrada. */
 export const getBusiness = (org: string): NegocioRegistrado => RESOLUTOR.getBusiness(org);

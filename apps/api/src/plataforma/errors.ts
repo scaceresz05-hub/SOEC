@@ -49,6 +49,20 @@ export class SinFuenteDeDatosError extends PlataformaError {
   }
 }
 
+/**
+ * La organización no declara embudo de conversión y su perfil tampoco aporta `directorContext`.
+ * NO se hereda el embudo de otra organización: se lanza.
+ */
+export class EmbudoNoConfiguradoError extends PlataformaError {
+  constructor(org: string) {
+    super(
+      `la organización '${org}' no tiene embudo de conversión configurado`,
+      'CONVERSION_FUNNEL_NOT_CONFIGURED',
+      409,
+    );
+  }
+}
+
 /** Se usó un alias legado (businessKey / slug histórico) como identificador de tenant. */
 export class IdentidadOrganizacionInvalidaError extends PlataformaError {
   constructor(valor: string, motivo: string) {

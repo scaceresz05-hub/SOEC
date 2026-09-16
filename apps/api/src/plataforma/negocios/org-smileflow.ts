@@ -23,6 +23,13 @@ import { BUSINESS_KEY_SMILEFLOW, ORG_SMILEFLOW, aliasLegados } from '../identida
 import { economiaSinMedir } from '../tipos';
 import type { ConfiguracionOrganizacion } from '../tipos';
 
+/** Provider PROPIO de la fuente Growth de SmileFlow. No es el provider "de Growth" en SOEC. */
+export const PROVIDER_GROWTH_SMILEFLOW = 'smileflow-growth' as const;
+
+/** Host productivo del puente M2M de SmileFlow. Antes vivía cableado dentro del adaptador. */
+export const HOST_GROWTH_SMILEFLOW = 'smileflow-clinic-production.up.railway.app' as const;
+export const BASE_URL_GROWTH_SMILEFLOW = `https://${HOST_GROWTH_SMILEFLOW}` as const;
+
 /** Cuenta de Google Ads gobernada por SmileFlow. Antes era el `CONFINAMIENTO` global de la plataforma. */
 const ADS_SMILEFLOW = {
   customerId: '8605539300',
@@ -128,7 +135,7 @@ export const CONFIGURACION_ORG_SMILEFLOW: ConfiguracionOrganizacion = {
     {
       sourceId: 'src-smileflow-growth',
       organizationId: ORG_SMILEFLOW,
-      provider: 'smileflow-growth',
+      provider: PROVIDER_GROWTH_SMILEFLOW,
       tipo: 'GROWTH',
       externalAccountId: null,
       credenciales: [
@@ -137,6 +144,18 @@ export const CONFIGURACION_ORG_SMILEFLOW: ConfiguracionOrganizacion = {
       estado: 'CONNECTED_READ_ONLY',
       soloLectura: true,
       faltantes: [],
+      /**
+       * Configuración de ingesta que ANTES estaba cableada en el adaptador (host, ruta) y en los
+       * scripts (baseUrl por variable global). Mismos valores exactos: el comportamiento productivo
+       * de SmileFlow no cambia; lo que cambia es QUIÉN los declara.
+       */
+      growth: {
+        baseUrl: BASE_URL_GROWTH_SMILEFLOW,
+        hostsAutorizados: [HOST_GROWTH_SMILEFLOW],
+        rutaIngesta: '/integrations/soec/growth-events',
+        nombreLogicoCredencial: 'smileflow-growth-token',
+        baseUrlEnvOverride: 'SMILEFLOW_M2M_URL',
+      },
     },
   ],
 };

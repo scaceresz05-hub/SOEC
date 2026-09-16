@@ -5,9 +5,18 @@
  * evento, nombre, instante, atribución UTM y un `lead_id` opaco). El mapeo NO agrega nada personal. La clave
  * de idempotencia de la observación es provider+externalEventId. Un evento DIAG sigue siendo REAL: sólo se
  * marca como no elegible para aprendizaje.
+ *
+ * EL `provider` LO APORTA LA FUENTE REGISTRADA, no este módulo. `smileflow-growth` es el provider de UNA
+ * organización, no "el provider de Growth" en SOEC: cablearlo aquí haría que toda organización futura
+ * escribiera observaciones bajo la identidad de SmileFlow y compartiera su espacio de idempotencia.
+ *
+ * FRONTERA DE PRIVACIDAD: todo evento pasa por la regla V1 (`politica-privacidad-growth`) ANTES de
+ * convertirse en observación. Un evento que une interés por tratamiento con identidad de contacto no se
+ * mapea: se rechaza.
  */
 import type { EntradaObservacionReal } from '@soec/motor-medicion';
 import type { NivelCalidad } from '@soec/medicion';
+import { assertPrivacidadGrowth } from './politica-privacidad-growth';
 
 /** Forma del evento tal como lo entrega el endpoint M2M productivo (sin PII). */
 export interface EventoGrowth {
@@ -41,15 +50,30 @@ export function esDiagnostico(ev: EventoGrowth): boolean {
   return anon.startsWith('diag') || ev.utm_source === 'diag';
 }
 
-/** Id de observación determinista = provider + externalEventId (clave de idempotencia). */
-export function observacionIdDe(ev: EventoGrowth): string {
-  return `smileflow-growth:${ev.event_id}`;
+/** Exige un provider no vacío: sin él no hay identidad de fuente ni clave de idempotencia. */
+function assertProvider(provider: string): string {
+  const p = (provider ?? '').trim();
+  if (!p) throw new Error('mapa-growth: provider requerido (lo aporta la fuente registrada)');
+  return p;
 }
 
-/** Mapea un evento Growth a la entrada de la puerta REAL de M8. Sin PII; ausencia de valor ⇒ conteo 1. */
-export function mapearEventoGrowth(ev: EventoGrowth): EntradaObservacionReal {
+/**
+ * Id de observación determinista = provider + externalEventId (clave de idempotencia). El `provider`
+ * viene de la fuente GROWTH de la organización: dos organizaciones NUNCA comparten espacio de ids.
+ */
+export function observacionIdDe(ev: EventoGrowth, provider: string): string {
+  return `${assertProvider(provider)}:${ev.event_id}`;
+}
+
+/**
+ * Mapea un evento Growth a la entrada de la puerta REAL de M8. Sin PII; ausencia de valor ⇒ conteo 1.
+ * Lanza `PrivacidadGrowthError` si el evento viola la regla V1 de privacidad (fail-closed).
+ */
+export function mapearEventoGrowth(ev: EventoGrowth, provider: string): EntradaObservacionReal {
+  const p = assertProvider(provider);
+  assertPrivacidadGrowth(ev); // FRONTERA: nada que viole la regla V1 llega a persistirse
   return {
-    provider: 'smileflow-growth',
+    provider: p,
     externalEventId: String(ev.event_id),
     eventName: ev.event_name,
     occurredAt: ev.occurred_at,
@@ -59,7 +83,7 @@ export function mapearEventoGrowth(ev: EventoGrowth): EntradaObservacionReal {
     unidad: 'conteo',
     calidad: CALIDAD_INGESTA,
     cobertura: 1,
-    source: 'smileflow-growth',
+    source: p,
     utmSource: ev.utm_source,
     utmCampaign: ev.utm_campaign,
     leadRef: ev.lead_id != null ? String(ev.lead_id) : null,

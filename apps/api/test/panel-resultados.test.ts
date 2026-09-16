@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { construirPanel, type ObsPanel, type Sync } from '../src/ingesta/panel-resultados';
+import { construirPanel, type ConfiguracionPanel, type ObsPanel, type Sync } from '../src/ingesta/panel-resultados';
 import type { SnapshotAdsActual } from '../src/ingesta/mapa-google-ads';
+import { ORG_SMILEFLOW, buscarFuenteGrowth, getEmbudo } from '../src/plataforma';
+
+/**
+ * Configuración REGISTRADA de SmileFlow (no una copia literal): si alguien cambiara su fuente Growth o su
+ * embudo, estas pruebas —que siguen afirmando exactamente los mismos conteos de siempre— fallarían.
+ */
+const CONFIG_SF: ConfiguracionPanel = {
+  growthProvider: buscarFuenteGrowth(ORG_SMILEFLOW)!.provider,
+  embudo: getEmbudo(ORG_SMILEFLOW),
+};
 
 // Snapshot acumulado vigente (stream dedicado): campaña ENABLED que aún no sirve → 0 impresiones/clics/coste.
 const SNAP_CERO: SnapshotAdsActual = {
@@ -36,7 +46,7 @@ const SYNCS: Sync[] = [
 ];
 
 describe('construirPanel', () => {
-  const panel = construirPanel(OBS, SYNCS, SNAP_CERO);
+  const panel = construirPanel(OBS, SYNCS, SNAP_CERO, CONFIG_SF);
 
   it('extrae nombre, estado e id de campaña del snapshot acumulado vigente', () => {
     expect(panel.campaign.name).toBe('SmileFlow Search Chile');
@@ -54,7 +64,7 @@ describe('construirPanel', () => {
   });
 
   it('sin snapshot ⇒ cabecera y cifras Ads en null (nunca 0 fabricado)', () => {
-    const vacio = construirPanel(OBS, SYNCS, null);
+    const vacio = construirPanel(OBS, SYNCS, null, CONFIG_SF);
     expect(vacio.campaign).toEqual({ name: null, status: null, id: null });
     expect(vacio.ads.impressions).toBeNull();
     expect(vacio.ads.ctr).toBeNull();
@@ -97,6 +107,7 @@ describe('construirPanel', () => {
       ],
       SYNCS,
       snapHoy,
+      CONFIG_SF,
     );
     expect(conDatos.ads.impressions).toBe(200);
     expect(conDatos.ads.ctr).toBeCloseTo(10 / 200, 6);
@@ -108,7 +119,7 @@ describe('construirPanel', () => {
 
   it('con 1 impresión usa singular ("impresión")', () => {
     const snap1: SnapshotAdsActual = { campaignId: '1', campaignName: 'c', status: 'ENABLED', impressions: 1, clicks: 0, cost: 0, at: '2026-08-10T22:00:00Z' };
-    const p = construirPanel([], SYNCS, snap1);
+    const p = construirPanel([], SYNCS, snap1, CONFIG_SF);
     expect(p.lecturaSoec).toContain('1 impresión ');
     expect(p.ads.ctr).toBe(0); // 0 clics / 1 impresión = 0 (impresiones > 0 ⇒ calculable)
     expect(p.ads.cpc).toBeNull(); // 0 clics ⇒ NO_CALCULABLE
@@ -124,7 +135,7 @@ const SNAP_REAL: SnapshotAdsActual = {
 
 describe('construirPanel · trazabilidad Google Ads', () => {
   it('snapshot con valores: source, capturedAt y período ALL_TIME (from=inicio campaña, to=capturedAt)', () => {
-    const p = construirPanel([], SYNCS, SNAP_REAL, '2026-08-16T01:00:00Z');
+    const p = construirPanel([], SYNCS, SNAP_REAL, CONFIG_SF, '2026-08-16T01:00:00Z');
     expect(p.ads.source).toBe('GOOGLE_ADS');
     expect(p.ads.impressions).toBe(556);
     expect(p.ads.clicks).toBe(22);
@@ -134,11 +145,11 @@ describe('construirPanel · trazabilidad Google Ads', () => {
     expect(p.ads.sinDatos).toBe(false);
   });
   it('fresco (dentro del umbral) ⇒ no stale; viejo ⇒ stale, nunca como actual', () => {
-    expect(construirPanel([], SYNCS, SNAP_REAL, '2026-08-16T01:00:00Z').ads.stale).toBe(false);
-    expect(construirPanel([], SYNCS, SNAP_REAL, '2026-08-18T12:00:00Z').ads.stale).toBe(true); // ~2 días
+    expect(construirPanel([], SYNCS, SNAP_REAL, CONFIG_SF, '2026-08-16T01:00:00Z').ads.stale).toBe(false);
+    expect(construirPanel([], SYNCS, SNAP_REAL, CONFIG_SF, '2026-08-18T12:00:00Z').ads.stale).toBe(true); // ~2 días
   });
   it('sin snapshot ⇒ capturedAt/period null, sinDatos true, NO se inventa rango ni 0 como dato', () => {
-    const p = construirPanel([], SYNCS, null, '2026-08-18T12:00:00Z');
+    const p = construirPanel([], SYNCS, null, CONFIG_SF, '2026-08-18T12:00:00Z');
     expect(p.ads.capturedAt).toBeNull();
     expect(p.ads.period).toBeNull();
     expect(p.ads.sinDatos).toBe(true);
@@ -147,7 +158,7 @@ describe('construirPanel · trazabilidad Google Ads', () => {
   });
   it('snapshot viejo sin start_date persistido ⇒ period.from null (no se infiere desde capturedAt)', () => {
     const viejo: SnapshotAdsActual = { ...SNAP_REAL, startDate: undefined };
-    const p = construirPanel([], SYNCS, viejo, '2026-08-18T12:00:00Z');
+    const p = construirPanel([], SYNCS, viejo, CONFIG_SF, '2026-08-18T12:00:00Z');
     expect(p.ads.period).toEqual({ kind: 'ALL_TIME', from: null, to: '2026-08-16T00:24:06.440Z' });
   });
 });

@@ -16,7 +16,12 @@ import type { AdaptadorExterno, SalidaAdaptador } from '@soec/adaptadores';
 import { ObservacionService } from '@soec/motor-medicion';
 import { IngestaSmileFlowGrowth } from '../src/ingesta/ingesta-smileflow-service';
 import { esDiagnostico, mapearEventoGrowth, observacionIdDe, type EventoGrowth } from '../src/ingesta/mapa-growth';
-import { construirPanel, type ObsPanel, type Sync } from '../src/ingesta/panel-resultados';
+import { construirPanel, type ConfiguracionPanel, type ObsPanel, type Sync } from '../src/ingesta/panel-resultados';
+import { ORG_SMILEFLOW, buscarFuenteGrowth, getEmbudo } from '../src/plataforma';
+
+/** Provider y embudo REGISTRADOS de SmileFlow: el panel ya no los supone, los recibe. */
+const PROVIDER_SF = buscarFuenteGrowth(ORG_SMILEFLOW)!.provider;
+const CONFIG_SF: ConfiguracionPanel = { growthProvider: PROVIDER_SF, embudo: getEmbudo(ORG_SMILEFLOW) };
 
 const AHORA = '2026-08-12T12:00:00.000Z';
 
@@ -47,8 +52,8 @@ describe('Contrato naturaleza REAL/TEST · mapeo puro', () => {
   });
 
   it('mapearEventoGrowth propaga diagnostico desde is_test', () => {
-    expect(mapearEventoGrowth(EV_TEST).diagnostico).toBe(true);
-    expect(mapearEventoGrowth(EV_REAL).diagnostico).toBe(false);
+    expect(mapearEventoGrowth(EV_TEST, PROVIDER_SF).diagnostico).toBe(true);
+    expect(mapearEventoGrowth(EV_REAL, PROVIDER_SF).diagnostico).toBe(false);
   });
 });
 
@@ -60,7 +65,7 @@ describe('Contrato naturaleza REAL/TEST · panel comercial', () => {
       utmContent: null, limitaciones: [], externalEventId: String(ev.event_id),
     }));
     const syncs: Sync[] = [{ provider: 'smileflow-growth', ok: true, at: AHORA, estado: 'OK' }];
-    const panel = construirPanel(obs, syncs, null);
+    const panel = construirPanel(obs, syncs, null, CONFIG_SF);
     // REAL cuenta como evidencia comercial:
     expect(panel.growthFunnel.comercial.demo_requested).toBe(1);
     // TEST NO cuenta como comercial, pero queda visible en el bucket de diagnóstico (auditable):
@@ -75,8 +80,8 @@ describe('Contrato naturaleza REAL/TEST · ingesta real', () => {
     const ingesta = new IngestaSmileFlowGrowth({ adaptador: adaptadorCon([EV_REAL, EV_TEST]), observaciones, store, org: 'org-smileflow' });
     await ingesta.correrUnaVez(ctx('org-smileflow'), { ahora: AHORA });
 
-    const real = await observaciones.cargar(ctx('org-smileflow'), observacionIdDe(EV_REAL));
-    const test = await observaciones.cargar(ctx('org-smileflow'), observacionIdDe(EV_TEST));
+    const real = await observaciones.cargar(ctx('org-smileflow'), observacionIdDe(EV_REAL, PROVIDER_SF));
+    const test = await observaciones.cargar(ctx('org-smileflow'), observacionIdDe(EV_TEST, PROVIDER_SF));
     expect(real.datos?.naturaleza).toBe('REAL');
     expect(real.datos?.provenanciaReal?.diagnostico).toBe(false);
     expect(test.datos?.naturaleza).toBe('REAL'); // sigue siendo dato REAL (observado), pero…

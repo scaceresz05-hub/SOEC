@@ -38,6 +38,7 @@ import {
   CONFIGURACION_ORG_CYP,
 } from '../src/plataforma/negocios/org-cyp';
 import { CONFIGURACION_ORG_SMILEFLOW } from '../src/plataforma/negocios/org-smileflow';
+import { ORG_CP_ODONTOLOGIA } from '../src/plataforma/negocios/org-cp-odontologia';
 import { LecturaDirectorRealService } from '../src/real-director/lectura-director-real';
 import { PlanAccionDryRunService } from '../src/autonomia-ads/plan-accion-service';
 import { G2AService } from '../src/autonomia-ads/g2a-service';
@@ -424,7 +425,11 @@ describe('C Y P · superficie HTTP de incorporación', () => {
     });
     expect(res.statusCode).toBe(200);
     const { negocios } = res.json() as { negocios: { organizationId: string; estado: string }[] };
-    expect(negocios.map((n) => n.organizationId).sort()).toEqual(['org-cyp', 'org-smileflow']);
+    expect(negocios.map((n) => n.organizationId).sort()).toEqual([
+      'org-cp-odontologia',
+      'org-cyp',
+      'org-smileflow',
+    ]);
     // Selector, NO portafolio: ninguna cifra, ninguna cuenta externa, ninguna credencial.
     const s = JSON.stringify(negocios);
     expect(s).not.toMatch(/impresiones|clics|gasto|customerId|credentialRef|env:|campaignId/i);
@@ -508,7 +513,7 @@ describe('EXTENSIBILIDAD · una tercera organización se registra por configurac
 
   it('la organización ficticia NO está en el despliegue real', () => {
     expect(organizacionesRegistradas()).not.toContain('org-tercera-de-prueba');
-    expect(organizacionesRegistradas()).toEqual([ORG_SMILEFLOW, ORG_CYP]);
+    expect(organizacionesRegistradas()).toEqual([ORG_SMILEFLOW, ORG_CYP, ORG_CP_ODONTOLOGIA]);
   });
 
   it('el registro rechaza organizaciones duplicadas', () => {

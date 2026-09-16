@@ -14,6 +14,7 @@
 import type { CriterioObjetivo, PoliticaOptimizacion } from '@soec/medicion';
 import { desconocido, type DesconocidoOValor, type MotivoDesconocido } from '@soec/comercio';
 import type { LimitesAutonomia } from '../autonomia-ads/limites-smileflow';
+import type { AlcanceGeografico } from '@soec/campanias';
 
 /** Modelo de negocio: gobierna qué significa "convertir" y con qué vocabulario razona el Director. */
 export type ModeloDeNegocio = 'SAAS_FUNNEL' | 'ECOMMERCE_DISTRIBUCION' | 'SERVICIOS';
@@ -59,12 +60,36 @@ export interface RecursoGoogleAds {
   readonly nombreCampania: string;
 }
 
-/** Contexto de negocio con el que razona el Director. No es un segundo motor: es su configuración. */
-export interface DirectorContext {
-  readonly descripcion: string;
+/**
+ * EMBUDO DE CONVERSIÓN de UNA organización: qué eventos cuentan, y cuál de ellos es la conversión
+ * que define el éxito. NO existe un embudo universal: `demo_requested` es de SmileFlow, no de SOEC.
+ * Cada organización declara el suyo; quien lo consuma (panel, Director) lo recibe, no lo supone.
+ */
+export interface EmbudoDeConversion {
   /** Evento/hecho que cuenta como conversión primaria para ESTA organización. */
   readonly conversionPrimaria: string;
   readonly conversionesSecundarias: readonly string[];
+}
+
+/**
+ * Eventos del embudo en orden declarado (primaria primero), sin repeticiones. Determinista: dos
+ * llamadas con el mismo embudo producen exactamente la misma lista.
+ */
+export function eventosDelEmbudo(embudo: EmbudoDeConversion): readonly string[] {
+  const vistos = new Set<string>();
+  const salida: string[] = [];
+  for (const e of [embudo.conversionPrimaria, ...embudo.conversionesSecundarias]) {
+    const nombre = (e ?? '').trim();
+    if (!nombre || vistos.has(nombre)) continue;
+    vistos.add(nombre);
+    salida.push(nombre);
+  }
+  return salida;
+}
+
+/** Contexto de negocio con el que razona el Director. No es un segundo motor: es su configuración. */
+export interface DirectorContext extends EmbudoDeConversion {
+  readonly descripcion: string;
   readonly vocabulario: readonly string[];
 }
 
@@ -141,6 +166,33 @@ export interface CredencialRef {
   readonly secretRef: string;
 }
 
+/**
+ * CONFIGURACIÓN DE INGESTA de una fuente `GROWTH`. Es la fuente —y no el adaptador— quien determina
+ * a qué origen se llama, qué hosts están autorizados, por qué ruta y con qué credencial. Sin esto,
+ * el adaptador tendría que conocer proveedores concretos, que es precisamente lo que se elimina.
+ *
+ * PROHIBIDO aquí: el VALOR del secreto. Sólo el nombre lógico de la credencial que la fuente exige
+ * (su referencia opaca vive en `credenciales`).
+ */
+export interface ConfiguracionGrowth {
+  /** Origen base del puente M2M (p. ej. `https://<host>`). */
+  readonly baseUrl: string;
+  /**
+   * Allowlist CERRADA de hosts a los que puede viajar la credencial (default-deny). NUNCA comodines.
+   * Vacía ⇒ no se autoriza ningún host (deniega todo); jamás significa «permitir todo».
+   */
+  readonly hostsAutorizados: readonly string[];
+  /** Ruta del endpoint de ingesta en el proveedor (debe empezar por `/`). */
+  readonly rutaIngesta: string;
+  /** Nombre lógico —dentro de `credenciales` de la fuente— de la credencial de ingesta. */
+  readonly nombreLogicoCredencial: string;
+  /**
+   * Nombre de la variable de entorno que, SI está definida, sustituye a `baseUrl` en despliegues
+   * operativos (staging/local). La declara la fuente: no hay variable global de plataforma.
+   */
+  readonly baseUrlEnvOverride?: string | null;
+}
+
 /** Una fuente de datos SIEMPRE pertenece a una organización. No existen fuentes globales. */
 export interface FuenteRegistrada {
   readonly sourceId: string;
@@ -154,6 +206,8 @@ export interface FuenteRegistrada {
   readonly soloLectura: true;
   /** Qué falta para conectarla. Vacío sólo cuando ya está conectada o no aplica. */
   readonly faltantes: readonly string[];
+  /** Configuración de ingesta de las fuentes `GROWTH`. Ausente/`null` en cualquier otro tipo. */
+  readonly growth?: ConfiguracionGrowth | null;
 }
 
 /** Configuración de la experiencia legacy "decisión del primer piloto" para una organización. */
@@ -182,6 +236,12 @@ export interface NegocioRegistrado {
   readonly decisionPiloto: ConfiguracionDecisionPiloto | null;
   /** Datos que SOEC no puede deducir y debe aportar una persona. Visibles en la UI. */
   readonly datosHumanosPendientes: readonly string[];
+  /**
+   * Territorio comercial DECLARADO por el negocio. Cuando existe, es un límite duro: ninguna campaña de
+   * la organización puede planificarse fuera de él (se comprueba al crear y al editar borradores).
+   * Ausente ⇒ la organización no ha declarado territorio y no se impone ninguno (no se infiere).
+   */
+  readonly alcanceComercial?: AlcanceGeografico | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -267,5 +327,10 @@ export interface ConfiguracionOrganizacion {
   readonly perfilComercial: PerfilComercial | null;
   /** POLÍTICA de evaluación (objetivo/criterio/política/cuenta). `null` ⇒ no evaluable. */
   readonly perfil: BusinessEvaluationProfile | null;
+  /**
+   * EMBUDO propio de la organización. Ausente/`null` ⇒ se deriva del `directorContext` de su perfil
+   * (si lo tiene). Nunca se hereda el de otra organización: si no hay ninguno de los dos, se lanza.
+   */
+  readonly embudo?: EmbudoDeConversion | null;
   readonly fuentes: readonly FuenteRegistrada[];
 }

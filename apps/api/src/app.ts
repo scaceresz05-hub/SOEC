@@ -152,6 +152,7 @@ import { crearComposicionGoogleAdsOAuth } from './acquisition/google-ads-runtime
 import type { ComponentesFlujoGoogleAds } from './acquisition/google-ads-oauth-flow';
 import { registerAccionRoutes } from './accion/accion-routes';
 import { registerCampanaRoutes } from './campana/campana-routes';
+import { registerCampaniasBorradorRoutes } from './campanias-borrador-routes';
 import { registerMetaDataDeletionPublico } from './acquisition/meta-data-deletion';
 import { crearComposicionMetaOAuth } from './acquisition/meta-runtime';
 import { registrarProteccionCsrf } from './csrf';
@@ -436,6 +437,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerGoogleAdsOAuthAutenticadas(target, { composicion: composicionGoogleAds, store: deps.store, env: process.env });
     registerAccionRoutes(target, deps.pool); // Safe Action Plane (V2-A): mandatos + budget guard + ledger
     registerCampanaRoutes(target, deps.pool); // V2-B/C: campaña + autonomía en dry-run/shadow (dormante)
+    registerCampaniasBorradorRoutes(target, deps.store, clock); // Campañas en BORRADOR (sin presupuesto ni ejecución)
 
     target.post('/events', async (req, reply) => {
       const ctx = contextFrom(req);
