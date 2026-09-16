@@ -161,28 +161,26 @@ describe('CP Odontología · configuración registrada', () => {
     // El estado refleja un HECHO verificado: el puente contra el host de STAGING está publicado, el
     // token depositado y la ingesta real corrió. Mismo valor que usa la fuente Growth de SmileFlow.
     expect(fuentes!.estado).toBe('CONNECTED_READ_ONLY');
-    // Conectada no significa completa: el host de PRODUCCIÓN sigue sin autorizar y así se declara.
+    // Nada pendiente para la fuente: endpoint publicado, token depositado y `www` autorizado.
     const registrada = getSources(ORG_CP_ODONTOLOGIA).find(
       (f) => f.sourceId === 'src-cp-odontologia-growth',
     );
-    expect(registrada!.faltantes).toEqual([
-      'host de producción autorizado (sólo cuando el sitio nuevo esté en producción)',
-    ]);
-    // Lo satisfecho ya no se declara pendiente: ni el endpoint ni el depósito del token.
-    expect(registrada!.faltantes.join(' ')).not.toMatch(/endpoint|token/i);
+    expect(registrada!.faltantes).toEqual([]);
   });
 
-  it('autoriza los hosts de PRODUCCIÓN sin dejar de autorizar el staging, y sin comodines', () => {
+  it('autoriza EXACTAMENTE staging y www: ni el ápice ni comodines', () => {
     const g = getFuenteGrowth(ORG_CP_ODONTOLOGIA);
     expect([...g.hostsAutorizados].sort()).toEqual([
       'cp-odontologia-stg.pages.dev',
-      'dentistaclaudiapacheco.cl',
       'www.dentistaclaudiapacheco.cl',
     ]);
+    // El ápice sigue en el servidor antiguo (sostiene el MX): nunca debe poder recibir el token.
+    expect(g.hostsAutorizados).not.toContain('dentistaclaudiapacheco.cl');
     // Allowlist CERRADA: ni comodines ni sufijos. Un '*' aquí convertiría default-deny en permitir todo.
     for (const h of g.hostsAutorizados) expect(h).not.toMatch(/[*?]/);
-    // Autorizar no es dirigir: hasta el corte, el origen efectivo sigue siendo el staging.
+    // El origen DECLARADO sigue siendo el staging; producción se fija por variable del despliegue.
     expect(g.baseUrl).toBe('https://cp-odontologia-stg.pages.dev');
+    expect(g.baseUrlEnvOverride).toBe('CP_ODONTOLOGIA_M2M_URL');
     expect(g.rutaIngesta).toBe('/integrations/soec/growth-events');
   });
 

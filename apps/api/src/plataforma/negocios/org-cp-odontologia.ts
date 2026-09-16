@@ -7,11 +7,11 @@
  * no cambia (es exactamente la puerta de extensión que `crearResolutorDeNegocios` ya probaba).
  *
  * ─────────────────────────────────────────────────────────────────────────────────────────────
- * ESTADO REAL EN ESTE GATE (3.2)
- *   · el sitio nuevo (Next.js) está en STAGING; producción sigue congelada e INTACTA;
- *   · el puente M2M `GROWTH` está CONECTADO en SOLO LECTURA contra el host de STAGING: el endpoint
- *     está publicado, el token depositado en los dos extremos y la ingesta real ya corrió. El host
- *     de PRODUCCIÓN sigue sin autorizar, que es lo único que queda en `faltantes`;
+ * ESTADO REAL
+ *   · el sitio nuevo (Next.js) está en PRODUCCIÓN en `https://www.dentistaclaudiapacheco.cl`; el
+ *     ÁPICE sigue deliberadamente en el servidor antiguo, porque de él depende el MX del correo;
+ *   · el puente M2M `GROWTH` está CONECTADO en SOLO LECTURA: endpoint publicado, token depositado en
+ *     los dos extremos y `www` autorizado; el despliegue lo consume vía `CP_ODONTOLOGIA_M2M_URL`;
  *   · NO hay cuenta de anuncios, ni analítica, ni economía medida ⇒ `perfil` (política de
  *     evaluación) permanece en `null` y ninguna experiencia REAL está habilitada.
  *
@@ -43,27 +43,28 @@ export const BUSINESS_KEY_CP_ODONTOLOGIA = 'cp-odontologia' as const;
 /** Provider PROPIO de la fuente Growth de CP. Nunca se reutiliza el de otra organización. */
 export const PROVIDER_GROWTH_CP_ODONTOLOGIA = 'cp-odontologia-growth' as const;
 
-/** Sitio público actual (producción CONGELADA en este gate: no se toca). */
+/** Sitio público en producción: el sitio nuevo, servido en `www` (canónico). */
 export const SITIO_CP_ODONTOLOGIA = 'https://www.dentistaclaudiapacheco.cl' as const;
 
 /**
- * Origen EFECTIVO del puente M2M. Sigue siendo el STAGING a propósito: la allowlist ya autoriza los
- * hosts de producción, pero el `baseUrl` no se mueve hasta que el dominio propio esté sirviendo el
- * sitio nuevo. Separar las dos cosas es deliberado: autorizar un host no dirige tráfico hacia él, y
- * apuntar a un host que todavía no responde dejaría la ingesta detenida sin motivo.
+ * Origen DECLARADO del puente M2M: el STAGING, donde se validó. El origen EFECTIVO en producción lo
+ * fija la variable `CP_ODONTOLOGIA_M2M_URL` del despliegue, que apunta a `www`; así un entorno sin
+ * esa variable nunca envía el token a producción por defecto.
  */
 export const BASE_URL_GROWTH_CP_ODONTOLOGIA = 'https://cp-odontologia-stg.pages.dev' as const;
 export const HOST_GROWTH_CP_ODONTOLOGIA = 'cp-odontologia-stg.pages.dev' as const;
 
 /**
- * Hosts de PRODUCCIÓN del sitio propio. Se autorizan los DOS —ápice y `www`— porque el canónico del
- * artefacto validado es `www` y el ápice redirige a él: `fetch` sigue la redirección, y la allowlist
- * se comprueba sobre la URL INICIAL, así que un origen autorizado que redirige a uno no autorizado
- * pasaría el control sin que nadie lo note. Autorizar ambos hace que el destino real del token esté
- * declarado en los dos casos.
+ * Host del sitio nuevo en PRODUCCIÓN: `www`, el canónico de los HTML, del `robots.txt` y del
+ * `sitemap.xml` validados. Es el ÚNICO host de producción autorizado.
+ *
+ * El ÁPICE NO se autoriza, y no por omisión: sigue en el servidor antiguo porque de su registro A
+ * depende el MX del correo. Ese servidor no sirve el puente (la ruta devuelve 404), así que
+ * autorizarlo sólo abriría un camino para que el token de ingesta viajara a un host ajeno al sitio
+ * nuevo. El traslado del ápice es una operación aparte.
  */
-export const HOST_PRODUCCION_CP_ODONTOLOGIA = 'dentistaclaudiapacheco.cl' as const;
-export const HOST_PRODUCCION_WWW_CP_ODONTOLOGIA = 'www.dentistaclaudiapacheco.cl' as const;
+export const HOST_WWW_CP_ODONTOLOGIA = 'www.dentistaclaudiapacheco.cl' as const;
+export const BASE_URL_WWW_CP_ODONTOLOGIA = 'https://www.dentistaclaudiapacheco.cl' as const;
 
 /**
  * Credencial de ingesta, SÓLO por referencia opaca. Su valor lo deposita una persona en el entorno;
@@ -99,19 +100,14 @@ const FUENTE_GROWTH_CP: FuenteRegistrada = {
   // como sin conectar una fuente de la que estaba ingiriendo.
   estado: 'CONNECTED_READ_ONLY',
   soloLectura: true,
-  // Sólo queda lo que sigue siendo cierto. El endpoint publicado y el token depositado ya no faltan.
-  // El host de producción NO se autoriza todavía: el sitio nuevo sigue en staging y
-  // `dentistaclaudiapacheco.cl` no se toca.
-  faltantes: ['host de producción autorizado (sólo cuando el sitio nuevo esté en producción)'],
+  // Nada pendiente para ESTA fuente: endpoint publicado, token depositado y host de producción (`www`)
+  // autorizado. Que el ápice siga en el servidor antiguo no es un requisito de la fuente Growth.
+  faltantes: [],
   growth: {
     baseUrl: BASE_URL_GROWTH_CP_ODONTOLOGIA,
-    // El staging SIGUE autorizado: es donde se validó el puente y donde apunta `baseUrl` hasta el
-    // corte. Añadir los hosts propios no cambia a dónde va el tráfico, sólo a dónde SE PERMITE ir.
-    hostsAutorizados: [
-      HOST_GROWTH_CP_ODONTOLOGIA,
-      HOST_PRODUCCION_CP_ODONTOLOGIA,
-      HOST_PRODUCCION_WWW_CP_ODONTOLOGIA,
-    ],
+    // Staging y `www`, y nada más. El staging sigue autorizado porque es el origen declarado y donde
+    // se validó el puente; el ápice queda fuera a propósito (ver HOST_WWW_CP_ODONTOLOGIA).
+    hostsAutorizados: [HOST_GROWTH_CP_ODONTOLOGIA, HOST_WWW_CP_ODONTOLOGIA],
     rutaIngesta: '/integrations/soec/growth-events',
     nombreLogicoCredencial: CREDENCIAL_GROWTH_CP_ODONTOLOGIA.nombreLogico,
     baseUrlEnvOverride: 'CP_ODONTOLOGIA_M2M_URL',
