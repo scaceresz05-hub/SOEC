@@ -242,6 +242,18 @@ export interface NegocioRegistrado {
    * Ausente ⇒ la organización no ha declarado territorio y no se impone ninguno (no se infiere).
    */
   readonly alcanceComercial?: AlcanceGeografico | null;
+  /**
+   * Cómo se describe el negocio a sí mismo («clínica odontológica»). DECLARADO, no derivado del modelo:
+   * `modeloDeNegocio` dice cómo se evalúa, no qué es. Ausente ⇒ la interfaz usa la etiqueta del modelo.
+   */
+  readonly tipoDeNegocio?: string;
+  /** Objetivo comercial en lenguaje de negocio. No es una meta numérica ni un KPI. */
+  readonly objetivoComercial?: string;
+  /**
+   * Especialidad fuerte y otras líneas que el negocio también presta, tal como las declara. Sólo líneas
+   * declaradas: nunca prestaciones inferidas ni un catálogo de tratamientos.
+   */
+  readonly especialidad?: { readonly principal: string; readonly tambienPresta: readonly string[] };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

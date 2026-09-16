@@ -18,6 +18,7 @@ import {
   VentasComercioService,
   embudoNoInstrumentado,
 } from '@soec/comercio';
+import { describirAlcance } from '@soec/campanias';
 import { contextoDe } from './superficie-auth';
 import { estadoDeposito } from './plataforma/deposito-secretos';
 import {
@@ -29,6 +30,19 @@ import {
   organizacionesRegistradas,
   buscarNegocio,
 } from './plataforma';
+
+/**
+ * Identidad comercial DECLARADA del negocio para la interfaz. Todo `null` cuando no está declarado: la
+ * interfaz decide qué mostrar en su lugar, pero la API nunca rellena con la descripción de otro negocio.
+ */
+function identidadComercial(n: NonNullable<ReturnType<typeof buscarNegocio>>) {
+  return {
+    tipoDeNegocio: n.tipoDeNegocio ?? null,
+    objetivoComercial: n.objetivoComercial ?? null,
+    especialidad: n.especialidad ?? null,
+    ubicacionComercial: n.alcanceComercial ? describirAlcance(n.alcanceComercial) : null,
+  };
+}
 
 /** Vista de una fuente para la UI. Sin `credentialRef` ni `externalAccountId`: no son de la vista. */
 interface FuenteVista {
@@ -83,6 +97,7 @@ export function registerPlataformaRoutes(app: FastifyInstance, store?: EventStor
       mercado: negocio.mercado,
       estado: negocio.estado,
       categoriasDeclaradas: negocio.categoriasDeclaradas,
+      ...identidadComercial(negocio),
       // Honestidad epistémica: se declara si HAY perfil, no se fabrica uno.
       perfilDeEvaluacion: perfil
         ? {
@@ -122,6 +137,8 @@ export function registerPlataformaRoutes(app: FastifyInstance, store?: EventStor
         estado: n.estado,
         modeloDeNegocio: n.modeloDeNegocio,
         mercado: n.mercado,
+        tipoDeNegocio: n.tipoDeNegocio ?? null,
+        ubicacionComercial: n.alcanceComercial ? describirAlcance(n.alcanceComercial) : null,
       }));
     return reply.send({ negocios, filtradoPorMembresia: false });
   });

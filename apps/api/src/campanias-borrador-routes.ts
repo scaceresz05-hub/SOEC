@@ -35,10 +35,12 @@ import {
   type CambiosBorrador,
   type Campania,
   type EntradaBorrador,
+  type EstadoCampania,
 } from '@soec/campanias';
 import { DecisionMktService, type EntradaDecision } from '@soec/decisiones-mkt';
 import { contextoDe, exigir } from './superficie-auth';
 import { buscarNegocio } from './plataforma';
+import type { ListadorCampanias } from './campanias-listado';
 
 const BODY_LIMIT = 64 * 1024;
 
@@ -97,7 +99,14 @@ async function vista(svc: CampaniaService, ctx: RequestContext, c: Campania): Pr
   };
 }
 
-export function registerCampaniasBorradorRoutes(app: FastifyInstance, store: EventStore, clock: Clock): void {
+const ESTADOS_CAMPANIA: readonly EstadoCampania[] = ['BORRADOR', 'ACTIVA', 'PAUSADA', 'COMPLETADA', 'CANCELADA'];
+
+export function registerCampaniasBorradorRoutes(
+  app: FastifyInstance,
+  store: EventStore,
+  clock: Clock,
+  listador: ListadorCampanias | null = null,
+): void {
   const campanias = new CampaniaService(store);
   const decisiones = new DecisionMktService(store);
   const opts = { config: { bodyLimit: BODY_LIMIT } };
@@ -196,6 +205,29 @@ export function registerCampaniasBorradorRoutes(app: FastifyInstance, store: Eve
   });
 
   // Leer una campaña de la organización autenticada.
+  // Listar las campañas de la organización AUTENTICADA (opcionalmente por estado: ?estado=BORRADOR).
+  app.get('/campanias', async (req: FastifyRequest, reply: FastifyReply) => {
+    exigir(req, 'campaign.read');
+    const ctx = contextoDe(req);
+    const org = String(ctx.organizationId);
+    const { estado } = (req.query ?? {}) as { estado?: string };
+    if (estado !== undefined && !ESTADOS_CAMPANIA.includes(estado as EstadoCampania)) {
+      return reply.code(400).send({ error: 'ENTRADA_INVALIDA', message: `estado desconocido: ${estado}` });
+    }
+    if (listador === null) {
+      // Un store que no se sabe enumerar no produce una lista vacía: eso diría "no hay campañas".
+      return reply.code(503).send({ error: 'LISTADO_NO_DISPONIBLE', message: 'el store de eventos de este despliegue no permite enumerar campañas' });
+    }
+    const campaniasVista: Record<string, unknown>[] = [];
+    for (const id of await listador.idsDe(org)) {
+      const c = await campanias.cargar(ctx, id);
+      if (!c.existe || c.organizacionId !== org) continue;
+      if (estado !== undefined && c.estado !== estado) continue;
+      campaniasVista.push(await vista(campanias, ctx, c));
+    }
+    return reply.send({ organizationId: org, estado: estado ?? null, total: campaniasVista.length, campanias: campaniasVista });
+  });
+
   app.get('/campanias/:campaniaId', async (req: FastifyRequest, reply: FastifyReply) => {
     exigir(req, 'campaign.read');
     const ctx = contextoDe(req);

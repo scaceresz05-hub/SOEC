@@ -159,6 +159,11 @@ export const CONFIGURACION_ORG_CP_ODONTOLOGIA: ConfiguracionOrganizacion = {
       'economía del servicio (ticket, costos) desde una fuente autorizada',
     ],
     alcanceComercial: ALCANCE_COMERCIAL_CP_ODONTOLOGIA,
+    // Qué ES el negocio, declarado por el dueño. No se enumeran prestaciones de odontología general:
+    // mientras no estén confirmadas, no se afirma ninguna (ni Fonasa, convenios, urgencias, etc.).
+    tipoDeNegocio: 'clínica odontológica',
+    objetivoComercial: 'captar pacientes / evaluaciones odontológicas',
+    especialidad: { principal: 'rehabilitación oral', tambienPresta: ['odontología general'] },
   },
 
   /** Qué ES el negocio: hechos observados. La economía, toda desconocida. */

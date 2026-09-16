@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { cabecerasOrg, ETIQUETA_ESTADO_FUENTE, orgActiva } from '../../lib/org-activa';
+import { etiquetaTipo, etiquetaUbicacion, objetivoDeclarado, presentacionDe } from '../../lib/perfil-negocio';
 import { estadoAds, lineaObjetivoAds, midiendoContactos } from '../../lib/ads-estado';
 import { BotonActualizarAds } from '../../components/boton-actualizar-ads';
 import { CampaignOperator } from '../../components/campaign-operator';
@@ -27,6 +28,9 @@ interface FuenteVista { sourceId: string; tipo: string; proveedor: string; estad
 interface Negocio {
   displayName: string; legalName: string; rut: string | null; modeloDeNegocio: string; mercado: string;
   estado: string; categoriasDeclaradas: string[]; fuentes: FuenteVista[]; datosHumanosPendientes: string[];
+  // Identidad comercial DECLARADA (null si el negocio no la declara). Ver lib/perfil-negocio.
+  tipoDeNegocio?: string | null; objetivoComercial?: string | null; ubicacionComercial?: string | null;
+  especialidad?: { principal: string; tambienPresta: string[] } | null;
 }
 interface Motivo { codigo: string; explicacion: string; resuelveCon: string }
 interface Fundamentos { veredicto: string; motivos: Motivo[]; cimientosPresentes: string[]; puedeRecomendarInversionPublicitaria: boolean }
@@ -214,6 +218,8 @@ export default function Panel(): React.ReactElement {
   // negocio aún no cargaba (negocio=null) o el modelo era desconocido, lo que pintaba pestañas de tienda
   // (Ventas/Productos/Google Shopping) a negocios SaaS o mientras cargaba ⇒ superficies en blanco/fantasma.
   const esEcom = negocio?.modeloDeNegocio === 'ECOMMERCE_DISTRIBUCION';
+  // Servicios (p. ej. una clínica): ni tienda ni SaaS. Sin esta distinción se pintaba como SmileFlow.
+  const esServicios = presentacionDe(negocio?.modeloDeNegocio) === 'SERVICIOS';
   const tabsBandeja = useMemo(() => (Array.isArray(bandeja?.items) ? bandeja!.items!.length : 0), [bandeja]);
 
   const tabs: { id: TabId; label: string; count?: number }[] = useMemo(() => {
@@ -267,7 +273,7 @@ export default function Panel(): React.ReactElement {
           <span className="bhav" style={{ background: colorDeNegocio(org) }} aria-hidden="true">{iniciales(negocio.displayName)}</span>
           <div style={{ minWidth: 0 }}>
             <div className="bhname">{negocio.displayName}</div>
-            <div className="bhkind">{esEcom ? 'E-commerce / distribución' : 'Software dental (SaaS)'} · {negocio.mercado}</div>
+            <div className="bhkind">{etiquetaTipo(negocio)} · {etiquetaUbicacion(negocio)}</div>
           </div>
           <div className="bhright" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {ver && <><span className="small muted">Estado SOEC:</span> <Badge tono={ver.tono}>{ver.texto}</Badge></>}
@@ -606,11 +612,39 @@ export default function Panel(): React.ReactElement {
         </>
       )}
       {tab === 'contactos' && !esEcom && !panel && (
-        <EmptyState ico="👥" titulo="Todavía no hay contactos para mostrar" detalle="Cuando una persona solicite una demo o deje sus datos en tu sitio, aparecerá aquí. Aún no hay contactos reales medidos." />
+        <EmptyState
+          ico="👥"
+          titulo="Todavía no hay contactos para mostrar"
+          detalle={esServicios
+            ? 'Cuando una persona te contacte desde tu sitio, aparecerá aquí. Aún no hay contactos reales medidos.'
+            : 'Cuando una persona solicite una demo o deje sus datos en tu sitio, aparecerá aquí. Aún no hay contactos reales medidos.'}
+        />
       )}
 
       {/* ══════════════ OBJETIVOS ══════════════ */}
-      {tab === 'objetivos' && (
+      {tab === 'objetivos' && esServicios && negocio && (
+        <>
+          <div className="section">Objetivo del negocio</div>
+          <div className="card">
+            <p className="eyebrow">Objetivo principal</p>
+            {objetivoDeclarado(negocio)
+              ? <p style={{ fontSize: 18, fontWeight: 750, margin: '2px 0 8px' }}>{objetivoDeclarado(negocio)}</p>
+              : <p className="s">Este negocio todavía no declaró su objetivo comercial. SOEC no lo supone.</p>}
+            <p className="s"><b>Tipo de negocio:</b> {etiquetaTipo(negocio)}</p>
+            <p className="s"><b>Ubicación comercial:</b> {etiquetaUbicacion(negocio)}</p>
+            {negocio.especialidad && (
+              <>
+                <p className="s"><b>Especialidad:</b> {negocio.especialidad.principal}</p>
+                {negocio.especialidad.tambienPresta.length > 0 && (
+                  <p className="s"><b>También presta:</b> {negocio.especialidad.tambienPresta.join(', ')}</p>
+                )}
+              </>
+            )}
+            <p className="s"><b>Estado:</b> todavía no hay datos suficientes para sacar conclusiones.</p>
+          </div>
+        </>
+      )}
+      {tab === 'objetivos' && !esServicios && (
         esEcom ? (
           <>
             <div className="section">Objetivo del negocio</div>
