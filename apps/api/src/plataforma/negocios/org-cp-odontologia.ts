@@ -9,8 +9,9 @@
  * ─────────────────────────────────────────────────────────────────────────────────────────────
  * ESTADO REAL EN ESTE GATE (3.2)
  *   · el sitio nuevo (Next.js) está en STAGING; producción sigue congelada e INTACTA;
- *   · el puente M2M `GROWTH` está DECLARADO pero NO CONECTADO: no hay endpoint publicado ni token
- *     depositado. `NOT_CONNECTED` ≠ «cero datos»;
+ *   · el puente M2M `GROWTH` está CONECTADO en SOLO LECTURA contra el host de STAGING: el endpoint
+ *     está publicado, el token depositado en los dos extremos y la ingesta real ya corrió. El host
+ *     de PRODUCCIÓN sigue sin autorizar, que es lo único que queda en `faltantes`;
  *   · NO hay cuenta de anuncios, ni analítica, ni economía medida ⇒ `perfil` (política de
  *     evaluación) permanece en `null` y ninguna experiencia REAL está habilitada.
  *
@@ -73,7 +74,7 @@ export const EMBUDO_CP_ODONTOLOGIA: EmbudoDeConversion = {
   conversionesSecundarias: ['appointment_intent', 'phone_intent'],
 };
 
-/** Fuente GROWTH de CP: declarada, con su propio provider, host, ruta y credencial. Sin conectar. */
+/** Fuente GROWTH de CP: su propio provider, host, ruta y credencial. Conectada en SOLO LECTURA. */
 const FUENTE_GROWTH_CP: FuenteRegistrada = {
   sourceId: 'src-cp-odontologia-growth',
   organizationId: ORG_CP_ODONTOLOGIA,
@@ -81,14 +82,16 @@ const FUENTE_GROWTH_CP: FuenteRegistrada = {
   tipo: 'GROWTH',
   externalAccountId: null,
   credenciales: [CREDENCIAL_GROWTH_CP_ODONTOLOGIA],
-  // DECLARADA pero SIN CONECTAR: el endpoint aún no existe y el token no está depositado.
-  estado: 'NOT_CONNECTED',
+  // CONECTADA en SOLO LECTURA, igual que la de SmileFlow: el endpoint M2M del staging está publicado,
+  // el token está depositado en los dos extremos y la ingesta real ya corrió contra este host. El
+  // estado es un HECHO verificado, no una intención: mientras decía `NOT_CONNECTED`, SOEC informaba
+  // como sin conectar una fuente de la que estaba ingiriendo.
+  estado: 'CONNECTED_READ_ONLY',
   soloLectura: true,
-  faltantes: [
-    'endpoint M2M de eventos Growth publicado en el sitio nuevo',
-    'token de ingesta depositado en CP_ODONTOLOGIA_GROWTH_TOKEN (lo deposita una persona)',
-    'host de producción autorizado (sólo cuando el sitio nuevo esté en producción)',
-  ],
+  // Sólo queda lo que sigue siendo cierto. El endpoint publicado y el token depositado ya no faltan.
+  // El host de producción NO se autoriza todavía: el sitio nuevo sigue en staging y
+  // `dentistaclaudiapacheco.cl` no se toca.
+  faltantes: ['host de producción autorizado (sólo cuando el sitio nuevo esté en producción)'],
   growth: {
     baseUrl: BASE_URL_GROWTH_CP_ODONTOLOGIA,
     hostsAutorizados: [HOST_GROWTH_CP_ODONTOLOGIA],

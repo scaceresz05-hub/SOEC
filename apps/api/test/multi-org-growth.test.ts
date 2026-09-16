@@ -56,6 +56,7 @@ import {
   getEmbudo,
   getFuenteGrowth,
   getProfile,
+  getSources,
   organizacionesRegistradas,
 } from '../src/plataforma';
 import { ORG_CYP } from '../src/plataforma/negocios/org-cyp';
@@ -150,14 +151,25 @@ describe('CP Odontología · configuración registrada', () => {
     expect(n.experienciasHabilitadas).toEqual([]);
   });
 
-  it('declara UNA fuente GROWTH propia, por referencia opaca y sin conectar', () => {
+  it('declara UNA fuente GROWTH propia, por referencia opaca y conectada en solo lectura', () => {
     const fuentes = getBusiness(ORG_CP_ODONTOLOGIA) && buscarFuenteGrowth(ORG_CP_ODONTOLOGIA);
     expect(fuentes).not.toBeNull();
     expect(fuentes!.provider).toBe(PROVIDER_GROWTH_CP_ODONTOLOGIA);
     expect(fuentes!.provider).toBe('cp-odontologia-growth');
     expect(fuentes!.organizationId).toBe(ORG_CP_ODONTOLOGIA);
     expect(fuentes!.credencialRef).toBe('env:CP_ODONTOLOGIA_GROWTH_TOKEN');
-    expect(fuentes!.estado).toBe('NOT_CONNECTED'); // declarada ≠ conectada
+    // El estado refleja un HECHO verificado: el puente contra el host de STAGING está publicado, el
+    // token depositado y la ingesta real corrió. Mismo valor que usa la fuente Growth de SmileFlow.
+    expect(fuentes!.estado).toBe('CONNECTED_READ_ONLY');
+    // Conectada no significa completa: el host de PRODUCCIÓN sigue sin autorizar y así se declara.
+    const registrada = getSources(ORG_CP_ODONTOLOGIA).find(
+      (f) => f.sourceId === 'src-cp-odontologia-growth',
+    );
+    expect(registrada!.faltantes).toEqual([
+      'host de producción autorizado (sólo cuando el sitio nuevo esté en producción)',
+    ]);
+    // Lo satisfecho ya no se declara pendiente: ni el endpoint ni el depósito del token.
+    expect(registrada!.faltantes.join(' ')).not.toMatch(/endpoint|token/i);
   });
 
   it('la configuración NO contiene el valor de ningún secreto', () => {
