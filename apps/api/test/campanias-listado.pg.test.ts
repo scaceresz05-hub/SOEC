@@ -81,7 +81,7 @@ async function usuarioConOrg(app: ReturnType<typeof buildApp>, email: string, sl
 }
 
 describe('GET /campanias · PostgreSQL real + gateway', () => {
-  it('descubre y reconstruye los 3 borradores de CP guardados con la forma de producción, sin escribir', async () => {
+  it('descubre y reconstruye los 4 borradores de CP guardados con la forma de producción, sin escribir', async () => {
     const store = new PgEventStore(pool);
     await sembrarComoProduccion(store);
     const eventosAntes = (await pool.query<{ n: number }>('select count(*)::int n from events')).rows[0]!.n;
@@ -91,10 +91,11 @@ describe('GET /campanias · PostgreSQL real + gateway', () => {
     const r = await app.inject({ method: 'GET', url: '/campanias?estado=BORRADOR', headers: { ...H, cookie, 'x-organization-slug': CP } });
     expect(r.statusCode, r.body).toBe(200);
     const v = r.json();
-    expect(v.total).toBe(3);
+    expect(v.total).toBe(4);
     expect(v.campanias.map((c: { campania: { campaniaId: string; presupuesto: unknown; estado: string } }) => [c.campania.campaniaId, c.campania.estado, c.campania.presupuesto])).toEqual([
       ['cp-carillas-estetica-provincia-curico', 'BORRADOR', null],
       ['cp-implantes-provincia-curico', 'BORRADOR', null],
+      ['cp-odontologia-general-provincia-curico', 'BORRADOR', null],
       ['cp-rehabilitacion-protesis-provincia-curico', 'BORRADOR', null],
     ]);
     for (const c of v.campanias) expect(c.geographicScope).toBe('Provincia de Curicó, Región del Maule, Chile');

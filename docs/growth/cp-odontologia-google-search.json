@@ -1,0 +1,73 @@
+{
+  "organizationId": "org-cp-odontologia",
+  "estado": "PREPARADA_SIN_ACTIVAR",
+  "nota": "Arquitectura para cuando exista la cuenta Google Ads de CP. No crea nada en Google, no fija presupuesto y no activa gasto. Fuente: docs/growth/cp-odontologia-fase-5-estructura-comercial.md",
+  "campania": {
+    "nombre": "CP | Search | Provincia de Curicó",
+    "tipo": "SEARCH",
+    "presupuesto": null,
+    "presupuestoCompartido": true,
+    "redes": { "busquedaGoogle": true, "sociosDeBusqueda": false, "display": false },
+    "segmentacionGeografica": {
+      "alcanceComercial": "Provincia de Curicó, Región del Maule, Chile",
+      "comunasAlcanceComercial": ["Curicó", "Teno", "Romeral", "Rauco", "Molina", "Sagrada Familia", "Hualañé", "Licantén", "Vichuquén"],
+      "comunasEjecutablesGoogleAds": ["Curicó", "Molina", "Teno", "Sagrada Familia", "Rauco", "Licantén"],
+      "comunasNoSegmentablesSinDesborde": ["Romeral", "Hualañé", "Vichuquén"],
+      "criterioUbicacion": "PRESENCIA"
+    },
+    "parametrosUrlFinal": "utm_source=google",
+    "parametrosProhibidosHaciaSoec": ["utm_campaign", "utm_content", "utm_term", "gclid", "keyword", "search_term"],
+    "negativasCampania": [
+      "fonasa", "bono fonasa", "dentista fonasa", "dental fonasa",
+      "gratis", "gratuito", "curso", "cursos", "diplomado", "capacitación", "universidad", "estudiar",
+      "trabajo", "empleo", "sueldo", "laboratorio dental", "técnico dental", "proveedor", "venta", "mayorista",
+      "ortodoncia", "brackets", "invisalign",
+      "veterinario", "perro", "gato", "mascota"
+    ],
+    "grupos": [
+      {
+        "id": "AG1",
+        "nombre": "Odontología General",
+        "borradorSoec": "cp-odontologia-general-provincia-curico",
+        "urlsFinales": ["https://www.dentistaclaudiapacheco.cl/odontologia-general/?utm_source=google"],
+        "keywords": ["dentista curico", "clinica dental curico", "centro dental curico", "mejores dentistas en curico", "odontologia general curico"],
+        "negativasGrupo": ["implante", "implantes", "prótesis", "placa dental", "corona dental", "puente dental", "carillas"]
+      },
+      {
+        "id": "AG2",
+        "nombre": "Implantes",
+        "borradorSoec": "cp-implantes-provincia-curico",
+        "urlsFinales": ["https://www.dentistaclaudiapacheco.cl/servicios/implantes-dentales/?utm_source=google"],
+        "keywords": ["implantes dentales curicó", "implante dental curicó", "reemplazar diente perdido", "diente perdido solución fija", "evaluación implantes dentales curicó", "consulta implantes dentales"],
+        "negativasGrupo": ["implante mamario", "implante capilar", "implante coclear", "implante anticonceptivo", "implante subdérmico"]
+      },
+      {
+        "id": "AG3",
+        "nombre": "Prótesis",
+        "borradorSoec": "cp-rehabilitacion-protesis-provincia-curico",
+        "urlsFinales": [
+          "https://www.dentistaclaudiapacheco.cl/servicios/protesis-removibles-totales/?utm_source=google",
+          "https://www.dentistaclaudiapacheco.cl/servicios/protesis-removibles-parciales/?utm_source=google",
+          "https://www.dentistaclaudiapacheco.cl/servicios/protesis-hibrida/?utm_source=google"
+        ],
+        "keywords": ["placa dental curicó", "prótesis dental curicó", "dentadura postiza curicó", "prótesis removible parcial", "prótesis flexible", "valplast curicó", "prótesis híbrida curicó", "dientes fijos sin placa"],
+        "negativasGrupo": ["prótesis de cadera", "prótesis de rodilla", "prótesis de pierna", "prótesis mamaria", "ortopédica", "ortopedia", "adhesivo para placas", "pegamento placa", "corega", "pastillas limpiadoras"]
+      },
+      {
+        "id": "AG4",
+        "nombre": "Coronas / Puentes",
+        "borradorSoec": "cp-rehabilitacion-protesis-provincia-curico",
+        "urlsFinales": [
+          "https://www.dentistaclaudiapacheco.cl/servicios/coronas-dentales/?utm_source=google",
+          "https://www.dentistaclaudiapacheco.cl/servicios/puentes-dentales/?utm_source=google"
+        ],
+        "keywords": ["corona dental curicó", "puente dental curicó", "puente fijo dental"],
+        "negativasGrupo": ["implante", "implantes"]
+      }
+    ]
+  },
+  "keywordsRetiradas": ["dentista curico fonasa", "dentista fonasa curico"],
+  "fueraDePautaPagada": [
+    { "borradorSoec": "cp-carillas-estetica-provincia-curico", "linea": "Carillas y Estética", "pautaPagada": false, "motivo": "Sin casos clínicos reales y anonimizados de carillas; canal orgánico (Instagram) primero." }
+  ]
+}

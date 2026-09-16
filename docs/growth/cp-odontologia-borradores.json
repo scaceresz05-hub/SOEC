@@ -196,6 +196,87 @@
         "criterioExito": "Por definir con línea base real",
         "criterioFracaso": "Por definir con línea base real"
       }
+    },
+    {
+      "campaniaId": "cp-odontologia-general-provincia-curico",
+      "campania": {
+        "nombre": "CP | Odontología General | Provincia de Curicó",
+        "objetivo": "Generar evaluaciones/contactos (GENERATE_LEADS)",
+        "publico": "Personas ubicadas o habitualmente presentes en la Provincia de Curicó (Región del Maule, Chile) que buscan atención dental general.",
+        "propuesta": "Atención de odontología general en CP Odontología con evaluación previa: evaluación general, limpieza / destartraje, obturaciones por caries, extracciones, endodoncia, urgencias dentales, tratamiento de encías, blanqueamiento, odontopediatría y radiografías. Atención particular y seguro dental.",
+        "mensaje": "Mensaje único del sitio: «Hola, quisiera agendar una evaluación.» Sin variantes por tratamiento.",
+        "canal": "GOOGLE_SEARCH",
+        "contenidoRequerido": [
+          "Textos de anuncio de búsqueda para el grupo Odontología General, sin precios, promociones, horarios, aseguradoras específicas, Fonasa ni promesas de resultado clínico"
+        ],
+        "calendario": "Sin fecha: se define junto con el presupuesto",
+        "presupuesto": null,
+        "hipotesis": [
+          "HIPÓTESIS: Google Search capta búsquedas locales genéricas («dentista curico», «clinica dental curico») con coincidencia directa con la landing de odontología general.",
+          "HIPÓTESIS: por el bajo volumen local, este grupo aporta la mayor parte de la demanda de la campaña Search compartida."
+        ],
+        "metricas": [
+          "whatsapp_intent",
+          "phone_intent"
+        ],
+        "criterioExito": "Por definir con una línea base real antes de activar. Se medirá en contactos (whatsapp_intent, phone_intent) por canal normalizado; no se fija ningún umbral sin datos.",
+        "criterioPausa": "Por definir con una línea base real antes de activar; ningún umbral de costo por contacto se fija sin datos.",
+        "riesgos": [
+          "SOEC no puede atribuir un contacto a esta campaña por diseño de la privacidad V1: los contactos se miden por canal y el interés por servicio sólo como agregado anónimo diario.",
+          "Las búsquedas con «fonasa» atraen una modalidad que la clínica no atiende: se excluyen con negativas.",
+          "Búsquedas genéricas pueden solaparse con los grupos de rehabilitación: requieren negativas cruzadas dentro de la campaña compartida."
+        ],
+        "destino": "https://www.dentistaclaudiapacheco.cl/odontologia-general/",
+        "destinosPorGrupo": [],
+        "requisitosPrevios": [
+          "Definir el presupuesto (hoy null) antes de cualquier activación.",
+          "Ejecutar en Google Ads como grupo AG1 de la campaña única «CP | Search | Provincia de Curicó» (docs/growth/cp-odontologia-fase-5-estructura-comercial.md), no como campaña independiente.",
+          "Las URLs finales de Google Search deben llevar utm_source=google: un clic que llega sólo con gclid se clasifica como orgánico.",
+          "Segmentación ejecutable en Google Ads: Curicó, Molina, Teno, Sagrada Familia, Rauco y Licantén, con la opción de presencia; Romeral, Hualañé y Vichuquén siguen dentro del alcance comercial pero no se segmentan por separado.",
+          "Keywords válidas: dentista curico · clinica dental curico · centro dental curico · mejores dentistas en curico · odontologia general curico. Negativas: fonasa · bono fonasa · dentista fonasa · dental fonasa.",
+          "No enviar utm_campaign, utm_content, gclid, keyword ni término de búsqueda a SOEC, ni asociar al contacto tratamiento, servicio, página, path o texto clínico.",
+          "Definir criterio de éxito y de pausa con una línea base real."
+        ],
+        "alcanceGeografico": {
+          "pais": "Chile",
+          "region": "Región del Maule",
+          "provincia": "Provincia de Curicó",
+          "comunas": [
+            "Curicó",
+            "Teno",
+            "Romeral",
+            "Rauco",
+            "Molina",
+            "Sagrada Familia",
+            "Hualañé",
+            "Licantén",
+            "Vichuquén"
+          ],
+          "criterioUbicacion": "PRESENCIA"
+        }
+      },
+      "decision": {
+        "objetivo": "Generar evaluaciones/contactos (GENERATE_LEADS)",
+        "contexto": "Borrador de planificación de la línea Odontología General. Presupuesto no decidido. Territorio exclusivo: Provincia de Curicó, Región del Maule, Chile. Modalidad: atención particular y seguro dental; no Fonasa.",
+        "fuentes": [
+          "docs/growth/cp-odontologia-fase-5-estructura-comercial.md",
+          "https://www.dentistaclaudiapacheco.cl/odontologia-general/"
+        ],
+        "faltantesObligatorios": [
+          "presupuesto (pendiente de decisión del dueño)",
+          "línea base real de contactos por canal"
+        ],
+        "hipotesis": [
+          "Google Search capta la demanda local genérica de atención dental con una landing específica."
+        ],
+        "justificacion": "Prestaciones de odontología general confirmadas por la clínica y landing productiva dedicada; es la búsqueda local de mayor volumen relativo.",
+        "riesgos": [
+          "Atribución por campaña imposible por diseño de privacidad V1",
+          "Solapamiento con los grupos de rehabilitación dentro de la campaña compartida"
+        ],
+        "criterioExito": "Por definir con línea base real",
+        "criterioFracaso": "Por definir con línea base real"
+      }
     }
   ]
 }

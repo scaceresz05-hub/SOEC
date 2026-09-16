@@ -209,7 +209,7 @@ describe('6 · borradores de CP ya almacenados → listables por el tenant, sin 
     }
   }
 
-  it('GET /campanias?estado=BORRADOR devuelve las 3 de CP con su estado, presupuesto null y territorio', async () => {
+  it('GET /campanias?estado=BORRADOR devuelve las 4 de CP con su estado, presupuesto null y territorio', async () => {
     const store = new InMemoryEventStore();
     await sembrarComoProduccion(store);
     const app = await appLegacy(store);
@@ -217,10 +217,11 @@ describe('6 · borradores de CP ya almacenados → listables por el tenant, sin 
     expect(r.statusCode, r.body).toBe(200);
     const v = r.json();
     expect(v.organizationId).toBe(CP);
-    expect(v.total).toBe(3);
+    expect(v.total).toBe(4);
     expect(v.campanias.map((c: { campania: { campaniaId: string } }) => c.campania.campaniaId)).toEqual([
       'cp-carillas-estetica-provincia-curico',
       'cp-implantes-provincia-curico',
+      'cp-odontologia-general-provincia-curico',
       'cp-rehabilitacion-protesis-provincia-curico',
     ]);
     for (const c of v.campanias) {

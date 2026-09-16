@@ -54,16 +54,17 @@ const lectura = (org: string): RequestContext => {
 const porId = (id: string): Borrador => ESPEC.borradores.find((b) => b.campaniaId === id)!;
 
 describe('Campañas CP en BORRADOR · creación con los cuerpos reales', () => {
-  it('la especificación es de CP y trae las tres líneas con su canal', () => {
+  it('la especificación es de CP y trae las cuatro líneas con su canal', () => {
     expect(ESPEC.organizationId).toBe(CP);
     expect(ESPEC.borradores.map((b) => [b.campania.nombre, b.campania.canal])).toEqual([
       ['CP | Implantes | Provincia de Curicó', 'GOOGLE_SEARCH'],
       ['CP | Rehabilitación y Prótesis | Provincia de Curicó', 'GOOGLE_SEARCH'],
       ['CP | Carillas y Estética | Provincia de Curicó', 'ORGANIC_INSTAGRAM'],
+      ['CP | Odontología General | Provincia de Curicó', 'GOOGLE_SEARCH'],
     ]);
   });
 
-  it('crea los tres borradores: BORRADOR, presupuesto null, organización y territorio correctos', async () => {
+  it('crea los cuatro borradores: BORRADOR, presupuesto null, organización y territorio correctos', async () => {
     const { app, store } = montar();
     for (const b of ESPEC.borradores) {
       const r = await app.inject({ method: 'POST', url: '/campanias/borradores', headers: cab(CP), payload: b });
