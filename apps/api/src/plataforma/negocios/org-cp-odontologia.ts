@@ -26,6 +26,7 @@
  * Por eso el embudo V1 se construye SÓLO con eventos de intención comercial.
  * ─────────────────────────────────────────────────────────────────────────────────────────────
  */
+import type { AlcanceGeografico } from '@soec/campanias';
 import { desconocido } from '@soec/comercio';
 import { economiaSinMedir } from '../tipos';
 import type {
@@ -34,6 +35,26 @@ import type {
   EmbudoDeConversion,
   FuenteRegistrada,
 } from '../tipos';
+
+/**
+ * TERRITORIO COMERCIAL de CP Odontología: EXCLUSIVAMENTE la Provincia de Curicó (decisión del dueño).
+ *
+ * No es "Curicó y alrededores", ni la Región del Maule, ni Chile: son estas nueve comunas y ninguna
+ * más. Talca, Linares, Cauquenes, Constitución o San Fernando quedan fuera aunque estén cerca. Aplica a
+ * la planificación en SOEC, a Google Search, a Meta, al reporting y a cualquier recomendación de
+ * inversión; en SOEC se hace cumplir al crear y editar campañas.
+ *
+ * Criterio `PRESENCIA`: personas ubicadas o habitualmente presentes en estas comunas, nunca personas
+ * que sólo mostraron interés por ellas. Cuando una plataforma permita elegir comunas una a una, eso se
+ * prefiere a un radio que se salga de la provincia.
+ */
+export const ALCANCE_COMERCIAL_CP_ODONTOLOGIA: AlcanceGeografico = {
+  pais: 'Chile',
+  region: 'Región del Maule',
+  provincia: 'Provincia de Curicó',
+  comunas: ['Curicó', 'Teno', 'Romeral', 'Rauco', 'Molina', 'Sagrada Familia', 'Hualañé', 'Licantén', 'Vichuquén'],
+  criterioUbicacion: 'PRESENCIA',
+};
 
 /** Clave de tenant canónica. Coherente con el resto: prefijo `org-` + clave de negocio. */
 export const ORG_CP_ODONTOLOGIA = 'org-cp-odontologia' as const;
@@ -137,6 +158,7 @@ export const CONFIGURACION_ORG_CP_ODONTOLOGIA: ConfiguracionOrganizacion = {
       'cuenta de anuncios propia, si alguna vez se abre',
       'economía del servicio (ticket, costos) desde una fuente autorizada',
     ],
+    alcanceComercial: ALCANCE_COMERCIAL_CP_ODONTOLOGIA,
   },
 
   /** Qué ES el negocio: hechos observados. La economía, toda desconocida. */

@@ -1,0 +1,201 @@
+{
+  "organizationId": "org-cp-odontologia",
+  "fuente": "docs/growth/cp-odontologia-fase-1-campanas.md",
+  "borradores": [
+    {
+      "campaniaId": "cp-implantes-provincia-curico",
+      "campania": {
+        "nombre": "CP | Implantes | Provincia de Curicó",
+        "objetivo": "Generar evaluaciones/contactos (GENERATE_LEADS)",
+        "publico": "Personas ubicadas o habitualmente presentes en la Provincia de Curicó (Región del Maule, Chile) que buscan reemplazar una o varias piezas perdidas.",
+        "propuesta": "Evaluación clínica previa con la Dra. Claudia Pacheco, especialista en Rehabilitación Oral, para determinar si el implante es viable en cada caso.",
+        "mensaje": "Mensaje único del sitio: «Hola, quisiera agendar una evaluación.» Sin variantes por tratamiento.",
+        "canal": "GOOGLE_SEARCH",
+        "contenidoRequerido": [
+          "Textos de anuncio de búsqueda por grupo temático, sin precios ni promesas de resultado clínico"
+        ],
+        "calendario": "Sin fecha: se define junto con el presupuesto",
+        "presupuesto": null,
+        "hipotesis": [
+          "HIPÓTESIS: Google Search capta demanda activa y local de implantes con coincidencia exacta con la landing.",
+          "HIPÓTESIS: la intención de búsqueda no necesita el nombre de la comuna; el territorio lo fija la segmentación geográfica."
+        ],
+        "metricas": ["whatsapp_intent", "phone_intent"],
+        "criterioExito": "Por definir con una línea base real antes de activar. Se medirá en contactos (whatsapp_intent, phone_intent) por canal normalizado; no se fija ningún umbral sin datos.",
+        "criterioPausa": "Por definir con una línea base real antes de activar; ningún umbral de costo por contacto se fija sin datos.",
+        "riesgos": [
+          "SOEC no puede atribuir un contacto a esta campaña por diseño de la privacidad V1: los contactos se miden por canal y el interés por servicio sólo como agregado anónimo diario.",
+          "El sitio no publica precios: las búsquedas de precio pueden no convertir."
+        ],
+        "destino": "https://www.dentistaclaudiapacheco.cl/servicios/implantes-dentales/",
+        "destinosPorGrupo": [],
+        "requisitosPrevios": [
+          "Definir el presupuesto (hoy null) antes de cualquier activación.",
+          "Las URLs finales de Google Search deben llevar utm_source=google: un clic que llega sólo con gclid se clasifica como orgánico.",
+          "Segmentación geográfica de Google Ads por las 9 comunas de la Provincia de Curicó, con la opción de presencia (personas ubicadas o habitualmente presentes), nunca «presencia o interés».",
+          "Palabras clave por intención (p. ej. «implantes dentales», «dentista implantes») sin exigir el nombre de la comuna.",
+          "No enviar utm_campaign a SOEC ni asociar al contacto tratamiento, servicio, página, path, gclid, fbclid ni texto clínico.",
+          "Definir criterio de éxito y de pausa con una línea base real."
+        ],
+        "alcanceGeografico": {
+          "pais": "Chile",
+          "region": "Región del Maule",
+          "provincia": "Provincia de Curicó",
+          "comunas": ["Curicó", "Teno", "Romeral", "Rauco", "Molina", "Sagrada Familia", "Hualañé", "Licantén", "Vichuquén"],
+          "criterioUbicacion": "PRESENCIA"
+        }
+      },
+      "decision": {
+        "objetivo": "Generar evaluaciones/contactos (GENERATE_LEADS)",
+        "contexto": "Borrador de planificación de la línea Implantes. Presupuesto no decidido. Territorio exclusivo: Provincia de Curicó, Región del Maule, Chile.",
+        "fuentes": [
+          "docs/growth/cp-odontologia-fase-1-campanas.md",
+          "https://www.dentistaclaudiapacheco.cl/servicios/implantes-dentales/"
+        ],
+        "faltantesObligatorios": [
+          "presupuesto (pendiente de decisión del dueño)",
+          "línea base real de contactos por canal"
+        ],
+        "hipotesis": [
+          "Google Search capta demanda activa y local de implantes con coincidencia exacta con la landing."
+        ],
+        "justificacion": "Demanda de alta consideración que ya se expresa en búsqueda; la landing tiene H1 y título locales y contacto en un toque.",
+        "riesgos": ["Atribución por campaña imposible por diseño de privacidad V1"],
+        "criterioExito": "Por definir con línea base real",
+        "criterioFracaso": "Por definir con línea base real"
+      }
+    },
+    {
+      "campaniaId": "cp-rehabilitacion-protesis-provincia-curico",
+      "campania": {
+        "nombre": "CP | Rehabilitación y Prótesis | Provincia de Curicó",
+        "objetivo": "Generar evaluaciones/contactos (GENERATE_LEADS)",
+        "publico": "Personas ubicadas o habitualmente presentes en la Provincia de Curicó (Región del Maule, Chile) con necesidad de coronas, puentes o prótesis dentales (removibles, totales, parciales o híbrida).",
+        "propuesta": "Evaluación clínica con la Dra. Claudia Pacheco, especialista en Rehabilitación Oral, para definir la alternativa de rehabilitación adecuada a cada caso.",
+        "mensaje": "Mensaje único del sitio: «Hola, quisiera agendar una evaluación.» Sin variantes por tratamiento.",
+        "canal": "GOOGLE_SEARCH",
+        "contenidoRequerido": [
+          "Textos de anuncio de búsqueda por grupo (coronas, puentes, prótesis totales, parciales, híbrida), sin precios ni promesas de resultado clínico"
+        ],
+        "calendario": "Sin fecha: se define junto con el presupuesto",
+        "presupuesto": null,
+        "hipotesis": [
+          "HIPÓTESIS: Google Search capta búsquedas por necesidad (placa, prótesis, corona, puente) y la línea tiene la mejor prueba del sitio (13 casos entre sus subtipos).",
+          "HIPÓTESIS: la intención de búsqueda no necesita el nombre de la comuna; el territorio lo fija la segmentación geográfica."
+        ],
+        "metricas": ["whatsapp_intent", "phone_intent"],
+        "criterioExito": "Por definir con una línea base real antes de activar. Se medirá en contactos (whatsapp_intent, phone_intent) por canal normalizado; no se fija ningún umbral sin datos.",
+        "criterioPausa": "Por definir con una línea base real antes de activar; ningún umbral de costo por contacto se fija sin datos.",
+        "riesgos": [
+          "SOEC no puede atribuir un contacto a esta campaña por diseño de la privacidad V1: los contactos se miden por canal y el interés por servicio sólo como agregado anónimo diario.",
+          "La landing principal (/servicios/) también enlaza implantes y carillas: por eso cada grupo usa su propia landing.",
+          "La prótesis híbrida es sobre implantes: se solapa con la campaña de Implantes y requiere negativos cruzados.",
+          "«Funda dental» es ambiguo: el sitio llama «Fundas» a las carillas, pero en búsqueda suele significar corona."
+        ],
+        "destino": "https://www.dentistaclaudiapacheco.cl/servicios/",
+        "destinosPorGrupo": [
+          { "grupo": "coronas", "destino": "https://www.dentistaclaudiapacheco.cl/servicios/coronas-dentales/" },
+          { "grupo": "puentes", "destino": "https://www.dentistaclaudiapacheco.cl/servicios/puentes-dentales/" },
+          { "grupo": "protesis-totales", "destino": "https://www.dentistaclaudiapacheco.cl/servicios/protesis-removibles-totales/" },
+          { "grupo": "protesis-parciales", "destino": "https://www.dentistaclaudiapacheco.cl/servicios/protesis-removibles-parciales/" },
+          { "grupo": "protesis-hibrida", "destino": "https://www.dentistaclaudiapacheco.cl/servicios/protesis-hibrida/" }
+        ],
+        "requisitosPrevios": [
+          "Definir el presupuesto (hoy null) antes de cualquier activación.",
+          "Las URLs finales de Google Search deben llevar utm_source=google: un clic que llega sólo con gclid se clasifica como orgánico.",
+          "Segmentación geográfica de Google Ads por las 9 comunas de la Provincia de Curicó, con la opción de presencia (personas ubicadas o habitualmente presentes), nunca «presencia o interés».",
+          "Palabras clave por intención (p. ej. «prótesis dental», «coronas dentales») sin exigir el nombre de la comuna.",
+          "No enviar utm_campaign a SOEC ni asociar al contacto tratamiento, servicio, página, path, gclid, fbclid ni texto clínico.",
+          "Definir criterio de éxito y de pausa con una línea base real."
+        ],
+        "alcanceGeografico": {
+          "pais": "Chile",
+          "region": "Región del Maule",
+          "provincia": "Provincia de Curicó",
+          "comunas": ["Curicó", "Teno", "Romeral", "Rauco", "Molina", "Sagrada Familia", "Hualañé", "Licantén", "Vichuquén"],
+          "criterioUbicacion": "PRESENCIA"
+        }
+      },
+      "decision": {
+        "objetivo": "Generar evaluaciones/contactos (GENERATE_LEADS)",
+        "contexto": "Borrador de planificación de la línea Rehabilitación y Prótesis. Presupuesto no decidido. Territorio exclusivo: Provincia de Curicó, Región del Maule, Chile.",
+        "fuentes": [
+          "docs/growth/cp-odontologia-fase-1-campanas.md",
+          "https://www.dentistaclaudiapacheco.cl/servicios/"
+        ],
+        "faltantesObligatorios": [
+          "presupuesto (pendiente de decisión del dueño)",
+          "línea base real de contactos por canal"
+        ],
+        "hipotesis": [
+          "Google Search capta búsquedas por necesidad de rehabilitación con prueba clínica publicada en el sitio."
+        ],
+        "justificacion": "Búsquedas por necesidad concreta y la mayor cantidad de casos clínicos anonimizados del sitio.",
+        "riesgos": ["Atribución por campaña imposible por diseño de privacidad V1", "Solapamiento con Implantes en prótesis híbrida"],
+        "criterioExito": "Por definir con línea base real",
+        "criterioFracaso": "Por definir con línea base real"
+      }
+    },
+    {
+      "campaniaId": "cp-carillas-estetica-provincia-curico",
+      "campania": {
+        "nombre": "CP | Carillas y Estética | Provincia de Curicó",
+        "objetivo": "Generar evaluaciones/contactos (GENERATE_LEADS)",
+        "publico": "Personas ubicadas o habitualmente presentes en la Provincia de Curicó (Región del Maule, Chile) interesadas en carillas y diseño de sonrisa.",
+        "propuesta": "Evaluación clínica con la Dra. Claudia Pacheco para definir si las carillas son una alternativa adecuada en cada caso.",
+        "mensaje": "Mensaje único del sitio: «Hola, quisiera agendar una evaluación.» Sin variantes por tratamiento.",
+        "canal": "ORGANIC_INSTAGRAM",
+        "contenidoRequerido": [
+          "Casos clínicos reales y anonimizados de carillas (hoy no existe ninguno publicable)"
+        ],
+        "calendario": "Sin fecha: la línea no está lista para pauta pagada",
+        "presupuesto": null,
+        "hipotesis": [
+          "HIPÓTESIS: carillas es un tratamiento estético y discrecional; sin prueba visual propia, el tráfico pagado no tiene con qué convencerse, así que la primera prueba es orgánica."
+        ],
+        "metricas": ["whatsapp_intent"],
+        "criterioExito": "Por definir con una línea base real antes de activar. Se medirá en contactos (whatsapp_intent) por canal normalizado; no se fija ningún umbral sin datos.",
+        "criterioPausa": "Por definir con una línea base real antes de activar.",
+        "riesgos": [
+          "La landing de carillas no tiene ningún caso clínico publicado.",
+          "SOEC no puede atribuir un contacto a esta campaña por diseño de la privacidad V1."
+        ],
+        "destino": "https://www.dentistaclaudiapacheco.cl/servicios/carillas-dentales/",
+        "destinosPorGrupo": [],
+        "requisitosPrevios": [
+          "Incorporar casos clínicos reales y anonimizados de carillas antes de invertir en tráfico pagado.",
+          "Definir el presupuesto (hoy null) antes de cualquier activación.",
+          "Si en el futuro se pauta: segmentación por las 9 comunas de la Provincia de Curicó con criterio de presencia, y en Google Search URLs finales con utm_source=google.",
+          "No enviar utm_campaign a SOEC ni asociar al contacto tratamiento, servicio, página, path, gclid, fbclid ni texto clínico."
+        ],
+        "alcanceGeografico": {
+          "pais": "Chile",
+          "region": "Región del Maule",
+          "provincia": "Provincia de Curicó",
+          "comunas": ["Curicó", "Teno", "Romeral", "Rauco", "Molina", "Sagrada Familia", "Hualañé", "Licantén", "Vichuquén"],
+          "criterioUbicacion": "PRESENCIA"
+        }
+      },
+      "decision": {
+        "objetivo": "Generar evaluaciones/contactos (GENERATE_LEADS)",
+        "contexto": "Borrador de planificación de la línea Carillas y Estética. No lista para pauta pagada. Presupuesto no decidido. Territorio exclusivo: Provincia de Curicó, Región del Maule, Chile.",
+        "fuentes": [
+          "docs/growth/cp-odontologia-fase-1-campanas.md",
+          "https://www.dentistaclaudiapacheco.cl/servicios/carillas-dentales/"
+        ],
+        "faltantesObligatorios": [
+          "presupuesto (pendiente de decisión del dueño)",
+          "casos clínicos reales y anonimizados de carillas",
+          "línea base real de contactos por canal"
+        ],
+        "hipotesis": [
+          "La prueba orgánica en Instagram precede a la pauta mientras no existan casos publicables."
+        ],
+        "justificacion": "Sin casos clínicos propios, invertir en tráfico pagado sería comprar visitas sin prueba.",
+        "riesgos": ["Landing sin casos clínicos"],
+        "criterioExito": "Por definir con línea base real",
+        "criterioFracaso": "Por definir con línea base real"
+      }
+    }
+  ]
+}

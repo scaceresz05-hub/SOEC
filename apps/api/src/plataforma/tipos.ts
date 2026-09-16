@@ -14,6 +14,7 @@
 import type { CriterioObjetivo, PoliticaOptimizacion } from '@soec/medicion';
 import { desconocido, type DesconocidoOValor, type MotivoDesconocido } from '@soec/comercio';
 import type { LimitesAutonomia } from '../autonomia-ads/limites-smileflow';
+import type { AlcanceGeografico } from '@soec/campanias';
 
 /** Modelo de negocio: gobierna qué significa "convertir" y con qué vocabulario razona el Director. */
 export type ModeloDeNegocio = 'SAAS_FUNNEL' | 'ECOMMERCE_DISTRIBUCION' | 'SERVICIOS';
@@ -235,6 +236,12 @@ export interface NegocioRegistrado {
   readonly decisionPiloto: ConfiguracionDecisionPiloto | null;
   /** Datos que SOEC no puede deducir y debe aportar una persona. Visibles en la UI. */
   readonly datosHumanosPendientes: readonly string[];
+  /**
+   * Territorio comercial DECLARADO por el negocio. Cuando existe, es un límite duro: ninguna campaña de
+   * la organización puede planificarse fuera de él (se comprueba al crear y al editar borradores).
+   * Ausente ⇒ la organización no ha declarado territorio y no se impone ninguno (no se infiere).
+   */
+  readonly alcanceComercial?: AlcanceGeografico | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

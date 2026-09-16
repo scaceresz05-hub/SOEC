@@ -2,8 +2,10 @@
 
 Organización: `org-cp-odontologia` · Sitio: `https://www.dentistaclaudiapacheco.cl` · Fecha: 2026-09-16
 
-Estado: **las 3 campañas están especificadas, NO persistidas.** Ningún gasto externo activado, ningún objeto
-creado en Google Ads ni Meta. Ver §1.3 para el motivo exacto y la decisión que falta.
+Estado (Growth 1.1): **las 3 campañas existen en SOEC como `BORRADOR` con `presupuesto: null`**, en
+`@soec/campanias`, con territorio exclusivo **Provincia de Curicó, Región del Maule, Chile**. Ningún gasto
+externo activado, ningún objeto creado en Google Ads ni Meta. Cuerpos exactos:
+`docs/growth/cp-odontologia-borradores.json`. Ver §1.3 y §6.
 
 Reglas que este documento no relaja: no se inventan presupuestos, precios, volúmenes, CPC ni tasas de
 conversión; la política de privacidad Growth V1 queda intacta (nunca tratamiento + lead, nunca path ni UTM
@@ -11,7 +13,7 @@ crudo ligado a un lead).
 
 ---
 
-## 1. Modelo real de campañas en SOEC
+## 1. Modelo real de campañas en SOEC (tal como estaba antes de Growth 1.1; ver §1.3)
 
 SOEC tiene cuatro piezas con "campaña" en el nombre. Sólo una se persiste, y sólo una representa
 "campaña planificada ≠ campaña publicada" — y no son la misma.
@@ -39,27 +41,27 @@ SOEC tiene cuatro piezas con "campaña" en el nombre. Sólo una se persiste, y s
 `metricas: ['leads_simulados/mes']` y `criterioPausa: 'CPL simulado > umbral'` fijos. El negocio corre en
 `modoEjecucion: 'PILOT'` (resultados simulados).
 
-### 1.3 Por qué no se crearon (bloqueo)
+### 1.3 Resolución (Growth 1.1): BORRADOR sin presupuesto en `@soec/campanias`
 
-Los dos caminos persistentes exigen un presupuesto **positivo**; el brief exige presupuesto 0/null y prohíbe
-inventar cifras. Además, el camino de programas aprueba su propia decisión y fija KPIs simulados que
-contradicen la estructura de medición de §3.
+La fase 1 quedó bloqueada porque los dos caminos persistentes exigían presupuesto positivo. Decisión del
+dueño: el sistema oficial sigue siendo `@soec/campanias` —sin sistema paralelo y sin persistir
+`CampanaAdquisicion`—, pero debe admitir un borrador sin presupuesto. Lo implementado:
 
-El modelo que sí encaja (`CampanaAdquisicion`: `DRAFT`, presupuesto propuesto `null`, `destino`,
-`requisitosMedicion`, `objetosExternosCreados = 0`, `sinEfectoExterno('DRAFT') === true`) existe sólo como
-tipos: sin servicio, sin persistencia y sin ruta de creación. `objetivosAdmitidos` tampoco está declarado
-para ninguna organización.
+- `Campania.presupuesto: Presupuesto | null`. `null` = no decidido; un `0` se rechaza (no es "sin
+  presupuesto", es una cifra que no autoriza nada).
+- Campos genéricos nuevos del agregado (no son de CP): `nombre`, `destino`, `destinosPorGrupo`,
+  `requisitosPrevios`, `alcanceGeografico`.
+- `CampaniaService.crearBorrador` / `actualizarBorrador`: el borrador puede referenciar una decisión aún
+  no aprobada (incluida `NO_EVALUABLE`, que es lo honesto cuando falta el presupuesto). No aprueba nada ni
+  fija métricas.
+- **La entrada a un estado ejecutable (`ACTIVA`) exige en dominio presupuesto > 0 y decisión `APROBADA`**
+  (`evaluarActivacion`, aplicado en `transicionar`). No hay ruta HTTP de activación.
+- Superficie autenticada: `POST /campanias/borradores` (`campaign.manage`; fijar dinero exige además
+  `budget.manage`), `PATCH /campanias/:id/borrador`, `GET /campanias/:id` (`campaign.read`).
 
-**Decisión que falta (del dueño), una de tres:**
-
-1. **Completar la persistencia de `CampanaAdquisicion`** (servicio + stream + ruta de creación en `DRAFT`).
-   Es el modelo diseñado para esto; no es un sistema paralelo, pero sí es desarrollo nuevo.
-2. **Usar `Campania`/programas con un presupuesto que decida el dueño** (ahora mismo no hay cifra).
-3. **Permitir `BORRADOR` con presupuesto 0 en `@soec/campanias`**, cambiando una invariante de gobierno
-   aprobada.
-
-Las especificaciones de §2 están escritas contra los campos reales de ambos modelos, así que cualquiera de
-las tres opciones las carga sin rediseño.
+SOEC no tenía un campo territorial oficial para campañas (sólo texto suelto: `territorio: 'CL'` en briefs,
+una `comuna` en el plan de Meta, `base` en el perfil). Se añadió `AlcanceGeografico` como tipo genérico y
+validado, y el registro de la organización declara su `alcanceComercial`; ver §6.
 
 ---
 
@@ -67,28 +69,28 @@ las tres opciones las carga sin rediseño.
 
 Campos comunes:
 
-- `organizationId`: `org-cp-odontologia` · `businessKey`: `cp-odontologia`
-- `objetivo` (`ObjetivoComercial`): `GENERATE_LEADS` — generar evaluaciones/contactos
-- `estado`: `DRAFT` (`CampanaAdquisicion`) / `BORRADOR` (`Campania`)
-- `presupuesto`: `{ moneda: 'CLP', propuestoDiario: null, propuestoTotal: null }` — se decide tras revisar
-  canales y términos de búsqueda
-- `objetosExternosCreados`: `0` · `mandatoRef`: `null` · `nivelAutonomia`: `0`
+- `organizacionId`: `org-cp-odontologia` · modelo: `@soec/campanias` · `Campania`
+- `objetivo`: generar evaluaciones/contactos (`GENERATE_LEADS`)
+- `estado`: `BORRADOR` · `presupuesto`: `null` — se decide tras revisar canales y términos de búsqueda
+- decisión referenciada `dec-<campaniaId>`, en `NO_EVALUABLE` (falta el presupuesto); nunca aprobada por la
+  creación · `nivelAutonomia`: `0`
+- `alcanceGeografico`: Provincia de Curicó, 9 comunas, criterio `PRESENCIA` (§6)
 - Mensaje de contacto: el **único** mensaje de WhatsApp del sitio (`Hola, quisiera agendar una evaluación.`).
   Ninguna campaña puede tener un mensaje propio: eso codificaría el tratamiento en el contacto.
 
-### A. `cp-implantes-curico` — "CP | Implantes | Curicó"
+### A. `cp-implantes-provincia-curico` — "CP | Implantes | Provincia de Curicó"
 
 - `destino`: `https://www.dentistaclaudiapacheco.cl/servicios/implantes-dentales/`
 - `canal` recomendado para la primera prueba: `GOOGLE_SEARCH`
 - Conversión primaria `whatsapp_intent` · secundaria `phone_intent`
 - Agregado de interés (anónimo, diario): `service_viewed:implantes-dentales`
 
-### B. `cp-rehabilitacion-protesis-curico` — "CP | Rehabilitación y Prótesis | Curicó"
+### B. `cp-rehabilitacion-protesis-provincia-curico` — "CP | Rehabilitación y Prótesis | Provincia de Curicó"
 
 - Línea comercial que agrupa: coronas, puentes, prótesis removibles totales, parciales e híbrida.
-- `destino` (campo único del modelo): `https://www.dentistaclaudiapacheco.cl/servicios/` — única página que
+- `destino` (landing principal): `https://www.dentistaclaudiapacheco.cl/servicios/` — única página que
   representa la línea entera. Limitación: también enlaza implantes y carillas.
-- Destinos por grupo (cuando el canal lo admita, p. ej. URL final por grupo de anuncios en Google Search):
+- `destinosPorGrupo` (URL final por grupo de anuncios en Google Search):
   - `/servicios/coronas-dentales/`
   - `/servicios/puentes-dentales/`
   - `/servicios/protesis-removibles-totales/`
@@ -100,10 +102,12 @@ Campos comunes:
   `protesis-removibles-parciales`, `protesis-hibrida`
 - La clasificación "rehabilitación/prótesis" es de la CAMPAÑA. Nunca se escribe en el lead.
 
-### C. `cp-carillas-estetica-curico` — "CP | Carillas y Estética | Curicó"
+### C. `cp-carillas-estetica-provincia-curico` — "CP | Carillas y Estética | Provincia de Curicó"
 
 - `destino`: `https://www.dentistaclaudiapacheco.cl/servicios/carillas-dentales/`
 - `canal` recomendado: `ORGANIC_INSTAGRAM` (ver §5 — pago bloqueado por hallazgo crítico)
+- Requisito previo registrado: «Incorporar casos clínicos reales y anonimizados de carillas antes de
+  invertir en tráfico pagado.» No lista para paid media.
 - Conversión primaria `whatsapp_intent`
 - Agregado: `service_viewed:carillas-dentales`
 
@@ -223,3 +227,41 @@ Sin volúmenes, CPC ni conversiones: no hay datos reales todavía.
 
 Segmentación: geográfica (Curicó y alrededores) en la configuración de la campaña; nombres de otras
 ciudades sólo como negativos si aparecen en los términos de búsqueda reales.
+
+---
+
+## 6. Territorio comercial: exclusivamente la Provincia de Curicó
+
+Decisión del dueño. Aplica a planificación en SOEC, Google Search, Meta, reporting, análisis comercial y
+recomendaciones de inversión.
+
+- **GEOGRAPHIC_SCOPE = Provincia de Curicó, Región del Maule, Chile.**
+- Comunas incluidas (9): Curicó, Teno, Romeral, Rauco, Molina, Sagrada Familia, Hualañé, Licantén,
+  Vichuquén.
+- No es "Curicó y alrededores", ni "Maule Centro", ni la Región del Maule, ni Chile. Talca, Linares,
+  Cauquenes, Constitución, San Fernando y cualquier otra provincia quedan fuera.
+- Criterio de ubicación: **presencia** (personas ubicadas o habitualmente presentes), nunca "presencia o
+  interés". Cuando la plataforma permita elegir comunas una a una, se prefiere eso a un radio que se salga
+  de la provincia.
+
+Cómo lo hace cumplir SOEC:
+
+- `ALCANCE_COMERCIAL_CP_ODONTOLOGIA` en `apps/api/src/plataforma/negocios/org-cp-odontologia.ts`, declarado
+  como `alcanceComercial` del negocio.
+- Al crear o editar un borrador de la organización, el alcance es obligatorio y ninguna comuna, provincia,
+  región ni país puede quedar fuera del declarado. Un alcance sin comunas se rechaza siempre: "ampliar a la
+  región" no puede ocurrir por omisión. Un subconjunto de la provincia sí se admite.
+- Una organización sin territorio declarado (p. ej. SmileFlow) no recibe ninguno.
+
+**Google Search — intención y ubicación son dimensiones distintas.** Una persona en Molina, Teno o Romeral
+puede buscar sólo "implantes dentales", "dentista implantes", "prótesis dental" o "coronas dentales" y es un
+prospecto válido. Por eso las palabras clave no exigen el nombre de la comuna (las de §5 que lo llevan son
+opcionales, no obligatorias); el territorio lo fija la segmentación geográfica. Grupos por localidad sólo
+cuando tengan sentido comercial, sin fragmentar el presupuesto.
+
+**Requisito de activación en Google:** URLs finales con `utm_source=google`. Nunca `utm_campaign`, `gclid`
+ni `fbclid` asociados al contacto en SOEC.
+
+Landings: se registran las URLs canónicas con barra final (`/servicios/implantes-dentales/`). Las mismas
+páginas sin barra responden 308 hacia ésas; guardar la canónica evita un salto de redirección en la URL
+final de un anuncio.
