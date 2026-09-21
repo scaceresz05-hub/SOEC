@@ -122,13 +122,16 @@ export function registerPlataformaRoutes(app: FastifyInstance, store?: EventStor
    * SELECTOR de negocio. Devuelve ÚNICAMENTE identificador, nombre y estado de incorporación:
    * ninguna métrica, ninguna cuenta externa, ningún dato comercial. NO es una vista de portafolio.
    *
-   * LIMITACIÓN DECLARADA: este despliegue no filtra la lista por membresía porque el plano de
-   * identidad todavía no tiene organizaciones dadas de alta. Antes de que SOEC sea multi-usuario,
-   * esta lista DEBE filtrarse por las membresías del usuario autenticado.
+   * AISLAMIENTO (Autonomy Fase 0): la lista se acota a la ORGANIZACIÓN DEL CONTEXTO AUTENTICADO, que el
+   * gateway resolvió contra la membresía del usuario. Antes devolvía todas las organizaciones del registro a
+   * cualquier usuario autenticado. Quien pertenece a varias empresas las ve por el plano de identidad
+   * (`/auth/me`, `/organizations`) y cambia de empresa allí; esta ruta describe el negocio ACTIVO.
    */
   app.get('/plataforma/negocios', async (req, reply) => {
-    contextoDe(req); // exige contexto de organización; sin él, 403
+    const { organizationId } = contextoDe(req); // exige contexto de organización; sin él, 403
+    const propia = String(organizationId);
     const negocios = organizacionesRegistradas()
+      .filter((org) => org === propia)
       .map((org) => buscarNegocio(org))
       .filter((n): n is NonNullable<typeof n> => n !== null)
       .map((n) => ({
@@ -140,7 +143,7 @@ export function registerPlataformaRoutes(app: FastifyInstance, store?: EventStor
         tipoDeNegocio: n.tipoDeNegocio ?? null,
         ubicacionComercial: n.alcanceComercial ? describirAlcance(n.alcanceComercial) : null,
       }));
-    return reply.send({ negocios, filtradoPorMembresia: false });
+    return reply.send({ negocios, filtradoPorMembresia: true });
   });
 
   /**

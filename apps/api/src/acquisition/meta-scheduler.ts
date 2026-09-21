@@ -159,15 +159,22 @@ export async function procesarTick(deps: DepsScheduler): Promise<number> {
 }
 
 /** Arranca el loop del scheduler. Devuelve un handle para detenerlo. No lanza: aísla errores por tick. */
-export function iniciarMetaScheduler(deps: DepsScheduler, intervaloMs = INTERVALO_SCHEDULER_MS): { detener: () => void } {
+export function iniciarMetaScheduler(
+  deps: DepsScheduler,
+  intervaloMs = INTERVALO_SCHEDULER_MS,
+  /** Latido para el read model de salud: se invoca al final de CADA tick, con el error si lo hubo. */
+  alTerminarTick?: (info: { readonly ok: boolean; readonly error: string | null }) => void,
+): { detener: () => void } {
   let corriendo = false;
   const tick = async (): Promise<void> => {
     if (corriendo) return; // no solapar ticks en el mismo proceso
     corriendo = true;
     try {
       await procesarTick(deps);
-    } catch {
+      alTerminarTick?.({ ok: true, error: null });
+    } catch (e) {
       /* un tick fallido no tumba el scheduler */
+      alTerminarTick?.({ ok: false, error: e instanceof Error ? e.message : String(e) });
     } finally {
       corriendo = false;
     }

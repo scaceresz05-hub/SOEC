@@ -62,6 +62,10 @@ function deps(over: { metricas?: Partial<MetricasCampania>; ultimo?: UltimoStop 
     leerCampaignBindingResourceName: async () => CAMP,
     leerMetricas: async () => m,
     leerUltimoStop: async () => over.ultimo ?? null,
+    // Autonomy Fase 0: la pausa es una mutación gobernada. Estos casos prueban la MECÁNICA del monitor con el
+    // permiso concedido; la denegación (política de la organización / kill switch) vive en
+    // `stop-monitor-gobernado.test.ts`.
+    permitirPausaSegura: () => ({ permitido: true, motivo: 'SAFETY_PAUSE_ENABLED' }),
     ...((over.conAdapter ?? true) ? { pausarCampania: async (customerId: string, resourceName: string): Promise<ResultadoPausaProvider> => { pausas.push({ customerId, resourceName }); return { ok: over.pausaOk ?? true, requestId: 'REQ-P', resourceName, errorStatus: over.pausaOk === false ? 'INVALID_ARGUMENT' : null, errorMessage: null }; } } : {}),
     registrarStop: async (_o, dec, met, outcome, pausa) => { stops.push({ action: dec.action, campaignId: dec.campaignId, outcome, requestId: pausa?.requestId ?? null }); },
     ahora: () => '2026-08-29T12:00:00.000Z',
@@ -94,7 +98,7 @@ describe('StopMonitorService — pausa real, idempotente, fail-closed', () => {
   });
   it('H: dos ticks — el segundo, con el primer PAUSED registrado, NO vuelve a pausar', async () => {
     let ultimo: UltimoStop | null = null; const pausas: unknown[] = [];
-    const d: DepsStopMonitor = { leerEnvelope: async () => envDe(), leerCampaignBindingResourceName: async () => CAMP, leerMetricas: async () => ({ spend: 30000, contacts: 0, trackingValid: true, landingAvailable: true, campaignStatus: 'ENABLED', snapshotCampaignId: '24194332264' }), leerUltimoStop: async () => ultimo, pausarCampania: async (c, rn) => { pausas.push({ c, rn }); return { ok: true, requestId: 'R', resourceName: rn, errorStatus: null, errorMessage: null }; }, registrarStop: async (_o, dec, _m, outcome) => { ultimo = { campaignId: dec.campaignId, outcome }; }, ahora: () => 't' };
+    const d: DepsStopMonitor = { leerEnvelope: async () => envDe(), leerCampaignBindingResourceName: async () => CAMP, leerMetricas: async () => ({ spend: 30000, contacts: 0, trackingValid: true, landingAvailable: true, campaignStatus: 'ENABLED', snapshotCampaignId: '24194332264' }), leerUltimoStop: async () => ultimo, pausarCampania: async (c, rn) => { pausas.push({ c, rn }); return { ok: true, requestId: 'R', resourceName: rn, errorStatus: null, errorMessage: null }; }, registrarStop: async (_o, dec, _m, outcome) => { ultimo = { campaignId: dec.campaignId, outcome }; }, permitirPausaSegura: () => ({ permitido: true, motivo: 'SAFETY_PAUSE_ENABLED' }), ahora: () => 't' };
     const svc = new StopMonitorService(d);
     expect((await svc.correrUnaVez('o')).outcome).toBe('PAUSED');
     expect((await svc.correrUnaVez('o')).outcome).toBe('ALREADY_STOPPED');

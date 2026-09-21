@@ -35,6 +35,23 @@ export function modoOperativoDe(req: FastifyRequest): string | null {
   return v && v.trim() ? v.trim() : null;
 }
 
+/**
+ * AUTORIDAD DE TENANT: la organización sobre la que se opera es la del CONTEXTO AUTENTICADO, nunca la que
+ * llegue en la URL o el cuerpo. Compara ambas y lanza (→ 403) si no coinciden.
+ *
+ * `demoSinAuth` sólo se usa en la superficie DEMO LEGACY (sin gateway, prohibida en producción): allí no hay
+ * cabeceras que comparar y el llamador ya declaró que esa superficie corre sin autenticación. Con gateway, la
+ * ausencia de contexto es siempre un 403: nunca se interpreta como permiso.
+ */
+export function exigirOrganizacion(req: FastifyRequest, orgPedida: string, opts: { readonly demoSinAuth?: boolean } = {}): void {
+  const org = header(req, 'x-organization-id');
+  if (!org) {
+    if (opts.demoSinAuth === true) return;
+    throw new SinPermisoError('contexto de organización ausente');
+  }
+  if (org !== orgPedida) throw new SinPermisoError('ORGANIZACION_AJENA: la organización pedida no es la del contexto autenticado');
+}
+
 /** Exige un permiso atómico del modelo canónico; lanza SinPermisoError (→ 403) si falta. */
 export function exigir(req: FastifyRequest, permiso: Permission): void {
   if (!permisosDe(req).has(permiso)) throw new SinPermisoError(`falta el permiso ${permiso}`);

@@ -61,6 +61,8 @@ export const CONFIGURACION_ORG_SMILEFLOW: ConfiguracionOrganizacion = {
       nombreComercial: 'SmileFlow Clinic',
     },
     datosHumanosPendientes: ['identidad legal (nombre legal y RUT)'],
+    // Conserva la protección que ya tenía: el stop-loss puede pausar su campaña de Google Ads.
+    politicaSeguridad: { pausaAutomatica: true },
   },
   /** Qué ES SmileFlow. Su economía tampoco se inventa: se mide o se declara desconocida. */
   perfilComercial: {

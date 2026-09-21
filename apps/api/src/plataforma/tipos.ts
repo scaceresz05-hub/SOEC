@@ -254,6 +254,21 @@ export interface NegocioRegistrado {
    * declaradas: nunca prestaciones inferidas ni un catálogo de tratamientos.
    */
   readonly especialidad?: { readonly principal: string; readonly tambienPresta: readonly string[] };
+  /**
+   * Política de seguridad operativa DECLARADA por la organización. Hoy sólo gobierna la pausa automática
+   * por stop-loss: pausar una campaña reduce exposición financiera, pero sigue siendo una mutación externa
+   * y por eso nunca es implícita. Ausente ⇒ la organización NO recibe pausas automáticas (fail-closed).
+   */
+  readonly politicaSeguridad?: PoliticaSeguridadOperativa;
+}
+
+/** Qué acciones de seguridad puede ejecutar SOEC por su cuenta sobre las cuentas externas del negocio. */
+export interface PoliticaSeguridadOperativa {
+  /**
+   * `true` ⇒ el monitor de stop-loss puede PAUSAR una campaña del negocio cuando dispara una regla del
+   * envelope vigente. Nunca reanuda, nunca crea y nunca aumenta gasto.
+   */
+  readonly pausaAutomatica: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

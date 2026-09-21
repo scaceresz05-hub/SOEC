@@ -3,11 +3,14 @@
  * reglas: sólo invoca `evaluarStopVigente`. Su ÚNICA acción posible es STOP_CAMPAIGN (reducción de riesgo, no-creación);
  * NUNCA habilita, aumenta presupuesto, crea recursos, cambia targeting ni toca la histórica.
  *
- * SEGURIDAD: el monitor NO tiene capacidad de escritura a Google (no recibe ningún puerto de mutate) ⇒
- * estructuralmente 0 provider writes. Emite/registra la DECISIÓN de stop; la ejecución del pause real vive detrás
- * del gate `supervisedReal` existente (hoy false). Idempotente: campaña ya PAUSED ⇒ NOOP; una regla que dispara dos
- * ciclos ⇒ una sola decisión efectiva. Aislamiento histórico: opera SÓLO sobre el binding de campaña del envelope
- * vigente; si las métricas no son de esa campaña, NOOP (no actúa sobre otra, p.ej. la histórica).
+ * SEGURIDAD: cuando recibe un adaptador de pausa, el monitor SÍ ejecuta una mutación externa real (pausar), y por
+ * eso está gobernada: antes de pausar consulta `permitirPausaSegura` — que resuelve el kill switch del despliegue y
+ * la política `politicaSeguridad.pausaAutomatica` DECLARADA por la organización (fail-closed: sin política, no
+ * pausa). No depende del modo operativo: pausar reduce exposición y no puede quedar bloqueado por estar en OBSERVE,
+ * pero tampoco puede ocurrir de forma implícita. Toda denegación se registra con su motivo.
+ * Idempotente: campaña ya PAUSED ⇒ NOOP; una regla que dispara dos ciclos ⇒ una sola decisión efectiva. Aislamiento
+ * histórico: opera SÓLO sobre el binding de campaña del envelope vigente; si las métricas no son de esa campaña,
+ * NOOP (no actúa sobre otra, p.ej. la histórica).
  */
 import { evaluarStopVigente } from './stop-enforcement';
 import type { AuthorizedExecutionEnvelope } from './authorized-execution-envelope';
@@ -70,7 +73,10 @@ export interface MetricasCampania {
 /** Resultado sanitizado de una pausa provider (sólo lo necesario; sin secretos). */
 export interface ResultadoPausaProvider { readonly ok: boolean; readonly requestId: string | null; readonly resourceName: string | null; readonly errorStatus: string | null; readonly errorMessage: string | null }
 
-export type OutcomeStop = 'NOOP' | 'ALREADY_STOPPED' | 'PAUSED' | 'FAILED_STOP_EXECUTION' | 'NO_PAUSE_ADAPTER';
+export type OutcomeStop =
+  | 'NOOP' | 'ALREADY_STOPPED' | 'PAUSED' | 'FAILED_STOP_EXECUTION' | 'NO_PAUSE_ADAPTER'
+  /** La regla disparó, pero el gobierno denegó la pausa (kill switch o política de la organización). 0 writes. */
+  | 'SAFETY_PAUSE_DENIED';
 
 export interface UltimoStop { readonly campaignId: string | null; readonly outcome: string }
 
@@ -91,6 +97,11 @@ export interface DepsStopMonitor {
   readonly leerUltimoStop: (org: string) => Promise<UltimoStop | null>;
   /** ÚNICA capacidad provider del monitor: PAUSAR. Opcional (sin adapter ⇒ NO_PAUSE_ADAPTER, 0 writes). */
   readonly pausarCampania?: (customerId: string, resourceName: string) => Promise<ResultadoPausaProvider>;
+  /**
+   * GOBIERNO de la pausa: se consulta SIEMPRE antes de tocar al proveedor. Ausente ⇒ denegado (fail-closed):
+   * un monitor sin gobierno explícito no ejecuta mutaciones externas.
+   */
+  readonly permitirPausaSegura?: (org: string) => { readonly permitido: boolean; readonly motivo: string };
   /** Persiste el resultado de un STOP ejecutado (regla, métricas, resourceName, requestId, outcome, at). */
   readonly registrarStop: (org: string, decision: DecisionMonitor, metricas: MetricasCampania, outcome: OutcomeStop, pausa: ResultadoPausaProvider | null, at: string) => Promise<void>;
   /** Heartbeat durable de CADA tick (para que la UI pruebe que el monitor está vivo Y qué OBSERVÓ). Opcional.
@@ -126,6 +137,13 @@ export class StopMonitorService {
     // STOP decidido ⇒ la campaña está ENABLED (decidirMonitorStop ya lo garantiza). Idempotencia de ejecución:
     const ultimo = await this.deps.leerUltimoStop(org);
     if (debeSaltarPausa(ultimo, decision.campaignId)) return { decision, outcome: 'ALREADY_STOPPED', metricas: m }; // ya pausada con éxito ⇒ 0 writes
+    // GOBIERNO: la pausa es una mutación externa. Sin permiso explícito no se toca al proveedor (0 writes), y la
+    // denegación queda registrada con su motivo para que se vea por qué NO se pausó.
+    const gobierno = this.deps.permitirPausaSegura?.(org) ?? { permitido: false, motivo: 'SAFETY_PAUSE_NOT_GOVERNED' };
+    if (!gobierno.permitido) {
+      await this.deps.registrarStop(org, { ...decision, reason: `${decision.reason ?? ''}|${gobierno.motivo}` }, m, 'SAFETY_PAUSE_DENIED', null, at);
+      return { decision, outcome: 'SAFETY_PAUSE_DENIED', metricas: m };
+    }
     // EJECUTAR exactamente UNA pausa real (única capacidad).
     const cid = customerIdDe(bindingRN);
     let outcome: OutcomeStop = 'NO_PAUSE_ADAPTER';

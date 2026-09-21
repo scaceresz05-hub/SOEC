@@ -145,6 +145,7 @@ import { registerOrganizationsRoutes } from './organizations-routes';
 import { registrarVerticalesAutenticadas } from './vertical-gateway';
 import { PlataformaError } from './plataforma';
 import { registerPlataformaRoutes } from './plataforma-routes';
+import { registerSaludRoutes } from './operacion/salud-routes';
 import { registerAcquisitionRoutes } from './acquisition-routes';
 import { registerMetaOAuthAutenticadas, registerMetaCallbackPublico } from './acquisition/meta-oauth-routes';
 import { registerGoogleAdsOAuthAutenticadas, registerGoogleAdsCallbackPublico } from './acquisition/google-ads-oauth-routes';
@@ -423,12 +424,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerPilotRoutes(target, deps.store);
     registerDirectorWorkspaceRoutes(target, deps.store, clock);
     registerDirectorAutonomoRoutes(target, deps.store, clock);
-    registerDirectorAutonomoProgramasRoutes(target, deps.store, clock);
+    registerDirectorAutonomoProgramasRoutes(target, deps.store, clock, { demoSinAuth: deps.legacyDemoAccess === true });
     registerEvaluacionRoutes(target, deps.store, clock);
     registerGeneracionRoutes(target, deps.store, clock, deps.generationRateLimit); // Motor de Generación (M3, Tramo J)
     registerCommercialKnowledgeRoutes(target, deps.store, clock); // Conocimiento comercial / CRM (M3, A-1)
     registerCiaRoutes(target, deps.store); // Centro de Integraciones Autónomas (CIA, preparación cerrada)
     registerPlataformaRoutes(target, deps.store); // Estado, fundamentos y catálogo del negocio
+    if (deps.pool) registerSaludRoutes(target, deps.pool); // Salud observable de los trabajos de fondo (Autonomy Fase 0)
     registerAcquisitionRoutes(target, deps.store); // Acquisition Engine (sólo lectura / shadow)
     // OAuth READ-ONLY de Meta — rutas AUTENTICADAS (start/connection/assets/binding). El CALLBACK va aparte,
     // PÚBLICO (fuera del gateway), porque el redirect de Meta llega sin sesión y se autentica por el state.

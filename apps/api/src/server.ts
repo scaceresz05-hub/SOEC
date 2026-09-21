@@ -24,6 +24,9 @@ import { DirectorCycleService, iniciarDirectorCycle } from './autonomia-ads/dire
 import { DecisionService } from './autonomia-ads/decision-service';
 import { ejecutarBootstrap } from '@soec/identity';
 import { DeterministicIntelligenceProvider } from '@soec/intelligence';
+import { jobHealthMigrations, PgRepositorioSaludJobs, type NombreJob } from './operacion/job-health-pg';
+import { iniciarIngestaServidor, planDeIngesta } from './ingesta/ingesta-runtime';
+import { estadoKillSwitch } from './gobierno';
 import { buildApp } from './app';
 
 /**
@@ -68,6 +71,11 @@ if (legacyDemoAccess) {
   console.warn('ADVERTENCIA: acceso DEMO LEGACY habilitado (rutas /experience/* SIN autenticacion). Solo test/dev/demo. NO usar con datos u organizaciones reales.');
 }
 
+/** Cadencia de la ingesta server-side: 15 min, la misma que tenía la tarea externa que reemplaza. */
+const INTERVALO_INGESTA_MS = 15 * 60_000;
+/** Cadencia declarada del scheduler de Google Ads (para el read model de salud). */
+const INTERVALO_INGESTA_ADS_MS = 3 * 60 * 60_000;
+
 const pool = makePool();
 
 async function main(): Promise<void> {
@@ -80,6 +88,7 @@ async function main(): Promise<void> {
   await runMigrations(pool, dataDeletionMigrations); // Meta data deletion callback (App Review)
   await runGoogleAdsMigrationsSeguro(pool); // OAuth Google Ads multi-tenant (google_ads_*) bajo advisory lock (boot concurrente seguro)
   await runMigrations(pool, budgetAuthorizationMigrations); // P0: autorización de presupuesto TOTAL por humano (guardrail financiero)
+  await runMigrations(pool, jobHealthMigrations); // Autonomy Fase 0: salud observable de los trabajos de fondo
   const boot = await ejecutarBootstrap(pool);
   if (boot.ejecutado) console.log(JSON.stringify({ bootstrap: boot }));
 
@@ -97,16 +106,40 @@ async function main(): Promise<void> {
   const addr = await app.listen({ port, host: '0.0.0.0' });
   console.log(JSON.stringify({ listening: addr, authRequired, legacyDemoAccess, produccion: esProduccion, allowedOrigins }));
 
+  // ── GOBIERNO y SALUD del runtime autónomo ───────────────────────────────────────────────────
+  // El kill switch se declara en el arranque para que el log diga qué postura tiene el despliegue.
+  const ks = estadoKillSwitch(process.env);
+  console.log(JSON.stringify({ externalMutationsAllowed: ks.mutacionesExternasHabilitadas, killSwitchDeclarado: ks.valorDeclarado }));
+  const salud = new PgRepositorioSaludJobs(pool);
+  /** Latido de un bucle: traduce su evento de log a un registro de salud consultable. */
+  const latido = (job: NombreJob, org: string, intervaloMs: number) => (evento: unknown): void => {
+    console.log(JSON.stringify(evento));
+    const at = new Date().toISOString();
+    const next = new Date(Date.parse(at) + intervaloMs).toISOString();
+    const err = (evento as { error?: unknown } | null)?.error;
+    const promesa = typeof err === 'string' && err.length > 0
+      ? salud.marcarFallo(job, org, at, err, next)
+      : salud.marcarExito(job, org, at, next);
+    void promesa.catch(() => undefined); // la observabilidad nunca puede tumbar el bucle que observa
+  };
+
   // Scheduler autónomo READ-ONLY de sync Meta (freshness-aware, tenant-aware). Habilitado por defecto;
   // apagable con SOEC_META_SCHEDULER_ENABLED=false. Sólo arranca si Meta está configurado (composición != null).
   if (process.env.SOEC_META_SCHEDULER_ENABLED !== 'false') {
     const compSched = crearComposicionMetaOAuth(pool, process.env);
     if (compSched !== null) {
-      iniciarMetaScheduler({ comp: compSched, scheduleRepo: compSched.scheduleRepo, ahora: () => new Date().toISOString() });
+      iniciarMetaScheduler(
+        { comp: compSched, scheduleRepo: compSched.scheduleRepo, ahora: () => new Date().toISOString() },
+        INTERVALO_SCHEDULER_MS,
+        (r) => latido('metaScheduler', '', INTERVALO_SCHEDULER_MS)({ metaScheduler: 'tick', ok: r.ok, ...(r.error ? { error: r.error } : {}) }),
+      );
       console.log(JSON.stringify({ metaScheduler: 'started', intervaloMs: INTERVALO_SCHEDULER_MS }));
     } else {
       console.log(JSON.stringify({ metaScheduler: 'idle_no_meta_config' }));
+      void salud.marcarDeshabilitado('metaScheduler', '', 'META_NOT_CONFIGURED').catch(() => undefined);
     }
+  } else {
+    void salud.marcarDeshabilitado('metaScheduler', '', 'SOEC_META_SCHEDULER_ENABLED=false').catch(() => undefined);
   }
 
   // Scheduler READ-ONLY multi-tenant de Google Ads. DORMIDO por defecto: sólo agenda si
@@ -124,12 +157,14 @@ async function main(): Promise<void> {
       holder: `${process.env.RAILWAY_REPLICA_ID ?? 'local'}:${randomUUID()}`,
       habilitado: habilitadoGoogleAds,
       ahora: () => new Date().toISOString(),
-      log: (evento) => console.log(JSON.stringify({ googleAdsScheduler: evento })),
+      log: (evento) => latido('googleAdsScheduler', '', INTERVALO_INGESTA_ADS_MS)({ googleAdsScheduler: evento, ...(typeof (evento as { error?: unknown }).error === 'string' ? { error: (evento as { error?: string }).error } : {}) }),
     });
     const { agendado } = scheduler.iniciar();
     console.log(JSON.stringify({ googleAdsScheduler: agendado ? 'started' : 'dormant_disabled' }));
+    if (!agendado) void salud.marcarDeshabilitado('googleAdsScheduler', '', 'GOOGLE_ADS_SCHEDULER_ENABLED != true').catch(() => undefined);
   } else {
     console.log(JSON.stringify({ googleAdsScheduler: 'idle_no_google_ads_config' }));
+    void salud.marcarDeshabilitado('googleAdsScheduler', '', 'GOOGLE_ADS_NOT_CONFIGURED').catch(() => undefined);
   }
 
   // MONITOR AUTOMÁTICO de STOPS: conecta las reglas EXISTENTES (evaluarStopVigente) a un loop in-proceso. Activo por
@@ -144,7 +179,7 @@ async function main(): Promise<void> {
     const lectorMetricas = readClient ? construirLectorMetricasCampania((cid, q) => readClient.buscar(cid, q)) : null;
     const svc = new StopMonitorService(crearDepsStopMonitor(new PgEventStore(pool), pauseAdapter, lectorMetricas));
     const intervaloMs = 5 * 60_000;
-    iniciarStopMonitor(svc, 'org-smileflow', intervaloMs, (e) => console.log(JSON.stringify(e)));
+    iniciarStopMonitor(svc, 'org-smileflow', intervaloMs, latido('stopMonitor', 'org-smileflow', intervaloMs));
     console.log(JSON.stringify({ stopMonitor: 'started', intervaloMs, org: 'org-smileflow', pauseWired: pauseAdapter !== null, metricsWired: lectorMetricas !== null }));
     // SONDA DE FECHAS (READ-ONLY, boot): confirma que campaign.start_date/end_date (v25) se leen de LA campaña vigente.
     // Observabilidad honesta de la fuente de fechas; ninguna escritura, ningún efecto sobre la campaña.
@@ -165,6 +200,7 @@ async function main(): Promise<void> {
     })();
   } else {
     console.log(JSON.stringify({ stopMonitor: 'disabled' }));
+    void salud.marcarDeshabilitado('stopMonitor', 'org-smileflow', 'SOEC_STOP_MONITOR_ENABLED=false').catch(() => undefined);
   }
 
   // DIRECTOR AUTÓNOMO: ciclo SERVER-SIDE (no depende de la UI). En cada ciclo lee evidencia READ-ONLY, y al cerrar
@@ -177,7 +213,7 @@ async function main(): Promise<void> {
       diagnosis: new DiagnosisEvidenceService(new PgEventStore(pool)),
       clienteFactory: (o) => construirClienteEscrituraGoogleAds(process.env, o, compGoogleAds, {}),
     });
-    iniciarDirectorCycle(directorCycle, 'org-smileflow', 5 * 60_000, (e) => console.log(JSON.stringify(e)));
+    iniciarDirectorCycle(directorCycle, 'org-smileflow', 5 * 60_000, latido('directorCycle', 'org-smileflow', 5 * 60_000));
     console.log(JSON.stringify({ directorCycle: 'started', org: 'org-smileflow' }));
     // Observabilidad del BUCLE DE DECISIÓN al boot (READ-ONLY, mismo SSOT que la UI): decisión vigente + su semántica
     // financiera. Corre unos segundos DESPUÉS del boot para leer el resultado ya persistido por la corrida inmediata
@@ -193,6 +229,21 @@ async function main(): Promise<void> {
     })(), 20_000).unref?.();
   } else {
     console.log(JSON.stringify({ directorCycle: 'disabled' }));
+    void salud.marcarDeshabilitado('directorCycle', 'org-smileflow', 'SOEC_DIRECTOR_CYCLE_ENABLED=false').catch(() => undefined);
+  }
+
+  // ── INGESTA SERVER-SIDE MULTIEMPRESA ────────────────────────────────────────────────────────
+  // Reemplaza la tarea de Windows (`scripts/ingesta-tick.cmd`) que corría en el PC del desarrollador y llevaba
+  // deshabilitada desde 2026-08-27. Descubre del registro qué organizaciones son ingeribles (ninguna fijada en
+  // código), corre cada una aislada y registra su salud. Apagable con SOEC_INGESTA_ENABLED=false.
+  if (process.env.SOEC_INGESTA_ENABLED !== 'false') {
+    const storeIngesta = new PgEventStore(pool);
+    const plan = planDeIngesta(storeIngesta, process.env);
+    iniciarIngestaServidor({ store: storeIngesta, env: process.env, salud, log: (i) => console.log(JSON.stringify(i)) }, INTERVALO_INGESTA_MS);
+    console.log(JSON.stringify({ ingesta: 'started', intervaloMs: INTERVALO_INGESTA_MS, organizaciones: plan.map((p) => ({ org: p.org, fuentes: p.fuentes, omitidas: p.omitidas })) }));
+  } else {
+    console.log(JSON.stringify({ ingesta: 'disabled' }));
+    void salud.marcarDeshabilitado('ingestion', '', 'SOEC_INGESTA_ENABLED=false').catch(() => undefined);
   }
 }
 

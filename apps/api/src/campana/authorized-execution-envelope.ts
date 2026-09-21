@@ -14,6 +14,7 @@
 import type { MarketingPlan } from './marketing-plan';
 import { hashPlan } from './plan-hash';
 import { politicaAccionesDe, ACCIONES_EXPERIMENTO_BUSQUEDA, ACCIONES_AUTORIZABLES_DEFECTO, type AccionAutorizable } from './acciones';
+import { mutacionesExternasHabilitadas } from '../gobierno/kill-switch';
 
 export { ACCIONES_EXPERIMENTO_BUSQUEDA, ACCIONES_AUTORIZABLES_DEFECTO, type AccionAutorizable };
 export type CanalId = 'google' | 'meta';
@@ -68,7 +69,7 @@ export type ReasonCode =
   | 'ENVELOPE_NOT_APPROVED' | 'ENVELOPE_EXPIRED' | 'ENVELOPE_REVOKED' | 'PLAN_HASH_MISMATCH'
   | 'CHANNEL_NOT_AUTHORIZED' | 'ACTION_NOT_AUTHORIZED' | 'EXTERNAL_GATE_BLOCKED' | 'TRACKING_INVALID'
   | 'LANDING_INVALID' | 'TOTAL_CAP_WOULD_BE_EXCEEDED' | 'ZERO_CONVERSION_GUARDRAIL' | 'PERIOD_ENDED'
-  | 'AUTONOMOUS_REAL_DISABLED' | 'SUPERVISED_REAL_DISABLED';
+  | 'AUTONOMOUS_REAL_DISABLED' | 'SUPERVISED_REAL_DISABLED' | 'EXTERNAL_MUTATIONS_DISABLED';
 
 export interface AuditEvent {
   readonly type: string;
@@ -87,7 +88,15 @@ export interface AuditEvent {
   readonly newPlanHash?: string;
 }
 
-export interface FlagsEjecucion { readonly autonomousReal: boolean; readonly supervisedReal: boolean }
+export interface FlagsEjecucion {
+  readonly autonomousReal: boolean;
+  readonly supervisedReal: boolean;
+  /**
+   * Kill switch del despliegue (`apps/api/src/gobierno/kill-switch.ts`). `false` ⇒ ninguna mutación externa,
+   * sin importar modo, envelope ni aprobación. Ausente ⇒ habilitadas (compatibilidad con llamadores previos).
+   */
+  readonly mutacionesExternasHabilitadas?: boolean;
+}
 export interface ProviderState { readonly executionEligibleChannels: readonly CanalId[]; readonly providerConnected: boolean; readonly trackingValid: boolean; readonly landingAvailable: boolean; readonly now: string; readonly contacts: number }
 export interface FinancialState { readonly historicalSpend: number; readonly envelopeSpend: number; readonly committedSpend: number }
 export interface AccionSolicitada { readonly canal: CanalId; readonly tipo: AccionAutorizable | string; readonly mode?: 'SUPERVISED' | 'AUTONOMOUS'; readonly commitment?: number }
@@ -104,8 +113,12 @@ export function flagsEjecucion(env: NodeJS.ProcessEnv, autonomousReal: boolean):
  * (fail-closed). `autonomousReal` permanece SIEMPRE false por diseño (AUTONOMOUS_REAL bloqueado, sin importar el
  * modo). El cliente NO puede declararse supervisado: el modo lo inyecta el gateway desde la membresía validada.
  */
-export function derivarFlagsDeModo(operationalMode: string | null | undefined): FlagsEjecucion {
-  return { supervisedReal: operationalMode === 'SUPERVISED_REAL', autonomousReal: false };
+export function derivarFlagsDeModo(operationalMode: string | null | undefined, env: NodeJS.ProcessEnv = process.env): FlagsEjecucion {
+  return {
+    supervisedReal: operationalMode === 'SUPERVISED_REAL',
+    autonomousReal: false,
+    mutacionesExternasHabilitadas: mutacionesExternasHabilitadas(env),
+  };
 }
 
 /** Estados APROBADOS: pasan el gate de estado; el gate externo/financiero decide después (reason preciso). */
@@ -230,6 +243,8 @@ export function validateAuthorizedExecution(
   e: AuthorizedExecutionEnvelope, plan: MarketingPlan, prov: ProviderState, fin: FinancialState, action: AccionSolicitada, flags: FlagsEjecucion,
 ): ResultadoValidacion {
   const deny = (r: ReasonCode): ResultadoValidacion => ({ decision: 'DENY', reasonCode: r });
+  // 0) KILL SWITCH del despliegue: manda sobre modo, envelope y aprobación humana.
+  if (flags.mutacionesExternasHabilitadas === false) return deny('EXTERNAL_MUTATIONS_DISABLED');
   // 1) Interruptores maestros (fail-closed).
   if (!flags.supervisedReal) return deny('SUPERVISED_REAL_DISABLED');
   if (action.mode === 'AUTONOMOUS' && !flags.autonomousReal) return deny('AUTONOMOUS_REAL_DISABLED');

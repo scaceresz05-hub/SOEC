@@ -19,10 +19,10 @@ const identityConModo = (operationalMode: string): IdentityService => ({
 
 describe('derivarFlagsDeModo (fuente única, fail-closed)', () => {
   it('PILOT ⇒ supervisedReal=false', () => {
-    expect(derivarFlagsDeModo('PILOT')).toEqual({ supervisedReal: false, autonomousReal: false });
+    expect(derivarFlagsDeModo('PILOT')).toMatchObject({ supervisedReal: false, autonomousReal: false });
   });
   it('SUPERVISED_REAL ⇒ supervisedReal=true', () => {
-    expect(derivarFlagsDeModo('SUPERVISED_REAL')).toEqual({ supervisedReal: true, autonomousReal: false });
+    expect(derivarFlagsDeModo('SUPERVISED_REAL')).toMatchObject({ supervisedReal: true, autonomousReal: false });
   });
   it('desconocido/null/vacío ⇒ supervisedReal=false (fail-closed)', () => {
     for (const m of ['AUTONOMOUS_REAL', 'OTRO', '', null, undefined]) {

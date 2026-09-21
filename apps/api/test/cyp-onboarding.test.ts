@@ -416,7 +416,7 @@ describe('C Y P · superficie HTTP de incorporación', () => {
     await app.close();
   });
 
-  it('el selector de negocios lista nombre y estado, sin métricas ni cuentas', async () => {
+  it('el selector de negocios lista nombre y estado de SU organización, sin métricas ni cuentas', async () => {
     const { app } = makeApp();
     const res = await app.inject({
       method: 'GET',
@@ -425,11 +425,8 @@ describe('C Y P · superficie HTTP de incorporación', () => {
     });
     expect(res.statusCode).toBe(200);
     const { negocios } = res.json() as { negocios: { organizationId: string; estado: string }[] };
-    expect(negocios.map((n) => n.organizationId).sort()).toEqual([
-      'org-cp-odontologia',
-      'org-cyp',
-      'org-smileflow',
-    ]);
+    // Autonomy Fase 0: la lista está acotada al tenant del contexto (antes devolvía TODAS las del registro).
+    expect(negocios.map((n) => n.organizationId)).toEqual(['org-cyp']);
     // Selector, NO portafolio: ninguna cifra, ninguna cuenta externa, ninguna credencial.
     const s = JSON.stringify(negocios);
     expect(s).not.toMatch(/impresiones|clics|gasto|customerId|credentialRef|env:|campaignId/i);

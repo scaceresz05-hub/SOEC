@@ -10,6 +10,7 @@ import { ResourceBindingService } from './resource-binding';
 import { DiagnosisEvidenceService } from './diagnosis-evidence-service';
 import type { GoogleAdsPauseAdapter } from './google-ads-pause-adapter';
 import type { DepsStopMonitor, MetricasCampania, UltimoStop } from './stop-monitor';
+import { evaluarPausaSeguridad } from '../gobierno';
 
 const GROWTH = 'smileflow-growth';
 const EVENTO_CONTACTO = 'lead_created';
@@ -95,6 +96,12 @@ export function crearDepsStopMonitor(store: EventStore, pauseAdapter: GoogleAdsP
       const eventos = await store.readStream(ctx(org), stopMonitorStreamId(org));
       const ultimo = eventos.filter((e) => e.type === EVENTO_STOP).map((e) => e.payload as { campaignId: string | null; outcome: string }).slice(-1)[0];
       return ultimo ? { campaignId: ultimo.campaignId, outcome: ultimo.outcome } : null;
+    },
+    // GOBIERNO de la pausa: kill switch del despliegue + política declarada por la organización. Se resuelve en
+    // cada tick (no se captura al arrancar) para que apagar el interruptor tenga efecto sin reiniciar el proceso.
+    permitirPausaSegura: (org: string) => {
+      const v = evaluarPausaSeguridad(org, process.env);
+      return { permitido: v.permitido, motivo: v.motivo };
     },
     ...(pauseAdapter ? { pausarCampania: (customerId: string, resourceName: string) => pauseAdapter.pausarCampania(customerId, resourceName).then((r) => ({ ok: r.ok, requestId: r.requestId, resourceName: r.resourceName, errorStatus: r.errorStatus, errorMessage: r.errorMessage })) } : {}),
     registrarTick: async (org, decision, metricas, outcome, at) => {
