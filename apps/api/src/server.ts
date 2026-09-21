@@ -29,6 +29,10 @@ import { negocioMigrations, RepositorioNegocios } from './negocio/negocio-pg';
 import { migrarNegociosDelRegistro } from './negocio/migracion-registro';
 import { crearDescubridorDeNegocios } from './negocio/descubrimiento';
 import { iniciarIngestaServidor, planDeIngesta, sincronizarSaludDelPlan } from './ingesta/ingesta-runtime';
+import { conexionMigrations } from './conexion/conexion-pg';
+import { migrarConexionesDelRegistro } from './conexion/migracion-conexiones';
+import { crearDepositoSecretosConexion, crearAlmacenDeLecturaDeSecretos } from './conexion/secreto-conexion';
+import { crearDescubridorPorCapacidad, crearElegiblesPorCapacidad, iniciarRefrescoDeNegocios, refrescarNegociosDelRuntime } from './conexion/snapshot';
 import { estadoKillSwitch, crearEvaluadorPausaSeguridad } from './gobierno';
 import { buildApp } from './app';
 
@@ -96,6 +100,8 @@ const RETRASO_DIRECTOR_MS = jitter(75_000);
 const INTERVALO_INGESTA_MS = 15 * 60_000;
 /** Cadencia declarada del scheduler de Google Ads (para el read model de salud). */
 const INTERVALO_INGESTA_ADS_MS = 3 * 60 * 60_000;
+/** Cadencia de refresco del snapshot de negocios (conexiones y capacidades como dato). */
+const INTERVALO_SNAPSHOT_MS = 60_000;
 
 const pool = makePool();
 
@@ -115,6 +121,15 @@ async function main(): Promise<void> {
   // nuevas ni regenera identidades: sólo persiste lo que ya existía, para que el runtime lea de la base.
   const migracionNegocios = await migrarNegociosDelRegistro(pool);
   console.log(JSON.stringify({ negociosComoDato: migracionNegocios }));
+  await runMigrations(pool, conexionMigrations); // Autonomy Fase B: conexiones y capacidades como dato
+  // Las conexiones y las capacidades que vivían en módulos TypeScript pasan a ser filas, sin cambiar lo que
+  // hoy hace cada empresa y sin mover ningún secreto (se conserva la referencia `env:` tal cual).
+  const migracionConexiones = await migrarConexionesDelRegistro(pool);
+  console.log(JSON.stringify({ conexionesComoDato: migracionConexiones }));
+  // PRIMER SNAPSHOT: desde aquí el runtime resuelve `organización → negocio / perfil / fuentes` contra la
+  // BASE. Se fija ANTES de atender la primera petición para que ninguna resuelva con el registro histórico.
+  const snapshotInicial = await refrescarNegociosDelRuntime(pool);
+  console.log(JSON.stringify({ negociosDelRuntime: 'snapshot_inicial', organizaciones: snapshotInicial.organizaciones, detalle: snapshotInicial.detalle }));
   const boot = await ejecutarBootstrap(pool);
   if (boot.ejecutado) console.log(JSON.stringify({ bootstrap: boot }));
 
@@ -148,6 +163,11 @@ async function main(): Promise<void> {
       : salud.marcarExito(job, org, at, next);
     void promesa.catch(() => undefined); // la observabilidad nunca puede tumbar el bucle que observa
   };
+
+  // REFRESCO del snapshot de negocios: una empresa creada y conectada desde la interfaz entra en operación
+  // en el siguiente minuto, sin desplegar. Si la base falla, se conserva el snapshot vigente.
+  iniciarRefrescoDeNegocios(pool, INTERVALO_SNAPSHOT_MS, (i) => console.log(JSON.stringify(i)));
+  console.log(JSON.stringify({ negociosDelRuntime: 'refresco_iniciado', intervaloMs: INTERVALO_SNAPSHOT_MS }));
 
   // Scheduler autónomo READ-ONLY de sync Meta (freshness-aware, tenant-aware). Habilitado por defecto;
   // apagable con SOEC_META_SCHEDULER_ENABLED=false. Sólo arranca si Meta está configurado (composición != null).
@@ -199,69 +219,88 @@ async function main(): Promise<void> {
   // evalúa y REGISTRA la decisión; su única acción es STOP_CAMPAIGN (reducción de riesgo). Con la campaña PAUSED ⇒
   // NOOP. Cadencia 5 min: protege un experimento de 15.000 CLP sin polling agresivo.
   if (process.env.SOEC_STOP_MONITOR_ENABLED !== 'false') {
-    // El monitor recibe SÓLO el adapter PAUSE-ONLY (capacidad estructural = pausar; jamás crear/habilitar/editar) +
-    // un lector de métricas READ-ONLY que consulta el spend/status de LA campaña del binding (no la histórica).
-    const pauseAdapter = construirAdapterPausaGoogleAds(process.env, 'org-smileflow', compGoogleAds, (i) => console.log(JSON.stringify({ stopMonitorPause: i })));
-    const readClient = construirClienteEscrituraGoogleAds(process.env, 'org-smileflow', compGoogleAds, {});
-    const lectorMetricas = readClient ? construirLectorMetricasCampania((cid, q) => readClient.buscar(cid, q)) : null;
-    // El permiso para pausar sale de `business_governance` (la base), con el registro como respaldo.
+    // A QUÉ NEGOCIOS protege: los que tienen la capacidad `MONITOR_SEGURIDAD` habilitada en la BASE. Ninguna
+    // organización va fijada en código. Hoy la migración la habilitó sólo para quien ya tenía pausa automática
+    // declarada, así que la cobertura es exactamente la de antes; mañana se amplía habilitándola, sin desplegar.
+    const protegidos = await crearDescubridorPorCapacidad(pool, 'MONITOR_SEGURIDAD')();
     const repoNegocios = new RepositorioNegocios(pool);
+    // El permiso para pausar sale de `business_governance` (la base), con el registro como respaldo.
     const evaluadorPausa = crearEvaluadorPausaSeguridad((org) => repoNegocios.gobierno(org), process.env);
-    const svc = new StopMonitorService(crearDepsStopMonitor(new PgEventStore(pool), pauseAdapter, lectorMetricas, evaluadorPausa));
     const intervaloMs = 5 * 60_000;
-    iniciarStopMonitor(svc, 'org-smileflow', intervaloMs, latido('stopMonitor', 'org-smileflow', intervaloMs));
-    // SIN retraso inicial: es el camino de SEGURIDAD. Su primer tick cae a los 5 min, como siempre.
-    console.log(JSON.stringify({ stopMonitor: 'started', intervaloMs, org: 'org-smileflow', pauseWired: pauseAdapter !== null, metricsWired: lectorMetricas !== null, caminoSeguridad: true }));
-    // SONDA DE FECHAS (READ-ONLY, boot): confirma que campaign.start_date/end_date (v25) se leen de LA campaña vigente.
-    // Observabilidad honesta de la fuente de fechas; ninguna escritura, ningún efecto sobre la campaña.
-    // Sonda diferida: es OBSERVABILIDAD, no seguridad; puede esperar a que pase la ráfaga del arranque.
-    if (readClient) setTimeout(() => void (async (): Promise<void> => {
-      try {
-        const st = new PgEventStore(pool);
-        const env = await new EnvelopeService(st).leerUltimo('org-smileflow');
-        const binds = env ? await new ResourceBindingService(st).listar('org-smileflow') : [];
-        const rn = env ? binds.find((b) => b.envelopeId === env.id && b.entityType === 'campaign')?.providerResourceId ?? null : null;
-        const cid = rn?.match(/^customers\/(\d+)\//)?.[1] ?? null;
-        const campId = rn?.match(/campaigns\/(\d+)$/)?.[1] ?? null;
-        if (!cid || !campId) { console.log(JSON.stringify({ campaignDatesProbe: 'no_binding' })); return; }
-        // v25: los campos son start_date_time / end_date_time ("yyyy-MM-dd HH:mm:ss", zona del customer).
-        const rows = await readClient.buscar(cid, `SELECT campaign.id, campaign.start_date_time, campaign.end_date_time FROM campaign WHERE campaign.id = ${campId}`);
-        const c = (rows[0] as { campaign?: { startDateTime?: unknown; endDateTime?: unknown } } | undefined)?.campaign;
-        console.log(JSON.stringify({ campaignDatesProbe: { ok: true, campaignId: campId, startDateTimeRaw: c?.startDateTime ?? null, endDateTimeRaw: c?.endDateTime ?? null, startDate: fechaCalendario(c?.startDateTime), endDate: fechaCalendario(c?.endDateTime) } }));
-      } catch (e) { console.log(JSON.stringify({ campaignDatesProbe: 'error', error: e instanceof Error ? e.message : String(e) })); }
-    })(), RETRASO_SONDA_FECHAS_MS).unref?.();
+    if (protegidos.length === 0) {
+      console.log(JSON.stringify({ stopMonitor: 'sin_negocios_con_capacidad', capacidad: 'MONITOR_SEGURIDAD' }));
+      void salud.marcarDeshabilitado('stopMonitor', '', 'ningún negocio tiene la capacidad MONITOR_SEGURIDAD').catch(() => undefined);
+    }
+    for (const [i, org] of protegidos.entries()) {
+      // El monitor recibe SÓLO el adapter PAUSE-ONLY (capacidad estructural = pausar; jamás crear/habilitar/editar) +
+      // un lector de métricas READ-ONLY que consulta el spend/status de LA campaña del binding (no la histórica).
+      const pauseAdapter = construirAdapterPausaGoogleAds(process.env, org, compGoogleAds, (info) => console.log(JSON.stringify({ stopMonitorPause: info })));
+      const readClient = construirClienteEscrituraGoogleAds(process.env, org, compGoogleAds, {});
+      const lectorMetricas = readClient ? construirLectorMetricasCampania((cid, q) => readClient.buscar(cid, q)) : null;
+      const svc = new StopMonitorService(crearDepsStopMonitor(new PgEventStore(pool), pauseAdapter, lectorMetricas, evaluadorPausa));
+      iniciarStopMonitor(svc, org, intervaloMs, latido('stopMonitor', org, intervaloMs));
+      // SIN retraso inicial: es el camino de SEGURIDAD. Su primer tick cae a los 5 min, como siempre.
+      console.log(JSON.stringify({ stopMonitor: 'started', intervaloMs, org, pauseWired: pauseAdapter !== null, metricsWired: lectorMetricas !== null, caminoSeguridad: true }));
+      // SONDA DE FECHAS (READ-ONLY, boot): confirma que campaign.start_date/end_date (v25) se leen de LA campaña vigente.
+      // Observabilidad honesta de la fuente de fechas; ninguna escritura, ningún efecto sobre la campaña.
+      // Sonda diferida y escalonada por negocio: es OBSERVABILIDAD, no seguridad, y no debe amontonar lecturas.
+      if (readClient) setTimeout(() => void (async (): Promise<void> => {
+        try {
+          const st = new PgEventStore(pool);
+          const env = await new EnvelopeService(st).leerUltimo(org);
+          const binds = env ? await new ResourceBindingService(st).listar(org) : [];
+          const rn = env ? binds.find((b) => b.envelopeId === env.id && b.entityType === 'campaign')?.providerResourceId ?? null : null;
+          const cid = rn?.match(/^customers\/(\d+)\//)?.[1] ?? null;
+          const campId = rn?.match(/campaigns\/(\d+)$/)?.[1] ?? null;
+          if (!cid || !campId) { console.log(JSON.stringify({ campaignDatesProbe: 'no_binding', org })); return; }
+          // v25: los campos son start_date_time / end_date_time ("yyyy-MM-dd HH:mm:ss", zona del customer).
+          const rows = await readClient.buscar(cid, `SELECT campaign.id, campaign.start_date_time, campaign.end_date_time FROM campaign WHERE campaign.id = ${campId}`);
+          const c = (rows[0] as { campaign?: { startDateTime?: unknown; endDateTime?: unknown } } | undefined)?.campaign;
+          console.log(JSON.stringify({ campaignDatesProbe: { ok: true, org, campaignId: campId, startDateTimeRaw: c?.startDateTime ?? null, endDateTimeRaw: c?.endDateTime ?? null, startDate: fechaCalendario(c?.startDateTime), endDate: fechaCalendario(c?.endDateTime) } }));
+        } catch (e) { console.log(JSON.stringify({ campaignDatesProbe: 'error', org, error: e instanceof Error ? e.message : String(e) })); }
+      })(), RETRASO_SONDA_FECHAS_MS + i * 5_000).unref?.();
+    }
   } else {
     console.log(JSON.stringify({ stopMonitor: 'disabled' }));
-    void salud.marcarDeshabilitado('stopMonitor', 'org-smileflow', 'SOEC_STOP_MONITOR_ENABLED=false').catch(() => undefined);
+    void salud.marcarDeshabilitado('stopMonitor', '', 'SOEC_STOP_MONITOR_ENABLED=false').catch(() => undefined);
   }
 
   // DIRECTOR AUTÓNOMO: ciclo SERVER-SIDE (no depende de la UI). En cada ciclo lee evidencia READ-ONLY, y al cerrar
   // un experimento (stop/pausa/fin) PERSISTE post-mortem + learning + decision pack + notificación (idempotente).
   // 0 escrituras a Google. Cadencia 5 min + una corrida inmediata al boot (el resultado nace antes de cualquier UI).
   if (process.env.SOEC_DIRECTOR_CYCLE_ENABLED !== 'false') {
+    // PARA QUÉ NEGOCIOS corre: los que tienen la capacidad `CICLO_DIRECTOR` habilitada en la BASE. Crear una
+    // empresa NO enciende su director: la capacidad nace apagada y sólo la habilita una persona.
+    const conDirector = await crearDescubridorPorCapacidad(pool, 'CICLO_DIRECTOR')();
     const directorCycle = new DirectorCycleService(new PgEventStore(pool), {
       envelopes: new EnvelopeService(new PgEventStore(pool)),
       bindings: new ResourceBindingService(new PgEventStore(pool)),
       diagnosis: new DiagnosisEvidenceService(new PgEventStore(pool)),
       clienteFactory: (o) => construirClienteEscrituraGoogleAds(process.env, o, compGoogleAds, {}),
     });
-    iniciarDirectorCycle(directorCycle, 'org-smileflow', 5 * 60_000, latido('directorCycle', 'org-smileflow', 5 * 60_000), RETRASO_DIRECTOR_MS);
-    console.log(JSON.stringify({ directorCycle: 'started', org: 'org-smileflow', retrasoInicialMs: RETRASO_DIRECTOR_MS }));
-    // Observabilidad del BUCLE DE DECISIÓN al boot (READ-ONLY, mismo SSOT que la UI): decisión vigente + su semántica
-    // financiera. Corre unos segundos DESPUÉS del boot para leer el resultado ya persistido por la corrida inmediata
-    // del ciclo (evita la carrera boot-tick/probe). No dispara análisis ni escribe en Google.
-    setTimeout(() => void (async (): Promise<void> => {
-      try {
-        const dsvc = new DecisionService(new PgEventStore(pool), { leerResultado: (o) => directorCycle.leerResultado(o) });
-        const est = await dsvc.estado('org-smileflow'); const c = est.current;
-        console.log(JSON.stringify({ decisionProbe: c
-          ? { decisionId: c.decisionId, type: c.decisionType, status: c.decisionStatus, financialCommitmentClp: c.financialCommitmentClp, providerWritesExpected: c.providerWritesExpected, historicalBudget: c.historicalCampaignBudgetClp, historicalSpend: c.historicalSpendClp, confidence: c.confidence, historyLen: est.history.length }
-          : { current: null, historyLen: est.history.length } }));
-      } catch (e) { console.log(JSON.stringify({ decisionProbe: 'error', error: e instanceof Error ? e.message : String(e) })); }
-    })(), 20_000).unref?.();
+    if (conDirector.length === 0) {
+      console.log(JSON.stringify({ directorCycle: 'sin_negocios_con_capacidad', capacidad: 'CICLO_DIRECTOR' }));
+      void salud.marcarDeshabilitado('directorCycle', '', 'ningún negocio tiene la capacidad CICLO_DIRECTOR').catch(() => undefined);
+    }
+    for (const [i, org] of conDirector.entries()) {
+      iniciarDirectorCycle(directorCycle, org, 5 * 60_000, latido('directorCycle', org, 5 * 60_000), RETRASO_DIRECTOR_MS + i * 5_000);
+      console.log(JSON.stringify({ directorCycle: 'started', org, retrasoInicialMs: RETRASO_DIRECTOR_MS + i * 5_000 }));
+      // Observabilidad del BUCLE DE DECISIÓN al boot (READ-ONLY, mismo SSOT que la UI): decisión vigente + su semántica
+      // financiera. Corre unos segundos DESPUÉS del boot para leer el resultado ya persistido por la corrida inmediata
+      // del ciclo (evita la carrera boot-tick/probe). No dispara análisis ni escribe en Google.
+      setTimeout(() => void (async (): Promise<void> => {
+        try {
+          const dsvc = new DecisionService(new PgEventStore(pool), { leerResultado: (o) => directorCycle.leerResultado(o) });
+          const est = await dsvc.estado(org); const c = est.current;
+          console.log(JSON.stringify({ decisionProbe: c
+            ? { org, decisionId: c.decisionId, type: c.decisionType, status: c.decisionStatus, financialCommitmentClp: c.financialCommitmentClp, providerWritesExpected: c.providerWritesExpected, historicalBudget: c.historicalCampaignBudgetClp, historicalSpend: c.historicalSpendClp, confidence: c.confidence, historyLen: est.history.length }
+            : { org, current: null, historyLen: est.history.length } }));
+        } catch (e) { console.log(JSON.stringify({ decisionProbe: 'error', org, error: e instanceof Error ? e.message : String(e) })); }
+      })(), 20_000 + i * 5_000).unref?.();
+    }
   } else {
     console.log(JSON.stringify({ directorCycle: 'disabled' }));
-    void salud.marcarDeshabilitado('directorCycle', 'org-smileflow', 'SOEC_DIRECTOR_CYCLE_ENABLED=false').catch(() => undefined);
+    void salud.marcarDeshabilitado('directorCycle', '', 'SOEC_DIRECTOR_CYCLE_ENABLED=false').catch(() => undefined);
   }
 
   // ── INGESTA SERVER-SIDE MULTIEMPRESA ────────────────────────────────────────────────────────
@@ -273,11 +312,16 @@ async function main(): Promise<void> {
     // DESCUBRIMIENTO desde la base: las organizaciones ingeribles salen del repositorio persistente, no de
     // un array en código. Una empresa creada desde la interfaz entra sin desplegar nada.
     const descubrir = crearDescubridorDeNegocios(pool);
-    const plan = await planDeIngesta(storeIngesta, process.env, descubrir);
+    // ELEGIBILIDAD COMO DATO: se ingiere a quien tiene la capacidad `INGESTA_GROWTH` habilitada. El almacén de
+    // secretos combina el entorno (credenciales históricas) con el depósito cifrado por tenant, de modo que una
+    // empresa conectada desde la interfaz se ingiere sin ninguna variable de entorno nueva.
+    const elegibles = crearElegiblesPorCapacidad(pool, 'INGESTA_GROWTH');
+    const secretStore = crearAlmacenDeLecturaDeSecretos(crearDepositoSecretosConexion(pool, process.env), process.env);
+    const plan = await planDeIngesta(storeIngesta, process.env, descubrir, { elegibles, secretStore });
     // Las organizaciones que hoy NO son ingeribles quedan marcadas como deshabilitadas con su motivo, para que
     // el read model no conserve un estado viejo de cuando sí lo eran.
-    void sincronizarSaludDelPlan({ store: storeIngesta, env: process.env, salud, descubrir }).catch(() => undefined);
-    iniciarIngestaServidor({ store: storeIngesta, env: process.env, salud, descubrir, log: (i) => console.log(JSON.stringify(i)) }, INTERVALO_INGESTA_MS);
+    void sincronizarSaludDelPlan({ store: storeIngesta, env: process.env, salud, descubrir, elegibles, secretStore }).catch(() => undefined);
+    iniciarIngestaServidor({ store: storeIngesta, env: process.env, salud, descubrir, elegibles, secretStore, log: (i) => console.log(JSON.stringify(i)) }, INTERVALO_INGESTA_MS);
     console.log(JSON.stringify({ ingesta: 'started', intervaloMs: INTERVALO_INGESTA_MS, organizaciones: plan.map((p) => ({ org: p.org, fuentes: p.fuentes, omitidas: p.omitidas })) }));
   } else {
     console.log(JSON.stringify({ ingesta: 'disabled' }));

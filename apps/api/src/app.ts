@@ -147,6 +147,9 @@ import { PlataformaError } from './plataforma';
 import { registerPlataformaRoutes } from './plataforma-routes';
 import { registerSaludRoutes } from './operacion/salud-routes';
 import { registerNegocioRoutes, registerNegocioTenantRoutes } from './negocio/negocio-routes';
+import { registerConexionRoutes } from './conexion/conexion-routes';
+import { crearDepositoSecretosConexion } from './conexion/secreto-conexion';
+import { refrescarNegociosDelRuntime } from './conexion/snapshot';
 import { registerAcquisitionRoutes } from './acquisition-routes';
 import { registerMetaOAuthAutenticadas, registerMetaCallbackPublico } from './acquisition/meta-oauth-routes';
 import { registerGoogleAdsOAuthAutenticadas, registerGoogleAdsCallbackPublico } from './acquisition/google-ads-oauth-routes';
@@ -433,6 +436,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerPlataformaRoutes(target, deps.store); // Estado, fundamentos y catálogo del negocio
     if (deps.pool) registerSaludRoutes(target, deps.pool); // Salud observable de los trabajos de fondo (Autonomy Fase 0)
     if (deps.pool) registerNegocioTenantRoutes(target, deps.pool); // Negocio como dato: leer/editar el propio
+    // CONEXIONES Y CAPACIDADES COMO DATO (Autonomy Fase B): conectar fuentes y habilitar capacidades desde
+    // la interfaz, sin variables de entorno por empresa y sin desplegar. Tras cada cambio se refresca el
+    // snapshot del runtime, para que lo conectado empiece a operar sin esperar el refresco periódico.
+    if (deps.pool) {
+      const pool = deps.pool;
+      registerConexionRoutes(target, pool, {
+        deposito: crearDepositoSecretosConexion(pool, process.env),
+        env: process.env,
+        refrescar: async () => {
+          await refrescarNegociosDelRuntime(pool).catch(() => undefined);
+        },
+      });
+    }
     registerAcquisitionRoutes(target, deps.store); // Acquisition Engine (sólo lectura / shadow)
     // OAuth READ-ONLY de Meta — rutas AUTENTICADAS (start/connection/assets/binding). El CALLBACK va aparte,
     // PÚBLICO (fuera del gateway), porque el redirect de Meta llega sin sesión y se autentica por el state.

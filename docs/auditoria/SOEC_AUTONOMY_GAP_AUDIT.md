@@ -10,6 +10,19 @@
 > de los trabajos de fondo que no figuraba en el backlog. P0-4 queda parcialmente resuelto: la ingesta ya es
 > multiempresa, pero `stopMonitor` y `directorCycle` siguen fijados a una organización.
 
+> **Actualización 2026-09-21 — Autonomy Fases A y B ejecutadas.** Las cifras de más abajo siguen siendo las
+> del estado auditado (línea base histórica) y no se alteran. Lo resuelto después:
+> [BUSINESS_AS_DATA.md](../autonomy/BUSINESS_AS_DATA.md) — el perfil del negocio es dato en PostgreSQL, con
+> alta transaccional desde la interfaz (bloqueador 1 del TOP 5) — y
+> [CONNECTIONS_AS_DATA.md](../autonomy/CONNECTIONS_AS_DATA.md) — conexiones, credenciales cifradas por tenant
+> y capacidades operativas también son dato, y los bucles (`stopMonitor`, `directorCycle`, ingesta) descubren
+> a quién cubren por capacidad persistida, sin ninguna organización fijada en código: **P0-4 queda cerrado**
+> y el bloqueador 2 queda resuelto en su mitad de bucles (la creación de campaña sigue atada a un envelope
+> literal). Por tanto, para una empresa nueva: `NEW_BUSINESS_REQUIRES_CODE_TODAY: NO` y
+> `NEW_BUSINESS_REQUIRES_DEPLOY_TODAY: NO`, con una salvedad declarada — su **política de evaluación**
+> (objetivo, criterio, límites, contexto del director) todavía no es dato, así que las experiencias REALES le
+> responden `409 PROFILE_INCOMPLETE`. Los bloqueadores 4 y 5 siguen intactos.
+
 **Método:** lectura del código ejecutable (no de la documentación), distinguiendo qué está cableado en el runtime (`apps/api/src/server.ts`, rutas registradas en `app.ts`) de lo que existe como tipo, motor puro o fixture. Toda afirmación lleva evidencia `archivo:línea`. Vocabulario: `IMPLEMENTADO_Y_USADO · IMPLEMENTADO_PARCIAL · IMPLEMENTADO_PERO_NO_CONECTADO · MOCK · SOLO_TIPO_O_DOC · LEGACY · AUSENTE`.
 
 ---

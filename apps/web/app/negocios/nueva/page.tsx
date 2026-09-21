@@ -60,8 +60,10 @@ export default function NuevaEmpresaPage() {
         description: descripcion || null,
         primaryObjective: objetivo || null,
       });
-      fijarOrgActiva(negocio.perfil.organizationId); // queda como empresa activa: se abre su panel
-      router.push('/negocios');
+      fijarOrgActiva(negocio.perfil.organizationId); // queda como empresa activa
+      // El alta continúa donde tiene sentido: conectar sus fuentes y decidir sus permisos. El panel todavía no
+      // tiene nada que mostrar, y mandar allí a alguien que acaba de crear su empresa sería un callejón.
+      router.push('/negocios/conexiones');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'no se pudo crear la empresa');
       setCreando(false);

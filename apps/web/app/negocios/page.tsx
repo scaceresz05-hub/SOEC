@@ -834,6 +834,10 @@ export default function Panel(): React.ReactElement {
         <>
           <div className="section">Preparación del negocio <span className="hint">de dónde saca SOEC los datos</span></div>
           <Callout tono="info" ico="ℹ">Una fuente «no conectada» no es un error ni un cero: es algo que todavía no configuraste. A medida que conectes fuentes, SOEC podrá decir más.</Callout>
+          {/* Conectar una fuente y decidir qué puede hacer SOEC con ella se hace desde la propia interfaz. */}
+          <p style={{ marginTop: 12 }}>
+            <Link className="btn primary" href="/negocios/conexiones">Conectar fuentes y permisos →</Link>
+          </p>
           <div className="card" style={{ marginTop: 12 }}>
             {negocio.fuentes.map((f) => {
               // VERDAD REAL para Google Ads: el registry sólo declara la CAPACIDAD (soportada, modo lectura);

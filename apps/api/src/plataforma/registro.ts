@@ -250,8 +250,115 @@ export function crearResolutorDeNegocios(
   };
 }
 
-/** Resolutor por defecto del despliegue. Las funciones exportadas delegan en él. */
-const RESOLUTOR = crearResolutorDeNegocios(ORGANIZACIONES_DEL_DESPLIEGUE);
+/**
+ * ── FUENTE DEL RESOLUTOR (Autonomy Fase B: conexiones como dato) ─────────────────────────────────────────
+ *
+ * El resolutor sigue siendo la MISMA función pura; lo que cambia es de dónde salen sus configuraciones. Al
+ * arrancar, el despliegue las PROYECTA desde PostgreSQL (perfil + conexiones + capacidades + gobierno) y las
+ * fija aquí con `fijarNegociosDelRuntime`. Así las rutas que ya resolvían por esta puerta pasan a leer datos
+ * persistidos sin que ninguna de ellas cambie, y una empresa creada desde la interfaz queda resoluble sin
+ * desplegar.
+ *
+ * Mientras no se fije nada (tests unitarios, arranque temprano), la fuente es el registro TypeScript
+ * histórico: es el comportamiento anterior, intacto.
+ */
+export type OrigenDeConfiguracion = 'PERSISTIDA' | 'PERSISTIDA_CON_REGISTRO' | 'REGISTRO';
+
+const ORIGEN_INICIAL = new Map<string, OrigenDeConfiguracion>(
+  ORGANIZACIONES_DEL_DESPLIEGUE.map((c) => [c.negocio.organizationId, 'REGISTRO' as OrigenDeConfiguracion]),
+);
+
+/**
+ * Registro TypeScript histórico, INMUTABLE. Existe aparte del resolutor vigente porque la proyección que
+ * alimenta al resolutor necesita leer el registro original: si leyera el resolutor ya fijado, cada refresco
+ * se construiría sobre el anterior y la procedencia de cada campo dejaría de ser comprobable.
+ */
+const REGISTRO_HISTORICO = crearResolutorDeNegocios(ORGANIZACIONES_DEL_DESPLIEGUE);
+
+/** Configuración del módulo TypeScript histórico de una organización. `null` si nunca tuvo módulo. */
+export const configuracionHistorica = (org: string): ConfiguracionOrganizacion | null =>
+  REGISTRO_HISTORICO.buscarConfiguracion(org);
+
+/** Organizaciones que tienen módulo TypeScript histórico. No incluye las creadas desde la interfaz. */
+export const organizacionesHistoricas = (): readonly string[] => REGISTRO_HISTORICO.organizacionesRegistradas();
+
+let RESOLUTOR = crearResolutorDeNegocios(ORGANIZACIONES_DEL_DESPLIEGUE);
+let ORIGENES: Map<string, OrigenDeConfiguracion> = new Map(ORIGEN_INICIAL);
+let CAMPOS_DEL_REGISTRO = new Map<string, readonly string[]>();
+let FIJADO_EN: string | null = null;
+/** Cuántas resoluciones ha servido una configuración que TODAVÍA depende del módulo histórico. */
+const USOS_LEGADO = new Map<string, number>();
+
+function anotarUso(org: string): void {
+  const origen = ORIGENES.get(org);
+  if (origen === undefined || origen === 'PERSISTIDA') return; // una empresa nueva nunca pasa por aquí
+  USOS_LEGADO.set(org, (USOS_LEGADO.get(org) ?? 0) + 1);
+}
+
+export interface ConfiguracionConProcedencia {
+  readonly config: ConfiguracionOrganizacion;
+  readonly origen: OrigenDeConfiguracion;
+  /** Campos que esta configuración sigue tomando del módulo TypeScript. Vacío ⇒ enteramente dato. */
+  readonly camposDelRegistro: readonly string[];
+}
+
+/**
+ * Fija las configuraciones con las que opera el runtime. Determinista y sin efectos: construye un resolutor
+ * nuevo sobre lo recibido. Si llega dos veces la misma organización, gana la primera (el llamador ya la
+ * deduplica; aquí no se lanza, porque un snapshot mal formado no puede tumbar el servidor).
+ */
+export function fijarNegociosDelRuntime(
+  entradas: readonly ConfiguracionConProcedencia[],
+  at: string = new Date().toISOString(),
+): { readonly organizaciones: number } {
+  const unicas = new Map<string, ConfiguracionConProcedencia>();
+  for (const e of entradas) {
+    const org = e.config.negocio.organizationId;
+    if (!unicas.has(org)) unicas.set(org, e);
+  }
+  RESOLUTOR = crearResolutorDeNegocios([...unicas.values()].map((e) => e.config));
+  ORIGENES = new Map([...unicas.entries()].map(([org, e]) => [org, e.origen]));
+  CAMPOS_DEL_REGISTRO = new Map([...unicas.entries()].map(([org, e]) => [org, e.camposDelRegistro]));
+  FIJADO_EN = at;
+  return { organizaciones: unicas.size };
+}
+
+/** Vuelve al registro TypeScript histórico. Para tests: deja el módulo como estaba antes de fijar nada. */
+export function restablecerNegociosDelRuntime(): void {
+  RESOLUTOR = crearResolutorDeNegocios(ORGANIZACIONES_DEL_DESPLIEGUE);
+  ORIGENES = new Map(ORIGEN_INICIAL);
+  CAMPOS_DEL_REGISTRO = new Map();
+  FIJADO_EN = null;
+  USOS_LEGADO.clear();
+}
+
+/**
+ * TELEMETRÍA de compatibilidad: qué organizaciones siguen dependiendo del módulo histórico, en qué campos y
+ * cuántas veces se ha usado. Sirve para poder afirmar —con números, no con confianza— que una empresa nueva
+ * no toca el registro.
+ */
+export function estadoDeCompatibilidadLegado(): {
+  readonly fijadoEn: string | null;
+  readonly organizaciones: ReadonlyArray<{
+    readonly org: string;
+    readonly origen: OrigenDeConfiguracion;
+    readonly camposDelRegistro: readonly string[];
+    readonly usos: number;
+  }>;
+} {
+  return {
+    fijadoEn: FIJADO_EN,
+    organizaciones: [...ORIGENES.entries()].map(([org, origen]) => ({
+      org,
+      origen,
+      camposDelRegistro: CAMPOS_DEL_REGISTRO.get(org) ?? (origen === 'REGISTRO' ? ['todo'] : []),
+      usos: USOS_LEGADO.get(org) ?? 0,
+    })),
+  };
+}
+
+/** Procedencia de la configuración con la que se está resolviendo una organización. */
+export const origenDeConfiguracion = (org: string): OrigenDeConfiguracion | null => ORIGENES.get(org) ?? null;
 
 export const organizacionesRegistradas = (): readonly string[] =>
   RESOLUTOR.organizacionesRegistradas();
@@ -269,8 +376,10 @@ export const buscarFuentes = (org: string): readonly FuenteRegistrada[] =>
 export const buscarFuente = (org: string, provider: string): FuenteRegistrada | null =>
   RESOLUTOR.buscarFuente(org, provider);
 /** Fuente GROWTH resuelta de la organización. `null` si no declara ninguna. */
-export const buscarFuenteGrowth = (org: string): DescriptorFuenteGrowth | null =>
-  RESOLUTOR.buscarFuenteGrowth(org);
+export const buscarFuenteGrowth = (org: string): DescriptorFuenteGrowth | null => {
+  anotarUso(org);
+  return RESOLUTOR.buscarFuenteGrowth(org);
+};
 /** Fuente GROWTH resuelta. Lanza `NO_DATA_SOURCE_CONFIGURED` si la organización no declara ninguna. */
 export const getFuenteGrowth = (org: string): DescriptorFuenteGrowth =>
   RESOLUTOR.getFuenteGrowth(org);
@@ -279,15 +388,26 @@ export const buscarEmbudo = (org: string): EmbudoDeConversion | null => RESOLUTO
 /** Embudo de conversión. Lanza `CONVERSION_FUNNEL_NOT_CONFIGURED` si la organización no tiene ninguno. */
 export const getEmbudo = (org: string): EmbudoDeConversion => RESOLUTOR.getEmbudo(org);
 
-/** Negocio de la organización. Lanza `ORGANIZATION_NOT_CONFIGURED` si no está registrada. */
-export const getBusiness = (org: string): NegocioRegistrado => RESOLUTOR.getBusiness(org);
+/** Negocio de la organización. Lanza `ORGANIZATION_NOT_CONFIGURED` si no existe como negocio. */
+export const getBusiness = (org: string): NegocioRegistrado => {
+  anotarUso(org);
+  return RESOLUTOR.getBusiness(org);
+};
 /** Perfil de evaluación. Lanza `BUSINESS_PROFILE_NOT_CONFIGURED` si la organización aún no lo tiene. */
-export const getProfile = (org: string): BusinessEvaluationProfile => RESOLUTOR.getProfile(org);
+export const getProfile = (org: string): BusinessEvaluationProfile => {
+  anotarUso(org);
+  return RESOLUTOR.getProfile(org);
+};
+/** Perfil de evaluación si existe. `null` ⇒ el negocio existe pero su política aún no está configurada. */
+export const perfilDeEvaluacionOpcional = (org: string): BusinessEvaluationProfile | null =>
+  RESOLUTOR.buscarProfile(org);
 /**
  * Fuentes de datos. Lanza `NO_DATA_SOURCE_CONFIGURED` si la organización no declara ninguna.
  * Declarada-pero-no-conectada NO es lo mismo que inexistente: cada fuente lleva su `estado`.
  */
 export const getSources = (org: string): readonly FuenteRegistrada[] => RESOLUTOR.getSources(org);
 /** Recurso de Google Ads de la organización. Ninguna organización resuelve la cuenta de otra. */
-export const getRecursoGoogleAds = (org: string): RecursoGoogleAds =>
-  RESOLUTOR.getRecursoGoogleAds(org);
+export const getRecursoGoogleAds = (org: string): RecursoGoogleAds => {
+  anotarUso(org);
+  return RESOLUTOR.getRecursoGoogleAds(org);
+};

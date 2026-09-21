@@ -95,10 +95,19 @@ describe('2/3 · bucles operativos: SmileFlow los conserva; CP no los recibe', (
     expect(server).toMatch(/iniciarMetaScheduler\(/);
   });
 
-  it('stopMonitor y directorCycle están fijados a org-smileflow, no a "todas las organizaciones"', () => {
-    expect(server).toMatch(/iniciarStopMonitor\(svc, 'org-smileflow'/);
-    expect(server).toMatch(/iniciarDirectorCycle\(directorCycle, 'org-smileflow'/);
-    // Nada en el arranque itera el registro de organizaciones ni nombra a CP.
+  /**
+   * Autonomy Fase B: los bucles dejaron de llevar la organización FIJADA EN CÓDIGO y descubren a quién cubren
+   * por CAPACIDAD PERSISTIDA. La garantía que protegía este test —que CP no recibe bucles por accidente— se
+   * conserva y se refuerza: CP no se nombra en el arranque y la migración no le habilitó ninguna capacidad.
+   */
+  it('stopMonitor y directorCycle se descubren por capacidad, sin ninguna organización fijada en código', () => {
+    expect(server).toMatch(/crearDescubridorPorCapacidad\(pool, 'MONITOR_SEGURIDAD'\)/);
+    expect(server).toMatch(/crearDescubridorPorCapacidad\(pool, 'CICLO_DIRECTOR'\)/);
+    expect(server).toMatch(/iniciarStopMonitor\(svc, org,/);
+    expect(server).toMatch(/iniciarDirectorCycle\(directorCycle, org,/);
+    // Ninguna organización aparece como literal en el cableado de los bucles, y CP no se nombra en absoluto.
+    expect(server).not.toMatch(/iniciarStopMonitor\(svc, 'org-/);
+    expect(server).not.toMatch(/iniciarDirectorCycle\(directorCycle, 'org-/);
     expect(server).not.toMatch(/organizacionesRegistradas/);
     expect(server).not.toMatch(/cp-odontologia/i);
   });

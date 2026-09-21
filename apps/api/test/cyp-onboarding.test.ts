@@ -401,7 +401,11 @@ describe('C Y P · superficie HTTP de incorporación', () => {
       const res = await app.inject({ method: 'GET', url, headers: H(ORG_CYP) });
       expect([403, 409]).toContain(res.statusCode);
       const cuerpo = res.json() as { error: string };
-      expect(['EXPERIENCE_BINDING_DENIED', 'BUSINESS_PROFILE_NOT_CONFIGURED']).toContain(
+      // Fase B: la negativa es SEMÁNTICA — capacidad no habilitada, conexión pendiente o perfil incompleto.
+      expect([
+        'EXPERIENCE_BINDING_DENIED', 'BUSINESS_PROFILE_NOT_CONFIGURED',
+        'CAPABILITY_NOT_ENABLED', 'CONNECTION_REQUIRED', 'PROFILE_INCOMPLETE',
+      ]).toContain(
         cuerpo.error,
       );
       sinRastroDeSmileFlow(cuerpo);

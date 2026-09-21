@@ -22,7 +22,7 @@
  * cursor por fuente), de modo que un reinicio o una corrida repetida no duplica datos.
  */
 import { ActorId, OrganizationId, type EventStore, type RequestContext } from '@soec/contracts';
-import { SecretStoreEnv } from '@soec/secretos';
+import { SecretStoreEnv, type SecretStore } from '@soec/secretos';
 import { ObservacionService } from '@soec/motor-medicion';
 import { buscarFuente, buscarFuenteGrowth, buscarNegocio } from '../plataforma';
 import { descubridorDelRegistro, type DescubridorDeNegocios } from '../negocio/descubrimiento';
@@ -58,6 +58,8 @@ export interface ResultadoIngestaOrg {
  * y no se pueden verificar aquí sin abrirlas — nunca se lee ni se registra el valor.
  */
 function credencialDisponible(credencialRef: string, env: NodeJS.ProcessEnv): boolean {
+  // `secretstore:<org>/<nombre>` ⇒ la credencial vive cifrada por tenant; existe si la conexión la declara y
+  // su verificación real ocurre al leer (no se descifra nada aquí sólo para comprobar que está).
   if (!credencialRef.startsWith('env:')) return true;
   const nombre = credencialRef.slice('env:'.length);
   return typeof env[nombre] === 'string' && env[nombre]!.trim().length > 0;
@@ -86,7 +88,7 @@ interface Corrible {
  * Construye lo corrible de UNA organización. Devuelve `null` si no tiene ninguna fuente ingerible: no es un
  * error, es una organización que todavía no está conectada.
  */
-function prepararOrganizacion(org: string, store: EventStore, env: NodeJS.ProcessEnv): Corrible | null {
+function prepararOrganizacion(org: string, store: EventStore, env: NodeJS.ProcessEnv, secretStore?: SecretStore): Corrible | null {
   const negocio = buscarNegocio(org);
   if (!negocio) return null;
   const observaciones = new ObservacionService(store, {} as never);
@@ -105,7 +107,10 @@ function prepararOrganizacion(org: string, store: EventStore, env: NodeJS.Proces
     omitidas.push(`growth: credencial ausente (${fuenteGrowth.credencialRef})`);
   } else {
     try {
-      const adaptador = crearGrowthAdapter(fuenteGrowth, { secretStore: new SecretStoreEnv(env), esquemaEgress: ESQUEMA_EGRESS_GROWTH, env });
+      // El almacén de secretos lo inyecta la composición: entorno (credenciales históricas) + depósito
+      // cifrado por tenant (credenciales de empresas conectadas desde la interfaz). Sin él, sólo entorno.
+      const almacen = secretStore ?? new SecretStoreEnv(env);
+      const adaptador = crearGrowthAdapter(fuenteGrowth, { secretStore: almacen, esquemaEgress: ESQUEMA_EGRESS_GROWTH, env });
       growth = new IngestaGrowth({ adaptador, observaciones, store, org, provider: fuenteGrowth.provider });
       fuentes.push({ provider: fuenteGrowth.provider, ingesta: growth });
       nombres.push(fuenteGrowth.sourceId);
@@ -127,13 +132,30 @@ function prepararOrganizacion(org: string, store: EventStore, env: NodeJS.Proces
 }
 
 /**
+ * ELEGIBILIDAD COMO DATO (Autonomy Fase B): además de tener fuente y credencial, la organización necesita la
+ * capacidad `INGESTA_GROWTH` habilitada. `undefined` ⇒ no se filtra (tests unitarios y despliegues sin base).
+ */
+export interface OpcionesIngesta {
+  readonly elegibles?: () => Promise<ReadonlySet<string>>;
+  /** Almacén de secretos de la composición (entorno + depósito cifrado por tenant). */
+  readonly secretStore?: SecretStore;
+}
+
+/**
  * Qué organizaciones puede ingerir este despliegue AHORA, y con qué fuentes. Sólo lectura de configuración.
  * Las organizaciones las aporta el DESCUBRIDOR (la base), no un array en código.
  */
-export async function planDeIngesta(store: EventStore, env: NodeJS.ProcessEnv, descubrir: DescubridorDeNegocios = descubridorDelRegistro): Promise<readonly PlanIngestaOrg[]> {
+export async function planDeIngesta(
+  store: EventStore,
+  env: NodeJS.ProcessEnv,
+  descubrir: DescubridorDeNegocios = descubridorDelRegistro,
+  opciones: OpcionesIngesta = {},
+): Promise<readonly PlanIngestaOrg[]> {
   const plan: PlanIngestaOrg[] = [];
+  const elegibles = opciones.elegibles ? await opciones.elegibles() : null;
   for (const org of await descubrir()) {
-    const c = prepararOrganizacion(org, store, env);
+    if (elegibles !== null && !elegibles.has(org)) continue; // capacidad no habilitada: no es un fallo
+    const c = prepararOrganizacion(org, store, env, opciones.secretStore);
     if (c !== null) plan.push({ org: c.org, negocio: c.negocio, fuentes: c.fuentes, omitidas: c.omitidas });
   }
   return plan;
@@ -147,6 +169,10 @@ export interface DepsIngestaRuntime {
   readonly descubrir?: DescubridorDeNegocios;
   readonly ahora?: () => string;
   readonly log?: (info: Record<string, unknown>) => void;
+  /** Organizaciones con la capacidad de ingesta habilitada. Ausente ⇒ no se filtra por capacidad. */
+  readonly elegibles?: () => Promise<ReadonlySet<string>>;
+  /** Almacén de secretos con el que se resuelven las credenciales de las fuentes. */
+  readonly secretStore?: SecretStore;
 }
 
 /**
@@ -156,8 +182,10 @@ export interface DepsIngestaRuntime {
 export async function correrIngestaDeTodas(deps: DepsIngestaRuntime, intervaloMs: number): Promise<readonly ResultadoIngestaOrg[]> {
   const ahora = deps.ahora ?? (() => new Date().toISOString());
   const resultados: ResultadoIngestaOrg[] = [];
+  const elegibles = deps.elegibles ? await deps.elegibles() : null;
   for (const org of await (deps.descubrir ?? descubridorDelRegistro)()) {
-    const corrible = prepararOrganizacion(org, deps.store, deps.env);
+    if (elegibles !== null && !elegibles.has(org)) continue; // sin capacidad habilitada no se ingiere
+    const corrible = prepararOrganizacion(org, deps.store, deps.env, deps.secretStore);
     if (corrible === null) continue; // organización sin fuentes ingeribles: no es un fallo
     const inicio = ahora();
     await deps.salud?.marcarInicio(JOB, org, inicio).catch(() => undefined);
@@ -205,12 +233,16 @@ export async function correrIngestaDeTodas(deps: DepsIngestaRuntime, intervaloMs
  */
 export async function sincronizarSaludDelPlan(deps: DepsIngestaRuntime): Promise<void> {
   if (!deps.salud) return;
-  const ingeribles = new Set((await planDeIngesta(deps.store, deps.env, deps.descubrir)).map((p) => p.org));
+  const opciones: OpcionesIngesta = { elegibles: deps.elegibles, secretStore: deps.secretStore };
+  const ingeribles = new Set((await planDeIngesta(deps.store, deps.env, deps.descubrir, opciones)).map((p) => p.org));
+  const elegibles = deps.elegibles ? await deps.elegibles() : null;
   for (const org of await (deps.descubrir ?? descubridorDelRegistro)()) {
     if (ingeribles.has(org)) continue;
-    const motivo = buscarFuenteGrowth(org) === null
-      ? 'sin fuente Growth declarada o conectada'
-      : 'credencial de la fuente Growth ausente en este despliegue';
+    const motivo = elegibles !== null && !elegibles.has(org)
+      ? 'capacidad INGESTA_GROWTH no habilitada para este negocio'
+      : buscarFuenteGrowth(org) === null
+        ? 'sin fuente Growth declarada o conectada'
+        : 'credencial de la fuente Growth ausente en este despliegue';
     await deps.salud.marcarDeshabilitado(JOB, org, motivo).catch(() => undefined);
   }
 }

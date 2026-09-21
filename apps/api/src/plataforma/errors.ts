@@ -74,6 +74,63 @@ export class IdentidadOrganizacionInvalidaError extends PlataformaError {
   }
 }
 
+/**
+ * La CAPACIDAD que exige la experiencia no está habilitada para el negocio (Autonomy Fase B).
+ *
+ * Es distinto de «el negocio no existe» y de «falta la conexión»: el negocio existe, es válido y alguien
+ * —una persona— decidió no habilitar esto. La respuesta nombra la capacidad para que la interfaz pueda
+ * ofrecer habilitarla, en lugar de decir que la organización «no está en el registro».
+ */
+export class CapacidadNoHabilitadaError extends PlataformaError {
+  constructor(
+    readonly org: string,
+    readonly capacidad: string,
+    readonly experiencia: string,
+  ) {
+    super(
+      `el negocio '${org}' no tiene habilitada la capacidad '${capacidad}' que requiere '${experiencia}'`,
+      'CAPABILITY_NOT_ENABLED',
+      403,
+    );
+  }
+}
+
+/**
+ * La capacidad está habilitada, pero falta la CONEXIÓN que necesita para operar. Un negocio recién creado
+ * está exactamente aquí: es válido y no le falta permiso — le falta conectar su cuenta.
+ */
+export class ConexionRequeridaError extends PlataformaError {
+  constructor(
+    readonly org: string,
+    readonly requerida: string,
+    readonly detalle: string,
+  ) {
+    super(
+      `el negocio '${org}' necesita ${detalle} antes de ejecutar esta operación`,
+      'CONNECTION_REQUIRED',
+      409,
+    );
+  }
+}
+
+/**
+ * El negocio existe y tiene la capacidad, pero su PERFIL DE EVALUACIÓN está incompleto (sin objetivo,
+ * criterio ni política). No es un fallo de configuración de la plataforma: es información del negocio que
+ * todavía no se ha aportado, y se dice así.
+ */
+export class PerfilIncompletoError extends PlataformaError {
+  constructor(
+    readonly org: string,
+    readonly faltantes: readonly string[],
+  ) {
+    super(
+      `el negocio '${org}' tiene el perfil de evaluación incompleto: falta ${faltantes.join(', ')}`,
+      'PROFILE_INCOMPLETE',
+      409,
+    );
+  }
+}
+
 /** La organización autenticada no puede ejecutar esa experiencia (binding ausente o discordante). */
 export class BindingDeExperienciaInvalidoError extends PlataformaError {
   constructor(org: string, experiencia: string, motivo: string) {
