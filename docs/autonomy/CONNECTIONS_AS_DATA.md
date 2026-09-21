@@ -89,6 +89,14 @@ Dos separaciones deliberadas:
 
 Y `/plataforma/negocio` responde **200** para una empresa creada desde la interfaz: negocio válido, fuentes vacías, capacidades apagadas. Antes era un 404.
 
+### Apagar apaga
+
+Una conexión `DISABLED` **sustituye** a la fuente del módulo histórico en lugar de dejarla al descubierto: si
+apagar la conexión hiciera volver a valer la fuente del código, apagar no apagaría nada. Y una fuente GROWTH
+declarada pero **sin lectura** (apagada, sin credencial) resuelve a «no hay ingesta» (`null`), no a una avería:
+antes lanzaba, y un error ahí abortaba el tick de ingesta de todas las empresas. Una fuente **conectada** pero
+mal declarada (sin allowlist, sin la credencial que dice exigir) sigue lanzando, porque eso sí es un defecto.
+
 ## 7. Descubrimiento de los bucles: ninguna organización en el código
 
 | Bucle | Antes | Ahora |
