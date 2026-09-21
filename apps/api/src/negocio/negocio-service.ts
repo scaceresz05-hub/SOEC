@@ -11,6 +11,7 @@
 import { randomUUID, randomBytes } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { crearMembresia, crearOrganizacion, organizacionPorSlug, organizacionesDeUsuario, registrarAuditoria } from '@soec/identity/pg';
+import { canonizarAliasLegado } from '../plataforma/identidad-organizacion';
 import { RepositorioNegocios, type CambiosPerfil, type NegocioCompleto, type PerfilNegocio, type TipoCliente, type TipoNegocio } from './negocio-pg';
 
 export class NegocioInvalidoError extends Error {}
@@ -168,11 +169,19 @@ export class NegocioService {
     return this.leer(org);
   }
 
-  /** Negocios que el usuario puede ver: los de sus membresías, nunca el catálogo completo. */
+  /**
+   * Negocios que el usuario puede ver: los de sus membresías, nunca el catálogo completo.
+   *
+   * El slug de identidad puede ser un ALIAS histórico (`smileflow`) mientras el negocio está persistido con
+   * su clave canónica (`org-smileflow`). Se canoniza igual que en el gateway; si no, una empresa migrada
+   * desaparecería del listado de su propio dueño. Las empresas nuevas no tienen alias: slug y clave coinciden.
+   */
   async listarDeUsuario(userId: string): Promise<readonly PerfilNegocio[]> {
     const orgs = await organizacionesDeUsuario(this.pool, userId);
-    const slugs = orgs.filter((o) => o.organization.status === 'ACTIVE').map((o) => o.organization.slug);
-    return this.repo.perfilesDe(slugs);
+    const slugs = orgs
+      .filter((o) => o.organization.status === 'ACTIVE')
+      .map((o) => canonizarAliasLegado(o.organization.slug) ?? o.organization.slug);
+    return this.repo.perfilesDe([...new Set(slugs)]);
   }
 
   /** Descubrimiento para los runtimes: todas las organizaciones con negocio persistido. */

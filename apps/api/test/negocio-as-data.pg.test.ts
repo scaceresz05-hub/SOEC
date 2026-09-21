@@ -227,6 +227,20 @@ describe('migración de los negocios históricos', () => {
   });
 });
 
+describe('alias históricos de identidad', () => {
+  it('una empresa migrada aparece en el listado de su dueño aunque su slug de identidad sea un alias', async () => {
+    await migrarNegociosDelRegistro(pool);
+    const a = app();
+    const cookie = await usuario(a, 'duena-sf@soec.cl');
+    // La organización de identidad usa el alias legado `smileflow`; el negocio vive como `org-smileflow`.
+    const creada = await a.inject({ method: 'POST', url: '/organizations', headers: { ...H, cookie }, payload: { slug: 'smileflow', name: 'SmileFlow Clinic' } });
+    expect(creada.statusCode, creada.body).toBe(201);
+    const lista = (await a.inject({ method: 'GET', url: '/negocios', headers: { cookie } })).json();
+    expect(lista.negocios.map((n: { organizationId: string }) => n.organizationId)).toContain('org-smileflow');
+    await a.close();
+  });
+});
+
 describe('identidad de tenant', () => {
   it('el slug no es adivinable sólo con el nombre y tolera nombres repetidos o raros', () => {
     const a = slugDeNegocio('Clínica CP');
