@@ -27,8 +27,10 @@ describe('descubrimiento de organizaciones (sin ninguna fijada en código)', () 
     expect(orgs).toContain('org-cp-odontologia');
     const cp = plan.find((p) => p.org === 'org-cp-odontologia')!;
     expect(cp.fuentes).toContain('src-cp-odontologia-growth');
-    // CP no tiene Google Ads conectado: se omite con motivo, no se inventa ni hereda la de otra organización.
-    expect(cp.omitidas.join(' ')).toMatch(/google-ads/);
+    // Google Ads NO se ingiere aquí: tiene su propio scheduler. Se declara el motivo, no se omite en silencio.
+    const sf = plan.find((p) => p.org === 'org-smileflow')!;
+    expect(sf.fuentes.every((f) => !f.includes('google-ads'))).toBe(true);
+    expect(sf.omitidas.join(' ')).toMatch(/google-ads: lo ingiere su propio scheduler/);
   });
 
   it('sin credenciales, una organización simplemente no entra en la corrida (no es un fallo)', () => {

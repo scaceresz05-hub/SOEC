@@ -46,6 +46,9 @@ Una organización sin política declarada —CP Odontología, por ejemplo— no 
 - **Sustituye** la tarea de Windows `scripts/ingesta-tick.cmd` → `ingest-all.ts`, que corría en el PC de un desarrollador contra un Postgres local, para una organización fijada por `SOEC_INGESTA_ORG`, y llevaba deshabilitada desde el 2026-08-27. Esa tarea **debe permanecer deshabilitada**: el servidor ya hace el trabajo.
 - **Descubrimiento**, no configuración fija: recorre el registro de negocios y admite una organización sólo si tiene fuente declarada, su estado permite lectura y su credencial está disponible. Lo que queda fuera se declara con motivo (`omitidas`), nunca en silencio.
 - **Aislamiento**: un `SchedulerIngesta` por organización, con su contexto y sus cursores (`ingesta-cursor:<provider>:<org>`). El fallo de una no detiene a las demás.
+- **Alcance deliberado**: sólo las fuentes SIN planificador propio. Google Ads queda fuera porque ya tiene su
+  scheduler multi-tenant con lease distribuido (cadencia 3 h); repetirlo cada 15 min gastaba cuota de la API
+  y devolvía 429 sin aportar datos nuevos. El motivo se declara en `omitidas`, no se calla.
 - **Idempotencia intacta**: no se tocó la deduplicación existente (`provider:event_id` + cursor por fuente); un reinicio no duplica datos.
 - Cadencia 15 min, primera corrida diferida 30 s tras el arranque, sin solapes. Apagable con `SOEC_INGESTA_ENABLED=false`.
 - Reutiliza el scheduler que ya existía: no se construyó otro sistema de trabajos.

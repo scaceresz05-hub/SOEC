@@ -11,6 +11,9 @@
  * resuelven de verdad. Una fuente `NOT_CONNECTED`, sin token o sin recurso configurado simplemente no entra
  * en la corrida: no se inventa ni se hereda la de otra.
  *
+ * ALCANCE: las fuentes SIN planificador propio. Google Ads queda fuera a propósito: tiene su propio scheduler
+ * multi-tenant con lease distribuido, y repetir su trabajo aquí sólo gastaría cuota de la API.
+ *
  * AISLAMIENTO: cada organización corre con su propio `SchedulerIngesta`, su propio contexto y sus propios
  * cursores (`ingesta-cursor:<provider>:<org>`), que ya son por proveedor y organización. Un fallo de una
  * organización se captura y no impide que las demás corran (ni las detiene a mitad).
@@ -22,7 +25,6 @@ import { ActorId, OrganizationId, type EventStore, type RequestContext } from '@
 import { SecretStoreEnv } from '@soec/secretos';
 import { ObservacionService } from '@soec/motor-medicion';
 import { buscarFuente, buscarFuenteGrowth, buscarNegocio, organizacionesRegistradas } from '../plataforma';
-import { construirIngestaGoogleAds } from './google-ads-runtime';
 import { ESQUEMA_EGRESS_GROWTH, crearGrowthAdapter } from './growth-adapter';
 import { IngestaGrowth } from './ingesta-growth-service';
 import { SchedulerIngesta, type FuenteIngesta } from './scheduler';
@@ -112,18 +114,12 @@ function prepararOrganizacion(org: string, store: EventStore, env: NodeJS.Proces
     }
   }
 
-  // ── Fuente Google Ads (READ ONLY), si la organización la tiene configurada ──
+  // ── Google Ads: NO se ingiere aquí ──
+  // Ya tiene su propio scheduler multi-tenant con lease distribuido (`GoogleAdsScheduler`, cadencia 3 h,
+  // cableado en server.ts). Duplicarlo cada 15 min gastaría cuota de la API y provocaría 429 sin aportar
+  // datos nuevos. Este runtime cubre las fuentes que NO tienen planificador propio: hoy, Growth.
   const fuenteAds = buscarFuente(org, 'google-ads');
-  if (!fuenteAds) {
-    omitidas.push('google-ads: sin fuente declarada');
-  } else {
-    const ingestaAds = construirIngestaGoogleAds(store, env, org);
-    if (ingestaAds === null) omitidas.push('google-ads: credenciales o recurso incompletos');
-    else {
-      fuentes.push({ provider: fuenteAds.provider, ingesta: ingestaAds });
-      nombres.push(fuenteAds.sourceId);
-    }
-  }
+  if (fuenteAds) omitidas.push('google-ads: lo ingiere su propio scheduler (GoogleAdsScheduler)');
 
   if (fuentes.length === 0) return null;
   return { org, negocio: negocio.displayName, scheduler: new SchedulerIngesta({ store, org, fuentes }), growth, fuentes: nombres, omitidas };
