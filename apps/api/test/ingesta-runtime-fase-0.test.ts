@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { InMemoryEventStore } from '@soec/event-store';
-import { correrIngestaDeTodas, planDeIngesta } from '../src/ingesta/ingesta-runtime';
+import { correrIngestaDeTodas, planDeIngesta, sincronizarSaludDelPlan } from '../src/ingesta/ingesta-runtime';
 import { derivarEstado, type RegistroJob } from '../src/operacion/job-health-pg';
 import { SchedulerIngesta } from '../src/ingesta/scheduler';
 import { ActorId, OrganizationId, type RequestContext } from '@soec/contracts';
@@ -70,6 +70,22 @@ describe('aislamiento entre organizaciones', () => {
     expect(orgs.has('org-smileflow')).toBe(true);
     expect(orgs.has('org-cp-odontologia')).toBe(true);
     expect(llamadas.filter((l) => l.metodo === 'inicio').length).toBe(orgs.size);
+  });
+});
+
+describe('salud del plan · no se conservan estados viejos', () => {
+  it('una organización que hoy no es ingerible queda DESHABILITADA con su motivo', async () => {
+    const deshabilitadas: Array<{ org: string; motivo: string }> = [];
+    const salud = {
+      marcarInicio: async () => undefined, marcarExito: async () => undefined, marcarFallo: async () => undefined,
+      marcarDeshabilitado: async (_j: never, org: string, motivo: string) => { deshabilitadas.push({ org, motivo }); },
+      listar: async () => [],
+    } as never;
+    // Sólo CP tiene credencial: SmileFlow y el resto deben quedar marcadas, no arrastrar su estado anterior.
+    await sincronizarSaludDelPlan({ store: new InMemoryEventStore(), env: { CP_ODONTOLOGIA_GROWTH_TOKEN: 'token-cp' } as NodeJS.ProcessEnv, salud });
+    expect(deshabilitadas.map((d) => d.org)).toContain('org-smileflow');
+    expect(deshabilitadas.find((d) => d.org === 'org-smileflow')?.motivo).toMatch(/credencial/);
+    expect(deshabilitadas.map((d) => d.org)).not.toContain('org-cp-odontologia');
   });
 });
 

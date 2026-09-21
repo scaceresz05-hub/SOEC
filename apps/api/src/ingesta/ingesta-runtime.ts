@@ -192,6 +192,24 @@ export async function correrIngestaDeTodas(deps: DepsIngestaRuntime, intervaloMs
 }
 
 /**
+ * Marca como DESHABILITADAS las organizaciones registradas que HOY no son ingeribles, con su motivo. Sin
+ * esto, una organización que dejó de entrar en el plan (credencial retirada, fuente movida a otro
+ * planificador) conservaría para siempre su último estado —incluido un `FALLANDO` viejo— y el read model
+ * mentiría sobre lo que el sistema está haciendo.
+ */
+export async function sincronizarSaludDelPlan(deps: DepsIngestaRuntime): Promise<void> {
+  if (!deps.salud) return;
+  const ingeribles = new Set(planDeIngesta(deps.store, deps.env).map((p) => p.org));
+  for (const org of organizacionesRegistradas()) {
+    if (ingeribles.has(org)) continue;
+    const motivo = buscarFuenteGrowth(org) === null
+      ? 'sin fuente Growth declarada o conectada'
+      : 'credencial de la fuente Growth ausente en este despliegue';
+    await deps.salud.marcarDeshabilitado(JOB, org, motivo).catch(() => undefined);
+  }
+}
+
+/**
  * Arranca el bucle dentro del servidor. `unref()` para no retener el proceso, sin solapes (un tick lento no
  * lanza otro encima) y con la primera corrida diferida unos segundos para no competir con el arranque.
  */

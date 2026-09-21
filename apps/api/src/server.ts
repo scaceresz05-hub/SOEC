@@ -25,7 +25,7 @@ import { DecisionService } from './autonomia-ads/decision-service';
 import { ejecutarBootstrap } from '@soec/identity';
 import { DeterministicIntelligenceProvider } from '@soec/intelligence';
 import { jobHealthMigrations, PgRepositorioSaludJobs, type NombreJob } from './operacion/job-health-pg';
-import { iniciarIngestaServidor, planDeIngesta } from './ingesta/ingesta-runtime';
+import { iniciarIngestaServidor, planDeIngesta, sincronizarSaludDelPlan } from './ingesta/ingesta-runtime';
 import { estadoKillSwitch } from './gobierno';
 import { buildApp } from './app';
 
@@ -239,6 +239,9 @@ async function main(): Promise<void> {
   if (process.env.SOEC_INGESTA_ENABLED !== 'false') {
     const storeIngesta = new PgEventStore(pool);
     const plan = planDeIngesta(storeIngesta, process.env);
+    // Las organizaciones que hoy NO son ingeribles quedan marcadas como deshabilitadas con su motivo, para que
+    // el read model no conserve un estado viejo de cuando sí lo eran.
+    void sincronizarSaludDelPlan({ store: storeIngesta, env: process.env, salud }).catch(() => undefined);
     iniciarIngestaServidor({ store: storeIngesta, env: process.env, salud, log: (i) => console.log(JSON.stringify(i)) }, INTERVALO_INGESTA_MS);
     console.log(JSON.stringify({ ingesta: 'started', intervaloMs: INTERVALO_INGESTA_MS, organizaciones: plan.map((p) => ({ org: p.org, fuentes: p.fuentes, omitidas: p.omitidas })) }));
   } else {
