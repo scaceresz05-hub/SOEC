@@ -24,7 +24,8 @@
 import { ActorId, OrganizationId, type EventStore, type RequestContext } from '@soec/contracts';
 import { SecretStoreEnv } from '@soec/secretos';
 import { ObservacionService } from '@soec/motor-medicion';
-import { buscarFuente, buscarFuenteGrowth, buscarNegocio, organizacionesRegistradas } from '../plataforma';
+import { buscarFuente, buscarFuenteGrowth, buscarNegocio } from '../plataforma';
+import { descubridorDelRegistro, type DescubridorDeNegocios } from '../negocio/descubrimiento';
 import { ESQUEMA_EGRESS_GROWTH, crearGrowthAdapter } from './growth-adapter';
 import { IngestaGrowth } from './ingesta-growth-service';
 import { SchedulerIngesta, type FuenteIngesta } from './scheduler';
@@ -125,10 +126,13 @@ function prepararOrganizacion(org: string, store: EventStore, env: NodeJS.Proces
   return { org, negocio: negocio.displayName, scheduler: new SchedulerIngesta({ store, org, fuentes }), growth, fuentes: nombres, omitidas };
 }
 
-/** Qué organizaciones puede ingerir este despliegue AHORA, y con qué fuentes. Sólo lectura de configuración. */
-export function planDeIngesta(store: EventStore, env: NodeJS.ProcessEnv): readonly PlanIngestaOrg[] {
+/**
+ * Qué organizaciones puede ingerir este despliegue AHORA, y con qué fuentes. Sólo lectura de configuración.
+ * Las organizaciones las aporta el DESCUBRIDOR (la base), no un array en código.
+ */
+export async function planDeIngesta(store: EventStore, env: NodeJS.ProcessEnv, descubrir: DescubridorDeNegocios = descubridorDelRegistro): Promise<readonly PlanIngestaOrg[]> {
   const plan: PlanIngestaOrg[] = [];
-  for (const org of organizacionesRegistradas()) {
+  for (const org of await descubrir()) {
     const c = prepararOrganizacion(org, store, env);
     if (c !== null) plan.push({ org: c.org, negocio: c.negocio, fuentes: c.fuentes, omitidas: c.omitidas });
   }
@@ -139,6 +143,8 @@ export interface DepsIngestaRuntime {
   readonly store: EventStore;
   readonly env: NodeJS.ProcessEnv;
   readonly salud?: RepositorioSaludJobs;
+  /** De dónde salen las organizaciones. Por defecto, el registro histórico (para tests sin base). */
+  readonly descubrir?: DescubridorDeNegocios;
   readonly ahora?: () => string;
   readonly log?: (info: Record<string, unknown>) => void;
 }
@@ -150,7 +156,7 @@ export interface DepsIngestaRuntime {
 export async function correrIngestaDeTodas(deps: DepsIngestaRuntime, intervaloMs: number): Promise<readonly ResultadoIngestaOrg[]> {
   const ahora = deps.ahora ?? (() => new Date().toISOString());
   const resultados: ResultadoIngestaOrg[] = [];
-  for (const org of organizacionesRegistradas()) {
+  for (const org of await (deps.descubrir ?? descubridorDelRegistro)()) {
     const corrible = prepararOrganizacion(org, deps.store, deps.env);
     if (corrible === null) continue; // organización sin fuentes ingeribles: no es un fallo
     const inicio = ahora();
@@ -199,8 +205,8 @@ export async function correrIngestaDeTodas(deps: DepsIngestaRuntime, intervaloMs
  */
 export async function sincronizarSaludDelPlan(deps: DepsIngestaRuntime): Promise<void> {
   if (!deps.salud) return;
-  const ingeribles = new Set(planDeIngesta(deps.store, deps.env).map((p) => p.org));
-  for (const org of organizacionesRegistradas()) {
+  const ingeribles = new Set((await planDeIngesta(deps.store, deps.env, deps.descubrir)).map((p) => p.org));
+  for (const org of await (deps.descubrir ?? descubridorDelRegistro)()) {
     if (ingeribles.has(org)) continue;
     const motivo = buscarFuenteGrowth(org) === null
       ? 'sin fuente Growth declarada o conectada'

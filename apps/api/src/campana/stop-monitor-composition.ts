@@ -61,7 +61,13 @@ const idCustomer = (rn: string | null): string | null => rn?.match(/^customers\/
 
 /** `pausar` es opcional: sin adapter configurado el monitor decide pero no pausa (NO_PAUSE_ADAPTER, 0 writes).
  * `leerMetricasProvider` lee el spend/status de LA campaña del binding (no la histórica); null ⇒ métricas indisponibles. */
-export function crearDepsStopMonitor(store: EventStore, pauseAdapter: GoogleAdsPauseAdapter | null, leerMetricasProvider: LeerMetricasProvider | null): DepsStopMonitor {
+export function crearDepsStopMonitor(
+  store: EventStore,
+  pauseAdapter: GoogleAdsPauseAdapter | null,
+  leerMetricasProvider: LeerMetricasProvider | null,
+  /** Gobierno de la pausa leído de la BASE. Ausente ⇒ se usa el del registro (compatibilidad). */
+  evaluadorPausa?: (org: string) => Promise<{ readonly permitido: boolean; readonly motivo: string }>,
+): DepsStopMonitor {
   const ctx = (org: string): RequestContext => { const o = OrganizationId(org); return { organizationId: o, actor: ActorId('stop-monitor'), scope: { organizationId: o, permissions: ['events:read', 'events:append'] }, correlationId: `stop-monitor-${org}` }; };
   const envelopes = new EnvelopeService(store);
   const bindings = new ResourceBindingService(store);
@@ -99,8 +105,8 @@ export function crearDepsStopMonitor(store: EventStore, pauseAdapter: GoogleAdsP
     },
     // GOBIERNO de la pausa: kill switch del despliegue + política declarada por la organización. Se resuelve en
     // cada tick (no se captura al arrancar) para que apagar el interruptor tenga efecto sin reiniciar el proceso.
-    permitirPausaSegura: (org: string) => {
-      const v = evaluarPausaSeguridad(org, process.env);
+    permitirPausaSegura: async (org: string) => {
+      const v = evaluadorPausa ? await evaluadorPausa(org) : evaluarPausaSeguridad(org, process.env);
       return { permitido: v.permitido, motivo: v.motivo };
     },
     ...(pauseAdapter ? { pausarCampania: (customerId: string, resourceName: string) => pauseAdapter.pausarCampania(customerId, resourceName).then((r) => ({ ok: r.ok, requestId: r.requestId, resourceName: r.resourceName, errorStatus: r.errorStatus, errorMessage: r.errorMessage })) } : {}),

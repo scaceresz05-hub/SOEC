@@ -9,6 +9,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { cabecerasOrg, fijarOrgActiva } from '../lib/org-activa';
 import { listarMisNegocios, type Negocio } from '../lib/mis-negocios';
 import { Badge, PageHeader, clp, colorDeNegocio, iniciales, num, type Tono } from '../components/ui';
@@ -101,6 +102,9 @@ export default function Home(): React.ReactElement {
   return (
     <div className="dash panel">
       <PageHeader eyebrow="SOEC · tu director de marketing" title="Mis empresas" />
+      <p style={{ margin: '0 0 12px' }}>
+        <Link className="btn primary" href="/negocios/nueva">+ Nueva empresa</Link>
+      </p>
       <p className="lede">
         SOEC dirige cada negocio por separado. Elegí una empresa para ver cómo va, qué recomienda SOEC
         y qué necesita de vos. Los datos de una empresa nunca se mezclan con los de otra.

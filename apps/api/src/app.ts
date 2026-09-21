@@ -146,6 +146,7 @@ import { registrarVerticalesAutenticadas } from './vertical-gateway';
 import { PlataformaError } from './plataforma';
 import { registerPlataformaRoutes } from './plataforma-routes';
 import { registerSaludRoutes } from './operacion/salud-routes';
+import { registerNegocioRoutes, registerNegocioTenantRoutes } from './negocio/negocio-routes';
 import { registerAcquisitionRoutes } from './acquisition-routes';
 import { registerMetaOAuthAutenticadas, registerMetaCallbackPublico } from './acquisition/meta-oauth-routes';
 import { registerGoogleAdsOAuthAutenticadas, registerGoogleAdsCallbackPublico } from './acquisition/google-ads-oauth-routes';
@@ -431,6 +432,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     registerCiaRoutes(target, deps.store); // Centro de Integraciones Autónomas (CIA, preparación cerrada)
     registerPlataformaRoutes(target, deps.store); // Estado, fundamentos y catálogo del negocio
     if (deps.pool) registerSaludRoutes(target, deps.pool); // Salud observable de los trabajos de fondo (Autonomy Fase 0)
+    if (deps.pool) registerNegocioTenantRoutes(target, deps.pool); // Negocio como dato: leer/editar el propio
     registerAcquisitionRoutes(target, deps.store); // Acquisition Engine (sólo lectura / shadow)
     // OAuth READ-ONLY de Meta — rutas AUTENTICADAS (start/connection/assets/binding). El CALLBACK va aparte,
     // PÚBLICO (fuera del gateway), porque el redirect de Meta llega sin sesión y se autentica por el state.
@@ -483,6 +485,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       ...(deps.rateLimit ? { rateLimit: deps.rateLimit } : {}),
     });
     registerOrganizationsRoutes(app, identity, !secure); // devToken de invitación solo fuera de prod
+    // NEGOCIO COMO DATO: crear y listar dependen sólo de la sesión (todavía no hay organización activa
+    // cuando alguien da de alta su primera empresa). La superficie por tenant va dentro del gateway.
+    registerNegocioRoutes(app, deps.pool, identity);
 
     // Callback OAuth de Meta: PÚBLICO (fuera del gateway vertical) porque el redirect del navegador de Meta
     // llega sin sesión ni Authorization. La autoridad viene del `state` persistido (org+actor, one-time, TTL,

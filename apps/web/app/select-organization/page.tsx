@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { crearOrganizacion, logout, yo, type UsuarioSesion } from '../../lib/auth-client';
 import { fijarOrgActiva } from '../../lib/org-activa';
 
@@ -78,7 +79,10 @@ export default function SelectOrganizationPage() {
 
       <form onSubmit={crear} className="card">
         <h2>{tiene ? 'Crear otra empresa' : 'Creá tu empresa para empezar'}</h2>
-        <p className="muted small">Sólo necesitamos el nombre. Lo demás lo configuramos nosotros.</p>
+        <p className="muted small">
+          Sólo necesitamos el nombre. Si prefieres decirnos desde ya a qué se dedica y dónde opera,{' '}
+          <Link href="/negocios/nueva">créala con su perfil</Link>.
+        </p>
         <label style={{ display: 'block', margin: '10px 0' }}>
           Nombre de la empresa<br />
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: SmileFlow Clinic" style={{ width: '100%' }} required />

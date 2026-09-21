@@ -20,8 +20,8 @@ const ENV_COMPLETO = {
 } as unknown as NodeJS.ProcessEnv;
 
 describe('descubrimiento de organizaciones (sin ninguna fijada en código)', () => {
-  it('con credenciales de ambas, el plan incluye a SmileFlow y a CP, cada una con su fuente', () => {
-    const plan = planDeIngesta(new InMemoryEventStore(), ENV_COMPLETO);
+  it('con credenciales de ambas, el plan incluye a SmileFlow y a CP, cada una con su fuente', async () => {
+    const plan = await planDeIngesta(new InMemoryEventStore(), ENV_COMPLETO);
     const orgs = plan.map((p) => p.org);
     expect(orgs).toContain('org-smileflow');
     expect(orgs).toContain('org-cp-odontologia');
@@ -33,14 +33,14 @@ describe('descubrimiento de organizaciones (sin ninguna fijada en código)', () 
     expect(sf.omitidas.join(' ')).toMatch(/google-ads: lo ingiere su propio scheduler/);
   });
 
-  it('sin credenciales, una organización simplemente no entra en la corrida (no es un fallo)', () => {
-    const plan = planDeIngesta(new InMemoryEventStore(), {} as NodeJS.ProcessEnv);
+  it('sin credenciales, una organización simplemente no entra en la corrida (no es un fallo)', async () => {
+    const plan = await planDeIngesta(new InMemoryEventStore(), {} as NodeJS.ProcessEnv);
     expect(plan.find((p) => p.org === 'org-cp-odontologia')).toBeUndefined();
   });
 
-  it('ninguna organización queda fijada: el plan sale del registro, no de SOEC_INGESTA_ORG', () => {
-    const conVariable = planDeIngesta(new InMemoryEventStore(), { ...ENV_COMPLETO, SOEC_INGESTA_ORG: 'org-smileflow' } as NodeJS.ProcessEnv);
-    const sinVariable = planDeIngesta(new InMemoryEventStore(), ENV_COMPLETO);
+  it('ninguna organización queda fijada: el plan lo aporta el descubridor, no SOEC_INGESTA_ORG', async () => {
+    const conVariable = await planDeIngesta(new InMemoryEventStore(), { ...ENV_COMPLETO, SOEC_INGESTA_ORG: 'org-smileflow' } as NodeJS.ProcessEnv);
+    const sinVariable = await planDeIngesta(new InMemoryEventStore(), ENV_COMPLETO);
     expect(conVariable.map((p) => p.org)).toEqual(sinVariable.map((p) => p.org));
     expect(sinVariable.length).toBeGreaterThan(1);
   });

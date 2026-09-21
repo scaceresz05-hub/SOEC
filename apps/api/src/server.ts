@@ -25,8 +25,11 @@ import { DecisionService } from './autonomia-ads/decision-service';
 import { ejecutarBootstrap } from '@soec/identity';
 import { DeterministicIntelligenceProvider } from '@soec/intelligence';
 import { jobHealthMigrations, PgRepositorioSaludJobs, type NombreJob } from './operacion/job-health-pg';
+import { negocioMigrations, RepositorioNegocios } from './negocio/negocio-pg';
+import { migrarNegociosDelRegistro } from './negocio/migracion-registro';
+import { crearDescubridorDeNegocios } from './negocio/descubrimiento';
 import { iniciarIngestaServidor, planDeIngesta, sincronizarSaludDelPlan } from './ingesta/ingesta-runtime';
-import { estadoKillSwitch } from './gobierno';
+import { estadoKillSwitch, crearEvaluadorPausaSeguridad } from './gobierno';
 import { buildApp } from './app';
 
 /**
@@ -107,6 +110,11 @@ async function main(): Promise<void> {
   await runGoogleAdsMigrationsSeguro(pool); // OAuth Google Ads multi-tenant (google_ads_*) bajo advisory lock (boot concurrente seguro)
   await runMigrations(pool, budgetAuthorizationMigrations); // P0: autorización de presupuesto TOTAL por humano (guardrail financiero)
   await runMigrations(pool, jobHealthMigrations); // Autonomy Fase 0: salud observable de los trabajos de fondo
+  await runMigrations(pool, negocioMigrations); // Autonomy Fase A: el negocio como dato (SSOT en PostgreSQL)
+  // Migración idempotente de los negocios que nacieron como módulos TypeScript. No crea organizaciones
+  // nuevas ni regenera identidades: sólo persiste lo que ya existía, para que el runtime lea de la base.
+  const migracionNegocios = await migrarNegociosDelRegistro(pool);
+  console.log(JSON.stringify({ negociosComoDato: migracionNegocios }));
   const boot = await ejecutarBootstrap(pool);
   if (boot.ejecutado) console.log(JSON.stringify({ bootstrap: boot }));
 
@@ -196,7 +204,10 @@ async function main(): Promise<void> {
     const pauseAdapter = construirAdapterPausaGoogleAds(process.env, 'org-smileflow', compGoogleAds, (i) => console.log(JSON.stringify({ stopMonitorPause: i })));
     const readClient = construirClienteEscrituraGoogleAds(process.env, 'org-smileflow', compGoogleAds, {});
     const lectorMetricas = readClient ? construirLectorMetricasCampania((cid, q) => readClient.buscar(cid, q)) : null;
-    const svc = new StopMonitorService(crearDepsStopMonitor(new PgEventStore(pool), pauseAdapter, lectorMetricas));
+    // El permiso para pausar sale de `business_governance` (la base), con el registro como respaldo.
+    const repoNegocios = new RepositorioNegocios(pool);
+    const evaluadorPausa = crearEvaluadorPausaSeguridad((org) => repoNegocios.gobierno(org), process.env);
+    const svc = new StopMonitorService(crearDepsStopMonitor(new PgEventStore(pool), pauseAdapter, lectorMetricas, evaluadorPausa));
     const intervaloMs = 5 * 60_000;
     iniciarStopMonitor(svc, 'org-smileflow', intervaloMs, latido('stopMonitor', 'org-smileflow', intervaloMs));
     // SIN retraso inicial: es el camino de SEGURIDAD. Su primer tick cae a los 5 min, como siempre.
@@ -259,11 +270,14 @@ async function main(): Promise<void> {
   // código), corre cada una aislada y registra su salud. Apagable con SOEC_INGESTA_ENABLED=false.
   if (process.env.SOEC_INGESTA_ENABLED !== 'false') {
     const storeIngesta = new PgEventStore(pool);
-    const plan = planDeIngesta(storeIngesta, process.env);
+    // DESCUBRIMIENTO desde la base: las organizaciones ingeribles salen del repositorio persistente, no de
+    // un array en código. Una empresa creada desde la interfaz entra sin desplegar nada.
+    const descubrir = crearDescubridorDeNegocios(pool);
+    const plan = await planDeIngesta(storeIngesta, process.env, descubrir);
     // Las organizaciones que hoy NO son ingeribles quedan marcadas como deshabilitadas con su motivo, para que
     // el read model no conserve un estado viejo de cuando sí lo eran.
-    void sincronizarSaludDelPlan({ store: storeIngesta, env: process.env, salud }).catch(() => undefined);
-    iniciarIngestaServidor({ store: storeIngesta, env: process.env, salud, log: (i) => console.log(JSON.stringify(i)) }, INTERVALO_INGESTA_MS);
+    void sincronizarSaludDelPlan({ store: storeIngesta, env: process.env, salud, descubrir }).catch(() => undefined);
+    iniciarIngestaServidor({ store: storeIngesta, env: process.env, salud, descubrir, log: (i) => console.log(JSON.stringify(i)) }, INTERVALO_INGESTA_MS);
     console.log(JSON.stringify({ ingesta: 'started', intervaloMs: INTERVALO_INGESTA_MS, organizaciones: plan.map((p) => ({ org: p.org, fuentes: p.fuentes, omitidas: p.omitidas })) }));
   } else {
     console.log(JSON.stringify({ ingesta: 'disabled' }));

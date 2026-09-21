@@ -101,7 +101,7 @@ export interface DepsStopMonitor {
    * GOBIERNO de la pausa: se consulta SIEMPRE antes de tocar al proveedor. Ausente ⇒ denegado (fail-closed):
    * un monitor sin gobierno explícito no ejecuta mutaciones externas.
    */
-  readonly permitirPausaSegura?: (org: string) => { readonly permitido: boolean; readonly motivo: string };
+  readonly permitirPausaSegura?: (org: string) => { readonly permitido: boolean; readonly motivo: string } | Promise<{ readonly permitido: boolean; readonly motivo: string }>;
   /** Persiste el resultado de un STOP ejecutado (regla, métricas, resourceName, requestId, outcome, at). */
   readonly registrarStop: (org: string, decision: DecisionMonitor, metricas: MetricasCampania, outcome: OutcomeStop, pausa: ResultadoPausaProvider | null, at: string) => Promise<void>;
   /** Heartbeat durable de CADA tick (para que la UI pruebe que el monitor está vivo Y qué OBSERVÓ). Opcional.
@@ -139,7 +139,7 @@ export class StopMonitorService {
     if (debeSaltarPausa(ultimo, decision.campaignId)) return { decision, outcome: 'ALREADY_STOPPED', metricas: m }; // ya pausada con éxito ⇒ 0 writes
     // GOBIERNO: la pausa es una mutación externa. Sin permiso explícito no se toca al proveedor (0 writes), y la
     // denegación queda registrada con su motivo para que se vea por qué NO se pausó.
-    const gobierno = this.deps.permitirPausaSegura?.(org) ?? { permitido: false, motivo: 'SAFETY_PAUSE_NOT_GOVERNED' };
+    const gobierno = (await this.deps.permitirPausaSegura?.(org)) ?? { permitido: false, motivo: 'SAFETY_PAUSE_NOT_GOVERNED' };
     if (!gobierno.permitido) {
       await this.deps.registrarStop(org, { ...decision, reason: `${decision.reason ?? ''}|${gobierno.motivo}` }, m, 'SAFETY_PAUSE_DENIED', null, at);
       return { decision, outcome: 'SAFETY_PAUSE_DENIED', metricas: m };
