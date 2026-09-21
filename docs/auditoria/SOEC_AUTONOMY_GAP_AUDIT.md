@@ -23,6 +23,18 @@
 > (objetivo, criterio, límites, contexto del director) todavía no es dato, así que las experiencias REALES le
 > responden `409 PROFILE_INCOMPLETE`. Los bloqueadores 4 y 5 siguen intactos.
 
+> **Actualización 2026-09-21 — Autonomy Fase C ejecutada.** Cifras de línea base intactas.
+> [EVALUATION_POLICY_AS_DATA.md](../autonomy/EVALUATION_POLICY_AS_DATA.md): la política de evaluación
+> (objetivo, eventos de conversión, KPI, criterios de éxito/alerta/pausa/escalamiento, mínimos de evidencia y
+> topes de autonomía) es dato tenant-scoped en PostgreSQL, con completitud explícita y motivos estructurados.
+> Con esto **la salvedad de la actualización anterior queda cerrada**: una empresa nueva pasa a EVALUABLE
+> configurando sus criterios desde la interfaz, y el perfil de SmileFlow reconstruido desde datos es idéntico
+> campo por campo al de su módulo (prueba de paridad). `PROFILE_REGISTRY_DEPENDENCY` pasa de 1 empresa a 0
+> para quien tiene política completa; el registro queda como referencia y rollback, no como dependencia
+> operativa. El Director multiempresa se salta —con motivos— a los tenants incompletos, sin afectar a los
+> demás. Los bloqueadores 4 y 5 del TOP 5 (motor de investigación/generación y optimización que ejecuta)
+> siguen intactos: SOEC ya puede evaluar cualquier empresa, todavía no puede promocionarla sola.
+
 **Método:** lectura del código ejecutable (no de la documentación), distinguiendo qué está cableado en el runtime (`apps/api/src/server.ts`, rutas registradas en `app.ts`) de lo que existe como tipo, motor puro o fixture. Toda afirmación lleva evidencia `archivo:línea`. Vocabulario: `IMPLEMENTADO_Y_USADO · IMPLEMENTADO_PARCIAL · IMPLEMENTADO_PERO_NO_CONECTADO · MOCK · SOLO_TIPO_O_DOC · LEGACY · AUSENTE`.
 
 ---

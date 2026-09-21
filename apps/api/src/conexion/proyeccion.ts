@@ -20,8 +20,11 @@ import type { AlcanceGeografico } from '@soec/campanias';
 import type { Pool } from 'pg';
 import { configuracionHistorica, organizacionesHistoricas } from '../plataforma/registro';
 import type {
+  BusinessEvaluationProfile,
   ConfiguracionOrganizacion,
   CredencialRef,
+  CuentaExternaRef,
+  EmbudoDeConversion,
   EstadoFuente,
   EstadoNegocio as EstadoIncorporacion,
   ExperienciaReal,
@@ -32,6 +35,8 @@ import type {
 } from '../plataforma/tipos';
 import { RepositorioNegocios, type GobiernoNegocio, type PerfilNegocio, type TerritorioNegocio, type TipoNegocio } from '../negocio/negocio-pg';
 import { RepositorioConexiones, type CapacidadPersistida, type Conexion } from './conexion-pg';
+import { RepositorioPolitica, type PoliticaCompleta } from '../politica/politica-pg';
+import { construirPerfilDeEvaluacion, evaluarCompletitud } from '../politica/politica-perfil';
 import {
   CAPACIDAD_DE_EXPERIENCIA,
   EXPERIENCIA_DE_CAPACIDAD,
@@ -50,6 +55,9 @@ export interface DetalleProyeccion {
   readonly capacidades: readonly CapacidadNegocio[];
   /** Qué sigue viniendo del módulo TypeScript histórico. Vacío en una empresa nueva. */
   readonly camposDelRegistro: readonly string[];
+  /** Qué le falta a su política de evaluación (Fase C). Vacío ⇒ el negocio es evaluable. */
+  readonly faltantesDePerfil: readonly string[];
+  readonly perfilEvaluable: boolean;
 }
 
 export interface SnapshotNegocios {
@@ -137,6 +145,40 @@ export function recursoGoogleAdsDe(c: Conexion | null): RecursoGoogleAds | null 
   };
 }
 
+/**
+ * Cuentas externas del negocio, derivadas de sus CONEXIONES. Sin secretos: `credentialRef` es la referencia
+ * opaca que ya guarda la conexión. Los proveedores que el tipo histórico no contempla (tienda, CRM, Search
+ * Console) no se fuerzan dentro de él: se omiten aquí y viven en las conexiones.
+ */
+export function cuentasExternasDeConexiones(conexiones: readonly Conexion[]): readonly CuentaExternaRef[] {
+  const PROVEEDOR: Partial<Record<Conexion['provider'], CuentaExternaRef['proveedor']>> = {
+    GOOGLE_ADS: 'google-ads', META_ADS: 'meta', GROWTH_M2M: 'growth-api', GA4: 'ga4', MERCHANT_CENTER: 'merchant-center',
+  };
+  const cuentas: CuentaExternaRef[] = [];
+  for (const c of conexiones) {
+    const proveedor = PROVEEDOR[c.provider];
+    if (proveedor === undefined) continue;
+    cuentas.push({
+      proveedor,
+      externalAccountId: c.externalAccountId,
+      loginAccountId: c.loginAccountId,
+      credentialRef: c.secretRef,
+      estado: c.estado === 'CONNECTED' ? 'CONNECTED_READ_ONLY' : c.estado === 'PENDING' ? 'PENDING' : 'NOT_CONNECTED',
+    });
+  }
+  return cuentas;
+}
+
+/** Embudo declarado como DATO: el evento principal y los secundarios persistidos. `null` si no hay ninguno. */
+export function embudoDePolitica(politica: PoliticaCompleta): EmbudoDeConversion | null {
+  const principal = politica.eventos.find((e) => e.rol === 'PRIMARY') ?? null;
+  if (principal === null) return null;
+  return {
+    conversionPrimaria: principal.eventKey,
+    conversionesSecundarias: politica.eventos.filter((e) => e.rol === 'SECONDARY').map((e) => e.eventKey),
+  };
+}
+
 /** Experiencias que las capacidades persistidas habilitan. Orden estable para que la salida sea determinista. */
 export function experienciasDeCapacidades(caps: readonly CapacidadPersistida[]): readonly ExperienciaReal[] {
   const habilitadas = new Set(caps.filter((c) => c.habilitada).map((c) => c.capacidad));
@@ -173,6 +215,8 @@ export interface DatosDeNegocio {
   readonly pendientes: readonly string[];
   readonly conexiones: readonly Conexion[];
   readonly capacidades: readonly CapacidadPersistida[];
+  /** Política de evaluación persistida (Fase C). Sin ella el negocio existe pero no es evaluable. */
+  readonly politica?: PoliticaCompleta;
 }
 
 /**
@@ -250,29 +294,40 @@ export function proyectarNegocio(d: DatosDeNegocio): { config: ConfiguracionOrga
       };
 
   if (base) {
-    // La POLÍTICA DE EVALUACIÓN (objetivo, criterio, límites, contexto del director) todavía no es dato.
-    if (base.perfil) delRegistro.push('perfilDeEvaluacion');
     if (base.perfilComercial) delRegistro.push('perfilComercial');
     delRegistro.push('estadoDeIncorporacion');
   }
+  if (base?.embudo && (d.politica?.eventos ?? []).every((e) => e.rol !== 'PRIMARY')) delRegistro.push('embudo');
 
-  const perfil = base?.perfil
-    ? {
-        ...base.perfil,
-        // El recurso de Google Ads pasa a resolverse desde la CONEXIÓN. Sin conexión se conserva el histórico
-        // (y queda contado), porque perderlo dejaría a la campaña vigente sin cuenta resuelta.
-        externalResourceRefs: { googleAds: recursoAds ?? base.perfil.externalResourceRefs.googleAds },
-      }
-    : null;
-  if (base?.perfil && recursoAds === null && base.perfil.externalResourceRefs.googleAds !== null) {
-    delRegistro.push('recursoGoogleAds');
+  // ── PERFIL DE EVALUACIÓN: PRIMERO LO PERSISTIDO (Fase C) ──
+  // La política vive en PostgreSQL. El módulo histórico sólo actúa como respaldo mientras la política de una
+  // empresa migrada siga incompleta, y ese respaldo queda CONTADO. Una empresa nueva nunca pasa por ahí: si su
+  // política está incompleta, su perfil es `null` y quien lo pida recibe PROFILE_INCOMPLETE con los motivos.
+  const politica: PoliticaCompleta = d.politica ?? { politica: null, kpis: [], eventos: [], reglas: [], limites: null, canales: [] };
+  const cuentasExternas = cuentasExternasDeConexiones(conexiones);
+  let perfil: BusinessEvaluationProfile | null = construirPerfilDeEvaluacion({
+    perfil: d.perfil,
+    politica,
+    recursoGoogleAds: recursoAds,
+    cuentasExternas,
+  });
+  if (perfil === null && base?.perfil) {
+    perfil = {
+      ...base.perfil,
+      // El recurso de Google Ads se resuelve desde la CONEXIÓN. Sin conexión se conserva el histórico (y queda
+      // contado), porque perderlo dejaría a la campaña vigente sin cuenta resuelta.
+      externalResourceRefs: { googleAds: recursoAds ?? base.perfil.externalResourceRefs.googleAds },
+    };
+    delRegistro.push('perfilDeEvaluacion');
+    if (recursoAds === null && base.perfil.externalResourceRefs.googleAds !== null) delRegistro.push('recursoGoogleAds');
   }
 
   const config: ConfiguracionOrganizacion = {
     negocio,
     perfilComercial: base?.perfilComercial ?? null,
     perfil,
-    embudo: base?.embudo ?? null,
+    // El embudo también es dato: sale de los eventos persistidos; el del módulo queda como respaldo contado.
+    embudo: embudoDePolitica(politica) ?? base?.embudo ?? null,
     fuentes,
   };
 
@@ -284,6 +339,8 @@ export function proyectarNegocio(d: DatosDeNegocio): { config: ConfiguracionOrga
       conexiones: conexiones.map((c) => `${c.provider}:${c.estado}`),
       capacidades: d.capacidades.filter((c) => c.habilitada).map((c) => c.capacidad),
       camposDelRegistro: [...new Set(delRegistro)],
+      faltantesDePerfil: evaluarCompletitud({ perfil: d.perfil, politica }).faltantes.map((f) => f.campo),
+      perfilEvaluable: perfil !== null,
     },
   };
 }
@@ -299,7 +356,10 @@ const PREFIJO_PENDIENTE = 'dato pendiente de aportar: ';
 export async function construirSnapshotDeNegocios(pool: Pool, ahora: () => string = () => new Date().toISOString()): Promise<SnapshotNegocios> {
   const repoN = new RepositorioNegocios(pool);
   const repoC = new RepositorioConexiones(pool);
-  const [perfiles, conexiones, capacidades] = await Promise.all([repoN.listarTodos(), repoC.todas(), repoC.todasLasCapacidades()]);
+  const repoP = new RepositorioPolitica(pool);
+  const [perfiles, conexiones, capacidades, politicas] = await Promise.all([
+    repoN.listarTodos(), repoC.todas(), repoC.todasLasCapacidades(), repoP.todas(),
+  ]);
 
   const configs: ConfiguracionOrganizacion[] = [];
   const detalle: DetalleProyeccion[] = [];
@@ -320,6 +380,7 @@ export async function construirSnapshotDeNegocios(pool: Pool, ahora: () => strin
         .map((x) => x.texto.slice(PREFIJO_PENDIENTE.length)),
       conexiones: conexiones.filter((c) => c.organizationId === org),
       capacidades: capacidades.filter((c) => c.organizationId === org),
+      politica: politicas.get(org),
     });
     configs.push(r.config);
     detalle.push(r.detalle);
@@ -339,6 +400,8 @@ export async function construirSnapshotDeNegocios(pool: Pool, ahora: () => strin
         .map((e) => CAPACIDAD_DE_EXPERIENCIA[e])
         .filter((x): x is CapacidadNegocio => x !== undefined),
       camposDelRegistro: ['negocio', 'fuentes', 'perfilDeEvaluacion', 'experienciasHabilitadas'],
+      faltantesDePerfil: c.perfil === null ? ['primaryObjective', 'primaryConversionEvent', 'primaryKpi', 'successCriterion'] : [],
+      perfilEvaluable: c.perfil !== null,
     });
   }
 

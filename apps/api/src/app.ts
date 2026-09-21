@@ -148,6 +148,7 @@ import { registerPlataformaRoutes } from './plataforma-routes';
 import { registerSaludRoutes } from './operacion/salud-routes';
 import { registerNegocioRoutes, registerNegocioTenantRoutes } from './negocio/negocio-routes';
 import { registerConexionRoutes } from './conexion/conexion-routes';
+import { registerPoliticaRoutes } from './politica/politica-routes';
 import { crearDepositoSecretosConexion } from './conexion/secreto-conexion';
 import { refrescarNegociosDelRuntime } from './conexion/snapshot';
 import { registerAcquisitionRoutes } from './acquisition-routes';
@@ -441,13 +442,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // snapshot del runtime, para que lo conectado empiece a operar sin esperar el refresco periódico.
     if (deps.pool) {
       const pool = deps.pool;
+      const refrescar = async (): Promise<void> => {
+        await refrescarNegociosDelRuntime(pool).catch(() => undefined);
+      };
       registerConexionRoutes(target, pool, {
         deposito: crearDepositoSecretosConexion(pool, process.env),
         env: process.env,
-        refrescar: async () => {
-          await refrescarNegociosDelRuntime(pool).catch(() => undefined);
-        },
+        refrescar,
       });
+      // POLÍTICA DE EVALUACIÓN COMO DATO (Autonomy Fase C): objetivos, indicadores y criterios se configuran
+      // desde la interfaz. Completarla vuelve EVALUABLE al negocio; no autoriza gasto ni ejecución.
+      registerPoliticaRoutes(target, pool, { refrescar });
     }
     registerAcquisitionRoutes(target, deps.store); // Acquisition Engine (sólo lectura / shadow)
     // OAuth READ-ONLY de Meta — rutas AUTENTICADAS (start/connection/assets/binding). El CALLBACK va aparte,

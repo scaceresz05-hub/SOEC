@@ -36,6 +36,7 @@ export async function refrescarNegociosDelRuntime(pool: Pool): Promise<ResumenRe
       config,
       origen: d?.origen ?? 'REGISTRO',
       camposDelRegistro: d?.camposDelRegistro ?? ['todo'],
+      faltantesDePerfil: d?.faltantesDePerfil ?? [],
     };
   });
   const { organizaciones } = fijarNegociosDelRuntime(entradas, snap.at);

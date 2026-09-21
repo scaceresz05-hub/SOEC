@@ -293,6 +293,7 @@ export const organizacionesHistoricas = (): readonly string[] => REGISTRO_HISTOR
 let RESOLUTOR = crearResolutorDeNegocios(ORGANIZACIONES_DEL_DESPLIEGUE);
 let ORIGENES: Map<string, OrigenDeConfiguracion> = new Map(ORIGEN_INICIAL);
 let CAMPOS_DEL_REGISTRO = new Map<string, readonly string[]>();
+let FALTANTES_DE_PERFIL = new Map<string, readonly string[]>();
 let FIJADO_EN: string | null = null;
 /** Cuántas resoluciones ha servido una configuración que TODAVÍA depende del módulo histórico. */
 const USOS_LEGADO = new Map<string, number>();
@@ -308,6 +309,11 @@ export interface ConfiguracionConProcedencia {
   readonly origen: OrigenDeConfiguracion;
   /** Campos que esta configuración sigue tomando del módulo TypeScript. Vacío ⇒ enteramente dato. */
   readonly camposDelRegistro: readonly string[];
+  /**
+   * Qué le falta a la POLÍTICA DE EVALUACIÓN de esta organización (Fase C). Vacío ⇒ es evaluable. Se transporta
+   * hasta aquí para que el binding —que es sincrónico— pueda decir exactamente qué falta sin consultar la base.
+   */
+  readonly faltantesDePerfil?: readonly string[];
 }
 
 /**
@@ -327,6 +333,7 @@ export function fijarNegociosDelRuntime(
   RESOLUTOR = crearResolutorDeNegocios([...unicas.values()].map((e) => e.config));
   ORIGENES = new Map([...unicas.entries()].map(([org, e]) => [org, e.origen]));
   CAMPOS_DEL_REGISTRO = new Map([...unicas.entries()].map(([org, e]) => [org, e.camposDelRegistro]));
+  FALTANTES_DE_PERFIL = new Map([...unicas.entries()].map(([org, e]) => [org, e.faltantesDePerfil ?? []]));
   FIJADO_EN = at;
   return { organizaciones: unicas.size };
 }
@@ -336,6 +343,7 @@ export function restablecerNegociosDelRuntime(): void {
   RESOLUTOR = crearResolutorDeNegocios(ORGANIZACIONES_DEL_DESPLIEGUE);
   ORIGENES = new Map(ORIGEN_INICIAL);
   CAMPOS_DEL_REGISTRO = new Map();
+  FALTANTES_DE_PERFIL = new Map();
   FIJADO_EN = null;
   USOS_LEGADO.clear();
 }
@@ -364,6 +372,12 @@ export function estadoDeCompatibilidadLegado(): {
     })),
   };
 }
+
+/**
+ * Qué le falta a la política de evaluación de una organización, según el último snapshot. Lista vacía cuando
+ * es evaluable o cuando todavía no se ha fijado ningún snapshot (el binding usa entonces su propio motivo).
+ */
+export const faltantesDePerfilDeEvaluacion = (org: string): readonly string[] => FALTANTES_DE_PERFIL.get(org) ?? [];
 
 /** Procedencia de la configuración con la que se está resolviendo una organización. */
 export const origenDeConfiguracion = (org: string): OrigenDeConfiguracion | null => ORIGENES.get(org) ?? null;

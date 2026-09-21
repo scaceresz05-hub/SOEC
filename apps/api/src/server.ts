@@ -33,6 +33,9 @@ import { conexionMigrations } from './conexion/conexion-pg';
 import { migrarConexionesDelRegistro } from './conexion/migracion-conexiones';
 import { crearDepositoSecretosConexion, crearAlmacenDeLecturaDeSecretos } from './conexion/secreto-conexion';
 import { crearDescubridorPorCapacidad, crearElegiblesPorCapacidad, iniciarRefrescoDeNegocios, refrescarNegociosDelRuntime } from './conexion/snapshot';
+import { politicaMigrations } from './politica/politica-pg';
+import { migrarPoliticasDelRegistro } from './politica/migracion-politica';
+import { PoliticaService } from './politica/politica-service';
 import { estadoKillSwitch, crearEvaluadorPausaSeguridad } from './gobierno';
 import { buildApp } from './app';
 
@@ -126,6 +129,10 @@ async function main(): Promise<void> {
   // hoy hace cada empresa y sin mover ningún secreto (se conserva la referencia `env:` tal cual).
   const migracionConexiones = await migrarConexionesDelRegistro(pool);
   console.log(JSON.stringify({ conexionesComoDato: migracionConexiones }));
+  await runMigrations(pool, politicaMigrations); // Autonomy Fase C: la política de evaluación como dato
+  // Se migra SÓLO lo que existe: SmileFlow completa, CP con su embudo (queda incompleta y lo dice), C Y P nada.
+  const migracionPoliticas = await migrarPoliticasDelRegistro(pool);
+  console.log(JSON.stringify({ politicaComoDato: migracionPoliticas }));
   // PRIMER SNAPSHOT: desde aquí el runtime resuelve `organización → negocio / perfil / fuentes` contra la
   // BASE. Se fija ANTES de atender la primera petición para que ninguna resuelva con el registro histórico.
   const snapshotInicial = await refrescarNegociosDelRuntime(pool);
@@ -282,8 +289,20 @@ async function main(): Promise<void> {
       console.log(JSON.stringify({ directorCycle: 'sin_negocios_con_capacidad', capacidad: 'CICLO_DIRECTOR' }));
       void salud.marcarDeshabilitado('directorCycle', '', 'ningún negocio tiene la capacidad CICLO_DIRECTOR').catch(() => undefined);
     }
+    // PUERTA DE EVALUACIÓN (Fase C): sin política completa el ciclo se SALTA con sus motivos. Un negocio
+    // incompleto no es un error del servidor y no impide que los demás corran.
+    const politicaSvc = new PoliticaService(pool);
+    const puedeEvaluar = async (org: string): Promise<{ ok: boolean; faltantes: readonly string[] }> => {
+      try {
+        const c = await politicaSvc.completitud(org);
+        return { ok: c.estado === 'EVALUATION_PROFILE_COMPLETE', faltantes: c.faltantes.map((f) => f.campo) };
+      } catch {
+        // Si la comprobación falla, NO se bloquea el ciclo de quien ya venía funcionando: se deja correr.
+        return { ok: true, faltantes: [] };
+      }
+    };
     for (const [i, org] of conDirector.entries()) {
-      iniciarDirectorCycle(directorCycle, org, 5 * 60_000, latido('directorCycle', org, 5 * 60_000), RETRASO_DIRECTOR_MS + i * 5_000);
+      iniciarDirectorCycle(directorCycle, org, 5 * 60_000, latido('directorCycle', org, 5 * 60_000), RETRASO_DIRECTOR_MS + i * 5_000, puedeEvaluar);
       console.log(JSON.stringify({ directorCycle: 'started', org, retrasoInicialMs: RETRASO_DIRECTOR_MS + i * 5_000 }));
       // Observabilidad del BUCLE DE DECISIÓN al boot (READ-ONLY, mismo SSOT que la UI): decisión vigente + su semántica
       // financiera. Corre unos segundos DESPUÉS del boot para leer el resultado ya persistido por la corrida inmediata

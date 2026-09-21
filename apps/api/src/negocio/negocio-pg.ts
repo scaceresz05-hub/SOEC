@@ -379,6 +379,11 @@ export class RepositorioNegocios {
     );
   }
 
+  /** Retira una restricción del negocio. Sólo de ESTE tenant: el `organization_id` va en el WHERE. */
+  async borrarRestriccion(q: Queryable, org: string, id: string): Promise<void> {
+    await q.query('delete from business_restriction where organization_id = $1 and id = $2', [org, id]);
+  }
+
   async restricciones(org: string): Promise<readonly RestriccionNegocio[]> {
     const { rows } = await this.pool.query('select * from business_restriction where organization_id = $1 order by tipo, id', [org]);
     return rows.map((r: Record<string, unknown>) => ({

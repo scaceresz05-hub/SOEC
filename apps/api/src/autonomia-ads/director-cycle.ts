@@ -208,8 +208,36 @@ export class DirectorCycleService {
 }
 
 /** Arranca el ciclo del director en el loop del servidor (setInterval + una corrida inmediata al boot). */
-export function iniciarDirectorCycle(svc: DirectorCycleService, org: string, intervaloMs: number, log?: (e: unknown) => void, retrasoInicialMs = 0): { detener: () => void } {
-  const tick = async (): Promise<void> => { try { const r = await svc.correrCiclo(org, 'scheduler'); log?.({ directorCycle: 'tick', org, persistido: r?.persistido ?? false, hayCampania: r !== null, resumen: r?.resumen ?? null }); } catch (e) { log?.({ directorCycle: 'error', org, error: e instanceof Error ? e.message : String(e) }); } };
+/**
+ * Puerta de ENTRADA al ciclo (Fase C): el Director no evalúa a una empresa cuya política de evaluación está
+ * incompleta. Devuelve `{ ok: false, faltantes }` y el ciclo se SALTA con su motivo — no es un error del
+ * servidor, y una empresa incompleta no impide que las demás corran.
+ */
+export type PuertaDeEvaluacion = (org: string) => Promise<{ readonly ok: boolean; readonly faltantes: readonly string[] }>;
+
+export function iniciarDirectorCycle(
+  svc: DirectorCycleService,
+  org: string,
+  intervaloMs: number,
+  log?: (e: unknown) => void,
+  retrasoInicialMs = 0,
+  puedeEvaluar?: PuertaDeEvaluacion,
+): { detener: () => void } {
+  const tick = async (): Promise<void> => {
+    try {
+      if (puedeEvaluar) {
+        const veredicto = await puedeEvaluar(org);
+        if (!veredicto.ok) {
+          log?.({ directorCycle: 'skip', org, motivo: 'PROFILE_INCOMPLETE', faltantes: veredicto.faltantes });
+          return;
+        }
+      }
+      const r = await svc.correrCiclo(org, 'scheduler');
+      log?.({ directorCycle: 'tick', org, persistido: r?.persistido ?? false, hayCampania: r !== null, resumen: r?.resumen ?? null });
+    } catch (e) {
+      log?.({ directorCycle: 'error', org, error: e instanceof Error ? e.message : String(e) });
+    }
+  };
   // Corrida inicial: el resultado nace en el boot, ANTES de cualquier lectura de la UI. Se puede RETRASAR para
   // no sumarse a la ráfaga de lecturas del arranque (este ciclo hace hasta 7 consultas GAQL seguidas).
   const primera = setTimeout(() => void tick(), retrasoInicialMs);

@@ -89,7 +89,10 @@ export default function ConexionesPage() {
 
   return (
     <main className="wrap" style={{ maxWidth: 760, margin: '0 auto', padding: '32px 16px' }}>
-      <p style={{ marginBottom: 8 }}><Link href="/negocios">← Volver al panel</Link></p>
+      <p style={{ marginBottom: 8, display: 'flex', gap: 12 }}>
+        <Link href="/negocios">← Volver al panel</Link>
+        <Link href="/negocios/objetivos">Objetivos y criterios →</Link>
+      </p>
       <h1 style={{ marginBottom: 4 }}>Conexiones y permisos</h1>
       <p style={{ color: 'var(--muted, #666)', marginBottom: 24 }}>
         Conecta de dónde salen tus datos y decide qué puede hacer SOEC con ellos. Nada se enciende solo.

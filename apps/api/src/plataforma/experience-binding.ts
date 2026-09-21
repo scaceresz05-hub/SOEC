@@ -33,7 +33,7 @@ import {
   PerfilIncompletoError,
 } from './errors';
 import { assertTenantIdCanonico } from './identidad-organizacion';
-import { getBusiness, buscarProfile, buscarFuentes } from './registro';
+import { getBusiness, buscarProfile, buscarFuentes, faltantesDePerfilDeEvaluacion } from './registro';
 import {
   ESTADOS_CON_LECTURA,
   type BusinessEvaluationProfile,
@@ -107,9 +107,12 @@ export function bindExperienciaReal(
   }
 
   // (6) perfil de evaluación (409 PROFILE_INCOMPLETE si el negocio existe pero su política no está definida).
+  //     Los motivos son los REALES de su política persistida (Fase C), no una lista genérica: la interfaz puede
+  //     pedir exactamente lo que falta.
   const perfil = buscarProfile(org);
   if (perfil === null) {
-    throw new PerfilIncompletoError(org, ['objetivo', 'criterio de evaluación', 'política de optimización']);
+    const faltantes = faltantesDePerfilDeEvaluacion(org);
+    throw new PerfilIncompletoError(org, faltantes.length > 0 ? faltantes : ['primaryObjective', 'primaryConversionEvent', 'primaryKpi', 'successCriterion']);
   }
 
   // (7) invariante estructural: todo pertenece a la MISMA organización.

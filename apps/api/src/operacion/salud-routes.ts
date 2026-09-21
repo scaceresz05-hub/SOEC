@@ -14,6 +14,7 @@ import type { Pool } from 'pg';
 import { contextoDe, permisosDe } from '../superficie-auth';
 import { estadoGobierno } from '../gobierno';
 import { RepositorioConexiones } from '../conexion/conexion-pg';
+import { PoliticaService } from '../politica/politica-service';
 import { estadoDeCompatibilidadLegado } from '../plataforma/registro';
 import { PgRepositorioSaludJobs, saludDeJobs, JOBS } from './job-health-pg';
 
@@ -26,6 +27,7 @@ function modoOperativoDe(req: { headers: Record<string, unknown> }): string | nu
 export function registerSaludRoutes(app: FastifyInstance, pool: Pool): void {
   const repo = new PgRepositorioSaludJobs(pool);
   const conexiones = new RepositorioConexiones(pool);
+  const politica = new PoliticaService(pool);
 
   app.get('/operacion/salud', async (req, reply) => {
     const { organizationId } = contextoDe(req); // sin contexto ⇒ 403
@@ -48,6 +50,8 @@ export function registerSaludRoutes(app: FastifyInstance, pool: Pool): void {
       conexiones.capacidades(org).catch(() => []),
     ]);
     const procedencia = estadoDeCompatibilidadLegado().organizaciones.find((x) => x.org === org) ?? null;
+    // PERFIL DE EVALUACIÓN (Fase C): responde «¿por qué esta empresa no entra al Director?» sin leer logs.
+    const completitud = await politica.completitud(org).catch(() => null);
     return reply.send({
       organizationId: org,
       at: ahora,
@@ -61,6 +65,14 @@ export function registerSaludRoutes(app: FastifyInstance, pool: Pool): void {
         ultimoError: c.ultimoError,
       })),
       capacidades: caps.filter((c) => c.habilitada).map((c) => c.capacidad),
+      evaluationProfile: completitud === null
+        ? null
+        : {
+            status: completitud.estado,
+            missingFields: completitud.faltantes.map((f) => f.campo),
+            recommendations: completitud.recomendaciones.map((r) => r.campo),
+            lastUpdatedAt: completitud.actualizadoEn,
+          },
       // De dónde sale la configuración con la que opera este negocio, y qué sigue viniendo del código.
       procedencia: procedencia === null
         ? null
