@@ -26,6 +26,7 @@ import { assertTenantIdCanonico } from './identidad-organizacion';
 import { CONFIGURACION_ORG_SMILEFLOW } from './negocios/org-smileflow';
 import { CONFIGURACION_ORG_CYP } from './negocios/org-cyp';
 import { CONFIGURACION_ORG_CP_ODONTOLOGIA } from './negocios/org-cp-odontologia';
+import { ESTADOS_CON_LECTURA } from './tipos';
 import type {
   BusinessEvaluationProfile,
   ConfiguracionOrganizacion,
@@ -139,8 +140,10 @@ export function crearResolutorDeNegocios(
    * Fuente `GROWTH` de la organización, RESUELTA. Reglas duras:
    *   · sólo se consideran fuentes cuyo `organizationId` coincide con el de la organización;
    *   · más de una fuente GROWTH ⇒ se lanza (la ingesta sería ambigua, jamás se elige una "por defecto");
-   *   · fuente GROWTH sin configuración de ingesta, sin la credencial que declara, o con allowlist de
-   *     hosts vacía ⇒ se lanza. No hay valores por defecto heredados de ningún proveedor.
+   *   · fuente GROWTH declarada pero SIN lectura (apagada, sin credencial) ⇒ `null`: no hay ingesta, y eso
+   *     no es una avería;
+   *   · fuente GROWTH CONECTADA pero sin configuración de ingesta, sin la credencial que declara, o con
+   *     allowlist de hosts vacía ⇒ se lanza. No hay valores por defecto heredados de ningún proveedor.
    */
   const buscarFuenteGrowth = (org: string): DescriptorFuenteGrowth | null => {
     const config = buscarConfiguracion(org);
@@ -157,6 +160,11 @@ export function crearResolutorDeNegocios(
       );
     }
     const f = growth[0]!;
+    // DECLARADA-PERO-NO-CONECTADA no es un error de configuración: es una fuente que existe y de la que hoy
+    // no se puede leer (credencial retirada, conexión apagada por su dueño). Se responde `null` —no hay
+    // ingesta— en lugar de lanzar. Lanzar aquí convertía «el dueño apagó su conexión» en una avería que
+    // abortaba el tick de ingesta de TODAS las empresas.
+    if (!ESTADOS_CON_LECTURA.includes(f.estado)) return null;
     const g = f.growth ?? null;
     if (!g) {
       throw new SinFuenteDeDatosError(

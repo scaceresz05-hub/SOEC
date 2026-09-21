@@ -227,6 +227,17 @@ describe('3 · capacidades: lo persistido manda sobre el módulo histórico', ()
     expect(r.detalle.camposDelRegistro).toContain('experienciasHabilitadas');
   });
 
+  it('apagar la conexión de una empresa migrada la desconecta de verdad (no vuelve a valer el módulo)', () => {
+    const apagada: Conexion = { ...conexionGrowth('org-smileflow'), estado: 'DISABLED', secretRef: null, configuracion: { ...conexionGrowth('org-smileflow').configuracion, provider: 'smileflow-growth' } };
+    const r = proyectarNegocio(datos({
+      perfil: perfilNuevo({ organizationId: 'org-smileflow', origen: 'MIGRACION' }),
+      conexiones: [apagada],
+    }));
+    fijar({ config: r.config, origen: 'PERSISTIDA_CON_REGISTRO', camposDelRegistro: r.detalle.camposDelRegistro });
+    // La fuente GROWTH resuelta es la de la conexión apagada: sin credencial, no hay descriptor de ingesta.
+    expect(buscarFuenteGrowth('org-smileflow')).toBeNull();
+  });
+
   it('la pausa automática la decide el gobierno persistido, no el módulo', () => {
     const sinGobierno = proyectarNegocio(datos({ perfil: perfilNuevo({ organizationId: 'org-smileflow' }) }));
     expect(sinGobierno.config.negocio.politicaSeguridad?.pausaAutomatica).toBe(false);

@@ -196,6 +196,9 @@ export default function ConexionesPage() {
             <Link href="/adquisicion">Adquisición</Link>; aquí sólo se ve su estado.
           </p>
         )}
+        {estado?.oauthMeta !== null && estado?.oauthMeta !== undefined && (
+          <p>Meta (Facebook e Instagram): <strong>{estado.oauthMeta.estado}</strong> · sólo lectura</p>
+        )}
         {estado?.conexiones.filter((c) => c.provider !== 'GROWTH_M2M').map((c) => (
           <p key={c.provider}>
             {ETIQUETA_PROVEEDOR[c.provider] ?? c.provider}: <strong>{ETIQUETA_ESTADO_CONEXION[c.estado].texto}</strong>

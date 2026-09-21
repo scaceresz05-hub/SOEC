@@ -38,6 +38,8 @@ export interface EstadoConexiones {
   capacidades: VistaCapacidad[];
   depositoDisponible: boolean;
   oauthGoogleAds: { estado: string; customerId: string | null; salud: string } | null;
+  /** Meta sigue siendo sólo lectura: aquí se ve su estado, no se habilita ninguna escritura. */
+  oauthMeta: { estado: string; salud: string } | null;
 }
 
 /** Etiquetas en lenguaje de negocio: el dueño lee qué hace cada cosa, no el nombre interno. */

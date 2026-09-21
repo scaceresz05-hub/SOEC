@@ -183,7 +183,10 @@ export function proyectarNegocio(d: DatosDeNegocio): { config: ConfiguracionOrga
   const org = d.perfil.organizationId;
   const base = configuracionHistorica(org);
   const delRegistro: string[] = [];
-  const conexiones = d.conexiones.filter((c) => c.estado !== 'DISABLED' || base === null);
+  // Se proyectan TODAS las conexiones, incluidas las apagadas: una conexión `DISABLED` se traduce a una fuente
+  // sin lectura y SUSTITUYE a la del módulo histórico. Si se filtraran, apagar la conexión de una empresa
+  // migrada no tendría efecto —volvería a valer la fuente del código—, y apagar algo tiene que apagarlo.
+  const conexiones = d.conexiones;
   const fuentesProyectadas = conexiones.map((c) => fuenteDeConexion(c));
 
   // CAPACIDADES: lo persistido manda. Sin ninguna fila (migración no corrida) se respeta el registro, y se

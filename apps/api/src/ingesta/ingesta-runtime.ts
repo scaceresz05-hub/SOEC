@@ -98,7 +98,14 @@ function prepararOrganizacion(org: string, store: EventStore, env: NodeJS.Proces
   let growth: IngestaGrowth | null = null;
 
   // ── Fuente GROWTH propia del negocio (puente M2M declarado por la organización) ──
-  const fuenteGrowth = buscarFuenteGrowth(org);
+  // La resolución se hace a prueba de fallos: una fuente mal declarada de UNA empresa no puede abortar el
+  // tick de las demás (el bucle superior aísla el fallo de la corrida, no el de la preparación).
+  let fuenteGrowth: ReturnType<typeof buscarFuenteGrowth> = null;
+  try {
+    fuenteGrowth = buscarFuenteGrowth(org);
+  } catch (e) {
+    omitidas.push(`growth: configuración inválida (${e instanceof Error ? e.message : String(e)})`);
+  }
   if (fuenteGrowth === null) {
     omitidas.push('growth: sin fuente declarada o no conectada');
   } else if (!credencialDisponible(fuenteGrowth.credencialRef, env)) {

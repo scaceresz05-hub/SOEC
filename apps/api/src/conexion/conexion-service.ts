@@ -69,6 +69,11 @@ export interface VistaConexiones {
   readonly depositoDisponible: boolean;
   /** Conexión OAuth de Google Ads, tal como la registró su propio flujo. Solo lectura, sin secretos. */
   readonly oauthGoogleAds: { readonly estado: string; readonly customerId: string | null; readonly salud: string } | null;
+  /**
+   * Conexión OAuth de Meta, tal como la registró su propio flujo. Se muestra para que el dueño vea TODO lo
+   * conectado en un sitio; esta fase no habilita ninguna escritura en Meta (sigue siendo sólo lectura).
+   */
+  readonly oauthMeta: { readonly estado: string; readonly salud: string } | null;
 }
 
 export interface EntradaGrowth {
@@ -138,10 +143,11 @@ export class ConexionService {
   /** Estado completo de lo conectado y lo habilitado. Es lo que pinta la interfaz de conexiones. */
   async estado(org: string): Promise<VistaConexiones> {
     await this.exigirNegocio(org);
-    const [conexiones, capacidades, oauth] = await Promise.all([
+    const [conexiones, capacidades, oauth, meta] = await Promise.all([
       this.repo.listar(org),
       this.repo.capacidades(org),
       this.oauthGoogleAds(org),
+      this.oauthMeta(org),
     ]);
     const porProveedor = new Map(conexiones.map((c) => [c.provider, c]));
     const habilitadas = new Map(capacidades.map((c) => [c.capacidad, c.habilitada]));
@@ -170,6 +176,7 @@ export class ConexionService {
       capacidades: vistasCap,
       depositoDisponible: this.deps.deposito !== null,
       oauthGoogleAds: oauth,
+      oauthMeta: meta,
     };
   }
 
@@ -353,6 +360,20 @@ export class ConexionService {
       return r ? { estado: r.estado, salud: r.salud, customerId: r.customer_id ?? null } : null;
     } catch {
       return null; // el esquema OAuth puede no existir en un despliegue mínimo: no es un fallo del negocio
+    }
+  }
+
+  /** Estado de la conexión OAuth de Meta, leído de su propia tabla. Sin tokens ni referencias. */
+  private async oauthMeta(org: string): Promise<VistaConexiones['oauthMeta']> {
+    try {
+      const { rows } = await this.pool.query(
+        'select estado, salud from meta_connection where organization_id = $1 limit 1',
+        [org],
+      );
+      const r = rows[0] as { estado: string; salud: string } | undefined;
+      return r ? { estado: r.estado, salud: r.salud } : null;
+    } catch {
+      return null; // el esquema OAuth de Meta puede no existir en un despliegue mínimo
     }
   }
 
