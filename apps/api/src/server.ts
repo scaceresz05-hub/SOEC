@@ -71,6 +71,24 @@ if (legacyDemoAccess) {
   console.warn('ADVERTENCIA: acceso DEMO LEGACY habilitado (rutas /experience/* SIN autenticacion). Solo test/dev/demo. NO usar con datos u organizaciones reales.');
 }
 
+/**
+ * ESCALONAMIENTO DEL ARRANQUE (camino de ANALÍTICA).
+ *
+ * Al arrancar, tres componentes leían Google Ads en el mismo segundo: el scheduler de ingesta (3 consultas),
+ * la sonda de fechas (1) y el ciclo del director (hasta 7). Once consultas en menos de un segundo agotan el
+ * límite de ráfaga del proveedor: cada arranque devolvía un 429, con la lectura recuperándose sola después.
+ * Aquí cada uno arranca en su propio momento, con un desfase pequeño y algo de jitter para que dos réplicas
+ * no coincidan. No cambia ninguna cadencia periódica ni se aumenta ninguna cuota.
+ *
+ * El camino de SEGURIDAD (stop monitor) NO se escalona ni se retrasa: su primera evaluación sigue cayendo en
+ * su cadencia de 5 min y puede pausar en cuanto una regla dispare. Proteger el dinero manda sobre ahorrar
+ * llamadas.
+ */
+const jitter = (ms: number): number => Math.floor(ms * (0.8 + Math.random() * 0.4));
+const RETRASO_SCHEDULER_ADS_MS = jitter(20_000);
+const RETRASO_SONDA_FECHAS_MS = jitter(45_000);
+const RETRASO_DIRECTOR_MS = jitter(75_000);
+
 /** Cadencia de la ingesta server-side: 15 min, la misma que tenía la tarea externa que reemplaza. */
 const INTERVALO_INGESTA_MS = 15 * 60_000;
 /** Cadencia declarada del scheduler de Google Ads (para el read model de salud). */
@@ -156,11 +174,12 @@ async function main(): Promise<void> {
       lease: new PgGoogleAdsSyncLease(pool), // exclusión distribuida: dos réplicas no sincronizan la misma conexión
       holder: `${process.env.RAILWAY_REPLICA_ID ?? 'local'}:${randomUUID()}`,
       habilitado: habilitadoGoogleAds,
+      retrasoInicialMs: RETRASO_SCHEDULER_ADS_MS, // escalonado: no comparte segundo con la sonda ni con el director
       ahora: () => new Date().toISOString(),
       log: (evento) => latido('googleAdsScheduler', '', INTERVALO_INGESTA_ADS_MS)({ googleAdsScheduler: evento, ...(typeof (evento as { error?: unknown }).error === 'string' ? { error: (evento as { error?: string }).error } : {}) }),
     });
     const { agendado } = scheduler.iniciar();
-    console.log(JSON.stringify({ googleAdsScheduler: agendado ? 'started' : 'dormant_disabled' }));
+    console.log(JSON.stringify({ googleAdsScheduler: agendado ? 'started' : 'dormant_disabled', retrasoInicialMs: agendado ? RETRASO_SCHEDULER_ADS_MS : null }));
     if (!agendado) void salud.marcarDeshabilitado('googleAdsScheduler', '', 'GOOGLE_ADS_SCHEDULER_ENABLED != true').catch(() => undefined);
   } else {
     console.log(JSON.stringify({ googleAdsScheduler: 'idle_no_google_ads_config' }));
@@ -180,10 +199,12 @@ async function main(): Promise<void> {
     const svc = new StopMonitorService(crearDepsStopMonitor(new PgEventStore(pool), pauseAdapter, lectorMetricas));
     const intervaloMs = 5 * 60_000;
     iniciarStopMonitor(svc, 'org-smileflow', intervaloMs, latido('stopMonitor', 'org-smileflow', intervaloMs));
-    console.log(JSON.stringify({ stopMonitor: 'started', intervaloMs, org: 'org-smileflow', pauseWired: pauseAdapter !== null, metricsWired: lectorMetricas !== null }));
+    // SIN retraso inicial: es el camino de SEGURIDAD. Su primer tick cae a los 5 min, como siempre.
+    console.log(JSON.stringify({ stopMonitor: 'started', intervaloMs, org: 'org-smileflow', pauseWired: pauseAdapter !== null, metricsWired: lectorMetricas !== null, caminoSeguridad: true }));
     // SONDA DE FECHAS (READ-ONLY, boot): confirma que campaign.start_date/end_date (v25) se leen de LA campaña vigente.
     // Observabilidad honesta de la fuente de fechas; ninguna escritura, ningún efecto sobre la campaña.
-    if (readClient) void (async (): Promise<void> => {
+    // Sonda diferida: es OBSERVABILIDAD, no seguridad; puede esperar a que pase la ráfaga del arranque.
+    if (readClient) setTimeout(() => void (async (): Promise<void> => {
       try {
         const st = new PgEventStore(pool);
         const env = await new EnvelopeService(st).leerUltimo('org-smileflow');
@@ -197,7 +218,7 @@ async function main(): Promise<void> {
         const c = (rows[0] as { campaign?: { startDateTime?: unknown; endDateTime?: unknown } } | undefined)?.campaign;
         console.log(JSON.stringify({ campaignDatesProbe: { ok: true, campaignId: campId, startDateTimeRaw: c?.startDateTime ?? null, endDateTimeRaw: c?.endDateTime ?? null, startDate: fechaCalendario(c?.startDateTime), endDate: fechaCalendario(c?.endDateTime) } }));
       } catch (e) { console.log(JSON.stringify({ campaignDatesProbe: 'error', error: e instanceof Error ? e.message : String(e) })); }
-    })();
+    })(), RETRASO_SONDA_FECHAS_MS).unref?.();
   } else {
     console.log(JSON.stringify({ stopMonitor: 'disabled' }));
     void salud.marcarDeshabilitado('stopMonitor', 'org-smileflow', 'SOEC_STOP_MONITOR_ENABLED=false').catch(() => undefined);
@@ -213,8 +234,8 @@ async function main(): Promise<void> {
       diagnosis: new DiagnosisEvidenceService(new PgEventStore(pool)),
       clienteFactory: (o) => construirClienteEscrituraGoogleAds(process.env, o, compGoogleAds, {}),
     });
-    iniciarDirectorCycle(directorCycle, 'org-smileflow', 5 * 60_000, latido('directorCycle', 'org-smileflow', 5 * 60_000));
-    console.log(JSON.stringify({ directorCycle: 'started', org: 'org-smileflow' }));
+    iniciarDirectorCycle(directorCycle, 'org-smileflow', 5 * 60_000, latido('directorCycle', 'org-smileflow', 5 * 60_000), RETRASO_DIRECTOR_MS);
+    console.log(JSON.stringify({ directorCycle: 'started', org: 'org-smileflow', retrasoInicialMs: RETRASO_DIRECTOR_MS }));
     // Observabilidad del BUCLE DE DECISIÓN al boot (READ-ONLY, mismo SSOT que la UI): decisión vigente + su semántica
     // financiera. Corre unos segundos DESPUÉS del boot para leer el resultado ya persistido por la corrida inmediata
     // del ciclo (evita la carrera boot-tick/probe). No dispara análisis ni escribe en Google.

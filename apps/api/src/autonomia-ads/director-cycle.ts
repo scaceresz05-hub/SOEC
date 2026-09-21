@@ -208,10 +208,13 @@ export class DirectorCycleService {
 }
 
 /** Arranca el ciclo del director en el loop del servidor (setInterval + una corrida inmediata al boot). */
-export function iniciarDirectorCycle(svc: DirectorCycleService, org: string, intervaloMs: number, log?: (e: unknown) => void): { detener: () => void } {
+export function iniciarDirectorCycle(svc: DirectorCycleService, org: string, intervaloMs: number, log?: (e: unknown) => void, retrasoInicialMs = 0): { detener: () => void } {
   const tick = async (): Promise<void> => { try { const r = await svc.correrCiclo(org, 'scheduler'); log?.({ directorCycle: 'tick', org, persistido: r?.persistido ?? false, hayCampania: r !== null, resumen: r?.resumen ?? null }); } catch (e) { log?.({ directorCycle: 'error', org, error: e instanceof Error ? e.message : String(e) }); } };
-  void tick(); // corrida inmediata: el resultado nace en el boot, ANTES de cualquier lectura de la UI
+  // Corrida inicial: el resultado nace en el boot, ANTES de cualquier lectura de la UI. Se puede RETRASAR para
+  // no sumarse a la ráfaga de lecturas del arranque (este ciclo hace hasta 7 consultas GAQL seguidas).
+  const primera = setTimeout(() => void tick(), retrasoInicialMs);
+  if (typeof primera === 'object' && primera && 'unref' in primera) (primera as { unref: () => void }).unref();
   const timer = setInterval(() => void tick(), intervaloMs);
   if (typeof timer === 'object' && timer && 'unref' in timer) (timer as { unref: () => void }).unref();
-  return { detener: () => clearInterval(timer) };
+  return { detener: () => { clearTimeout(primera); clearInterval(timer); } };
 }

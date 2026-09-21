@@ -32,6 +32,12 @@ export interface DepsScheduler extends DepsSincronizacion {
   readonly intervaloMs?: number;
   /** Habilitación explícita (dormido si !== 'true'). */
   readonly habilitado: boolean;
+  /**
+   * Retraso de la PRIMERA corrida tras el arranque. Existe para escalonar el camino de ANALÍTICA: si el
+   * scheduler, la sonda de fechas y el ciclo del director leen a la vez, el proveedor devuelve 429 de ráfaga.
+   * 0 (por defecto) ⇒ corrida inmediata, como antes.
+   */
+  readonly retrasoInicialMs?: number;
   /** Logger inyectable (observabilidad sanitizada; nunca secretos). */
   readonly log?: (evento: Record<string, unknown>) => void;
 }
@@ -102,6 +108,7 @@ export class InMemorySyncLease implements SyncLeasePort {
 
 export class GoogleAdsScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
+  private primera: ReturnType<typeof setTimeout> | null = null;
   constructor(private readonly deps: DepsScheduler) {}
 
   /** Agenda la corrida periódica. NO hace nada si el scheduler está deshabilitado (dormido). */
@@ -112,13 +119,28 @@ export class GoogleAdsScheduler {
     const correr = (): void => {
       void correrTodasLasConexiones(this.deps).catch((e) => this.deps.log?.({ scheduler: 'google-ads', error: e instanceof Error ? e.message : 'error' }));
     };
-    correr(); // corrida INICIAL inmediata: setInterval no dispara hasta pasado el intervalo (antes no había 1ª corrida observable)
+    // Corrida INICIAL: setInterval no dispara hasta pasado el intervalo, así que sin ella no habría primera
+    // sincronización observable tras un arranque. Se puede RETRASAR (`retrasoInicialMs`) para no competir con
+    // las otras lecturas de Google del arranque: tres componentes disparando a la vez agotaban el límite de
+    // ráfaga del proveedor (429) sin que ninguno leyera nada nuevo.
+    const retraso = this.deps.retrasoInicialMs ?? 0;
+    if (retraso > 0) {
+      const t = setTimeout(correr, retraso);
+      if (typeof t.unref === 'function') t.unref();
+      this.primera = t;
+    } else {
+      correr();
+    }
     this.timer = setInterval(correr, intervalo);
     if (typeof this.timer.unref === 'function') this.timer.unref();
     return { agendado: true };
   }
 
   detener(): void {
+    if (this.primera !== null) {
+      clearTimeout(this.primera);
+      this.primera = null;
+    }
     if (this.timer !== null) {
       clearInterval(this.timer);
       this.timer = null;

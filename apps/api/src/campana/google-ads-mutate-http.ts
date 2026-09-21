@@ -61,10 +61,17 @@ export interface SearchErrorDetalle {
   readonly message: string | null;
   readonly errorPath: string | null;
   readonly fieldPathElements: readonly FieldPathElement[];
+  /**
+   * Resumen del cuerpo cuando Google NO devuelve un `GoogleAdsFailure` parseable —por ejemplo en los 429 de
+   * límite de ráfaga, que llegan como texto del balanceador. Sin esto, el error se colapsaba a
+   * `GOOGLE_SEARCH_HTTP_429` y no se podía saber qué límite se estaba aplicando. Recortado y sin secretos:
+   * un cuerpo de error de Google no contiene credenciales, y aun así se acota a 200 caracteres.
+   */
+  readonly cuerpoResumen: string | null;
 }
 export class GoogleSearchError extends Error {
   constructor(public readonly detalle: SearchErrorDetalle) {
-    super(`GOOGLE_SEARCH_HTTP_${detalle.httpStatus}${detalle.status ? `:${detalle.status}` : ''}${detalle.code ? `:${detalle.code}` : ''}${detalle.errorPath ? ` @${detalle.errorPath}` : ''}${detalle.requestId ? `:req=${detalle.requestId}` : ''}`);
+    super(`GOOGLE_SEARCH_HTTP_${detalle.httpStatus}${detalle.status ? `:${detalle.status}` : ''}${detalle.code ? `:${detalle.code}` : ''}${detalle.errorPath ? ` @${detalle.errorPath}` : ''}${detalle.requestId ? `:req=${detalle.requestId}` : ''}${!detalle.status && !detalle.code && detalle.cuerpoResumen ? ` cuerpo=${detalle.cuerpoResumen}` : ''}`);
     this.name = 'GoogleSearchError';
   }
 }
@@ -115,6 +122,12 @@ export interface GoogleAdsWriteLog {
 /** Recorta el mensaje de Google para el log durable (evita payloads patológicos; no expone secretos). */
 function mensajeSanitizado(m: string | null): string | null {
   return m ? m.slice(0, 600) : null;
+}
+
+/** Resumen de una sola línea del cuerpo de error: sin etiquetas, sin saltos y acotado. */
+function resumenDeCuerpo(cuerpo: string): string | null {
+  const plano = cuerpo.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  return plano.length > 0 ? plano.slice(0, 200) : null;
 }
 
 export interface DepsGoogleAdsMutateHttp {
@@ -319,9 +332,13 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
     const requestId = res.headers.get('request-id') ?? res.headers.get('x-request-id') ?? null;
     if (!res.ok) {
       // ERROR ESTRUCTURADO (no colapsado): status/code/message/path/requestId de Google, sin secretos.
-      const f = parseGoogleAdsFailure(await res.text());
+      const cuerpo = await res.text();
+      const f = parseGoogleAdsFailure(cuerpo);
       const primero = f.googleErrors[0];
-      throw new GoogleSearchError({ httpStatus: res.status, requestId, status: f.status, code: primero?.errorCode ?? null, message: mensajeSanitizado(primero?.message ?? null), errorPath: primero?.errorPath ?? null, fieldPathElements: primero?.fieldPathElements ?? [] });
+      // Si Google no devolvió un fallo estructurado (429 de ráfaga, error del balanceador), se conserva un
+      // resumen del cuerpo: es la única pista de QUÉ límite se aplicó.
+      const cuerpoResumen = f.status === null && primero === undefined ? resumenDeCuerpo(cuerpo) : null;
+      throw new GoogleSearchError({ httpStatus: res.status, requestId, status: f.status, code: primero?.errorCode ?? null, message: mensajeSanitizado(primero?.message ?? null), errorPath: primero?.errorPath ?? null, fieldPathElements: primero?.fieldPathElements ?? [], cuerpoResumen });
     }
     const parsed = JSON.parse(await res.text()) as unknown;
     const batches = Array.isArray(parsed) ? parsed : [parsed];

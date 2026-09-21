@@ -84,6 +84,30 @@ Campos: `lastStartedAt · lastSucceededAt · lastFailedAt · lastError · nextRu
 
 Cubre `ingestion`, `stopMonitor`, `directorCycle`, `googleAdsScheduler` y `metaScheduler`. La respuesta incluye además la postura de gobierno de la organización: modo, kill switch y si tiene la pausa de seguridad habilitada. La observabilidad nunca puede tumbar al bucle que observa: todo registro de salud va envuelto y su fallo se ignora.
 
-## 7. Qué NO cambió
+## 7. Ritmo de lecturas a Google: SAFETY frente a ANALYTICS
+
+Cada arranque producía un 429 de Google (4 de 4 despliegues, siempre a ~0,3 s del `listening`) porque tres
+componentes leían en el mismo segundo: el scheduler de ingesta (3 consultas GAQL), la sonda de fechas (1) y
+el ciclo del director (hasta 7). Once consultas en menos de un segundo agotan el límite de ráfaga del
+proveedor. Pasada la ráfaga, las lecturas volvían solas: no era cuota diaria.
+
+La corrección es de coordinación, no de cuota:
+
+| Camino | Componente | Arranque | Cadencia |
+|---|---|---|---|
+| **ANALYTICS** | scheduler de ingesta Google Ads | +20 s (con jitter ±20 %) | 3 h |
+| **ANALYTICS** | sonda de fechas (observabilidad) | +45 s | sólo al arrancar |
+| **ANALYTICS** | ciclo del director | +75 s | 5 min |
+| **SAFETY** | stop monitor | **sin retraso** | 5 min |
+
+El camino de seguridad no se escalona ni se pospone: puede pausar en cuanto una regla dispare. Lo fija un
+contrato (`apps/api/test/arranque-lecturas-google.test.ts`), incluido que `iniciarStopMonitor` no acepte
+ningún parámetro de retraso.
+
+Además, cuando Google responde un error que **no** es un `GoogleAdsFailure` parseable —como este 429, que
+llega como texto del balanceador— el error conserva ahora un resumen del cuerpo (recortado a 200 caracteres,
+sin etiquetas). Antes se colapsaba a `GOOGLE_SEARCH_HTTP_429` y no se podía saber qué límite se aplicó.
+
+## 8. Qué NO cambió
 
 SmileFlow conserva sus cuatro bucles y su protección de stop-loss; su campaña sigue pausada y nada la reactiva. No se tocó Google Ads, Meta, la web de CP, el esquema de D1 ni el contrato de privacidad de la ingesta. No se introdujo ningún proveedor de IA. `AUTONOMOUS_REAL` sigue sin poder activarse desde el dominio de identidad.
