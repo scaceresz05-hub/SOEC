@@ -171,7 +171,13 @@ export async function correrIngestaDeTodas(deps: DepsIngestaRuntime, intervaloMs
       const siguiente = new Date(Date.parse(fin) + intervaloMs).toISOString();
       if (ok) await deps.salud?.marcarExito(JOB, org, fin, siguiente).catch(() => undefined);
       else await deps.salud?.marcarFallo(JOB, org, fin, JSON.stringify(r.fuentes.filter((f) => !f.ok).map((f) => f.error ?? f.provider)), siguiente).catch(() => undefined);
-      deps.log?.({ ingestion: 'tick', org, negocio: corrible.negocio, estado: r.estado, fuentes: corrible.fuentes, omitidas: corrible.omitidas });
+      // El RESUMEN por fuente es la prueba de la no-duplicación: leídos/ingeridos/nuevos y el cursor antes y
+      // después. Son contadores y un número de cursor; ningún dato de persona sale en el log.
+      deps.log?.({
+        ingestion: 'tick', org, negocio: corrible.negocio, estado: r.estado,
+        fuentes: r.fuentes.map((f) => ({ provider: f.provider, estado: f.estado, resumen: f.resumen ?? null })),
+        omitidas: corrible.omitidas,
+      });
       resultados.push({ org, ok, estado: r.estado, fuentes: corrible.fuentes });
     } catch (e) {
       // AISLAMIENTO: una organización caída no detiene a las demás.
