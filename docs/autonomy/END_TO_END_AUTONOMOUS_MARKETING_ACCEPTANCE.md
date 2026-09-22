@@ -157,8 +157,17 @@ clic, y sin eso la investigación vuelve a fallar por donde falló.
 * **SmileFlow** — campaña `24194332264` pausada, gasto $7.760, monitor cada 5 min conectado, modo `PILOT`,
   medición aún `ACTION_MISSING`. Igual que antes de esta fase.
 * **CP Odontología** — modo `PILOT`, sin conexión de anuncios, sin campaña, sin mandato. Igual que antes.
-* **Distribuidora C Y P** — no tiene organización persistida en este despliegue: vive sólo en el registro
-  histórico de TypeScript, y esta fase no tocó ni su módulo ni sus rutas de sólo lectura.
+* **Distribuidora C Y P** — **sí está persistida**: tiene `business_profile`, su conexión `WOOCOMMERCE`
+  conectada y sus filas de capacidades (todas apagadas), y el runtime la proyecta desde la base con origen
+  `PERSISTIDA_CON_REGISTRO`. No tiene política de evaluación, por decisión declarada desde la Fase C. No es
+  visible para la cuenta actual porque no consta ninguna membresía de ese usuario en ella. Si existe una
+  organización de identidad o una membresía de otra persona es **UNKNOWN** con las superficies de sólo
+  lectura disponibles: ninguna las lista sin membresía y `business_profile` no tiene clave foránea a
+  identidad. Esta fase no tocó ni sus datos ni su módulo.
+
+  > Corrección: una versión anterior de este informe afirmaba que C Y P «no tiene organización persistida».
+  > Era falso, y el error fue de método: se comprobó su existencia con `GET /negocios`, que lista **por
+  > membresía**. Ausencia de membresía no es ausencia de organización.
 
 Ninguna de las tres fue modificada. Las únicas empresas creadas fueron las de prueba, y sólo en la base de datos
 de pruebas.
@@ -188,3 +197,47 @@ ahí sin un desarrollador y sin pasarse de lo autorizado. Y no toca Meta, donde 
 `end-to-end-acceptance.pg.test.ts` (5 casos sobre PostgreSQL real) · `acceptance-failure-matrix.pg.test.ts`
 (26 casos) · `commercial-readiness.test.ts` (13 casos). Regresión completa al cerrar la fase:
 **2.914 pruebas unitarias y 358 sobre PostgreSQL, todas en verde.**
+
+## 15. Verificación en producción tras el despliegue
+
+Despliegue `aa8c1176-e2fc-4349-aa79-39244df863e6` (2026-09-22 15:03 UTC), hecho por el propietario.
+
+* `/health` responde `200` con esa versión · **un solo arranque**, sin reinicios, sin errores.
+* Migraciones **idempotentes**: `migrados: []` en negocios, conexiones y políticas; `yaEstaban` con las tres
+  empresas. Nada se volvió a crear ni a sobrescribir.
+* Los bucles arrancaron: monitor de seguridad, ciclo del director, planificador de Google Ads e ingesta de CP.
+* Después del despliegue: **0 respuestas 403**, **0 respuestas 429**, **0 escrituras externas**, **$0 de gasto**.
+
+**La ruta nueva, en producción y con sesión real.** `GET /aceptacion/preparacion` responde desde los datos
+persistidos de cada empresa, sin registro histórico de por medio. Aislamiento comprobado en vivo:
+
+| Prueba | Resultado |
+| --- | --- |
+| sin sesión (con y sin cabeceras falsificadas) | `401` |
+| empresa sin membresía (`org-cyp`) | `404` |
+| empresa inexistente | `404` |
+| cabecera `x-organization-id` falsificada hacia otra empresa | `200` **con los datos de la empresa validada**, no la falsificada |
+
+**CP Odontología**, recalculada desde la ruta desplegada: **7 READY · 3 MISSING · 6 de acción humana ·
+2 de acción del sistema**, idéntico al cálculo previo al despliegue. Sigue **NOT_READY** para crear, encender y
+operar con autonomía, y el siguiente paso sigue siendo suyo: **indicar la dirección del sitio web**. No se le
+rellenó ningún dato.
+
+**SmileFlow**, tras el despliegue: campaña `24194332264` **PAUSADA**, gasto $7.760, 136 impresiones, 5 clics,
+protección automática ACTIVA con su último chequeo hace un minuto y resultado `NOOP · ALREADY_PAUSED`, el ciclo
+en modo sombra esperando evidencia y cero acciones aplicadas.
+
+En su propio informe aparecen `PERFIL_DEL_NEGOCIO`, `OBJETIVO_COMERCIAL` y `TECHO_DE_INVERSION` como
+**MISSING**: su fila persistida tiene `description`, `website` y `primaryObjective` en `null` desde la
+migración, y hoy esos campos se los sigue prestando el módulo histórico al runtime. No es un defecto del read
+model —el motor de readiness ya decía lo mismo antes de esta fase—, sino la deuda de datos que queda a la
+vista cuando se lee sólo lo persistido.
+
+### Los cuatro veredictos, separados
+
+| Veredicto | Resultado |
+| --- | --- |
+| `SOFTWARE_E2E_ACCEPTANCE` | **PASS** |
+| `LIVE_EXTERNAL_READ_ACCEPTANCE` | **PASS** (lecturas reales de Google Ads: `estado OK`, 0 · 403, 0 · 429) |
+| `LIVE_EXTERNAL_WRITE_ACCEPTANCE` | **BLOCKED_EXTERNAL** (no existe cuenta de anuncios autorizada y segura para el canario; no se crea, y no se usan SmileFlow ni CP) |
+| `CP_COMMERCIAL_READINESS` | **NOT_READY**, con su lista exacta |
