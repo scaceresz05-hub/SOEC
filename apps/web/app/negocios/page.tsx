@@ -844,6 +844,8 @@ export default function Panel(): React.ReactElement {
             <Link className="btn" href="/negocios/plan">Plan de marketing →</Link>
             {/* Crear la campaña es un acto humano y explícito: la campaña nace en pausa. */}
             <Link className="btn" href="/negocios/campana">Preparar campaña →</Link>
+            {/* El ciclo observar → decidir → (permiso) → aplicar → verificar, y los límites de autonomía. */}
+            <Link className="btn" href="/negocios/director">Tu director →</Link>
           </p>
           <div className="card" style={{ marginTop: 12 }}>
             {negocio.fuentes.map((f) => {

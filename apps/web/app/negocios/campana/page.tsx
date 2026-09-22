@@ -101,6 +101,7 @@ export default function CampanaPage() {
         <Link href="/negocios">← Volver al panel</Link>
         <Link href="/negocios/plan">Plan de marketing</Link>
         <Link href="/negocios/investigacion">Investigación</Link>
+        <Link href="/negocios/director">Tu director</Link>
       </p>
       <h1 style={{ marginBottom: 4 }}>Preparar campaña</h1>
       <p style={{ ...apagado, marginBottom: 8 }}>

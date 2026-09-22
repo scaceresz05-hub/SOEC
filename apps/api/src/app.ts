@@ -154,6 +154,7 @@ import { registerInvestigacionRoutes } from './investigacion/investigacion-route
 import { proveedoresDeOrganizacion } from './investigacion/composicion';
 import { registerEjecucionRoutes } from './ejecucion/ejecucion-routes';
 import { clienteDeEscrituraGoogle, crearObservadorDeEventos } from './ejecucion/composicion';
+import { registerOptimizacionRoutes } from './optimizacion/optimizacion-routes';
 import type { GoogleAdsMutateHttpClient } from './campana/google-ads-mutate-http';
 import type { DepsInvestigacion } from './investigacion/investigacion-service';
 import { crearDepositoSecretosConexion } from './conexion/secreto-conexion';
@@ -496,6 +497,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           pool, env: process.env, composicionGoogleAds, log: (i) => console.log(JSON.stringify(i)),
         })),
         observarEventos: deps.ejecucionObservarEventos ?? crearObservadorDeEventos(pool),
+        log: (i) => console.log(JSON.stringify(i)),
+      });
+      // OPTIMIZACIÓN (Autonomy Fase G): el ciclo observar → evaluar → decidir → gobernar → ejecutar →
+      // verificar → aprender. En modo observación o supervisado no puede mutar nada por su cuenta.
+      registerOptimizacionRoutes(target, pool, {
+        refrescar,
+        clienteGoogle: deps.ejecucionGoogle ?? ((org) => clienteDeEscrituraGoogle(org, {
+          pool, env: process.env, composicionGoogleAds, log: (i) => console.log(JSON.stringify(i)),
+        })),
         log: (i) => console.log(JSON.stringify(i)),
       });
     }

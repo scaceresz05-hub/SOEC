@@ -87,6 +87,26 @@
 > encenderla ni tocarla después. Meta queda `BLOCKED_EXTERNAL`: `ads_management` es un scope prohibido en su
 > OAuth de sólo lectura.
 
+> **Actualización 2026-09-22 — Autonomy Fase G ejecutada.** Cifras de línea base intactas.
+> [AUTONOMOUS_OPTIMIZATION.md](../autonomy/AUTONOMOUS_OPTIMIZATION.md): existe el ciclo que faltaba —observar,
+> evaluar, decidir, gobernar, ejecutar, verificar y aprender— atando las piezas que ya existían (stop monitor,
+> director, política de evaluación, mandato financiero, ejecutor de la Fase F, gobierno y event store) sin
+> crear un segundo director ni un segundo camino de escritura. Con esto **el bloqueador 5 del TOP 5 queda
+> cerrado**: la optimización post-lanzamiento ya no es dry-run — negativas, pausas de palabra, presupuesto y
+> techo de CPC se aplican de verdad, de forma idempotente y verificada contra la plataforma, dentro de la
+> política de autonomía (QUÉ puede hacer) y del mandato financiero (CUÁNTO puede comprometer), que siguen
+> siendo dos autorizaciones distintas.
+> La activación de campañas cierra el hueco que la Fase F dejó abierto a propósito: `PAUSED → ENABLED` exige
+> ocho condiciones más la firma de una persona, o un permiso de activación automática declarado
+> explícitamente — jamás inferido del presupuesto. Se añade el modo `SHADOW`, que observa campañas reales y
+> registra qué habría hecho con cero escrituras.
+> Las decisiones son DETERMINISTAS y explicables (evidencia, política, efecto esperado, riesgo, impacto
+> máximo); no hay modelo de lenguaje en el camino. Se conservan los límites: con evidencia insuficiente, datos
+> viejos, señales contradictorias o medición degradada **no se decide**, y una palabra nunca se pausa por
+> «0 conversiones» a secas. Meta sigue `BLOCKED_EXTERNAL`.
+> Con los cinco bloqueadores del TOP 5 cerrados, lo que queda no es una pieza ausente sino la aceptación
+> extremo a extremo con una empresa real.
+
 **Método:** lectura del código ejecutable (no de la documentación), distinguiendo qué está cableado en el runtime (`apps/api/src/server.ts`, rutas registradas en `app.ts`) de lo que existe como tipo, motor puro o fixture. Toda afirmación lleva evidencia `archivo:línea`. Vocabulario: `IMPLEMENTADO_Y_USADO · IMPLEMENTADO_PARCIAL · IMPLEMENTADO_PERO_NO_CONECTADO · MOCK · SOLO_TIPO_O_DOC · LEGACY · AUSENTE`.
 
 ---
