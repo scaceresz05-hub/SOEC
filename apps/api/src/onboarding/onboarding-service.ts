@@ -37,6 +37,7 @@ import {
   type PasoVista,
 } from './onboarding-preguntas';
 import { evaluarReadiness, type BusinessReadiness } from './readiness';
+import { PgMandatoRepo } from '../accion/accion-pg';
 import { inspeccionarSitio, validarUrlDeSitio, type OpcionesInspeccion } from './sitio-web';
 import {
   MODO_DE_PREFERENCIA,
@@ -198,6 +199,21 @@ export class OnboardingService {
     return this.readinessDe(org, ctx);
   }
 
+  /**
+   * ¿Existe una autorización de presupuesto humana y vigente? Se consulta al repositorio de mandatos; si la
+   * tabla todavía no existe en este despliegue, la respuesta honesta es «no», nunca un supuesto optimista.
+   */
+  private async hayMandatoVigente(org: string): Promise<boolean> {
+    try {
+      const m = await new PgMandatoRepo(this.pool).actual(org);
+      if (m === null) return false;
+      const ahora = Date.parse(this.ahora());
+      return Date.parse(m.periodStart) <= ahora && Date.parse(m.periodEnd) > ahora;
+    } catch {
+      return false;
+    }
+  }
+
   private async readinessDe(org: string, ctx: ContextoOnboarding): Promise<BusinessReadiness> {
     const gobierno = await this.negocios.gobierno(org);
     const revisadas = ctx.respuestas.has('restricciones.noOfrecemos') || ctx.respuestas.has('restricciones.noPodemosAfirmar');
@@ -214,6 +230,8 @@ export class OnboardingService {
       presupuesto: ctx.presupuesto,
       modoOperativo: ctx.modoOperativo,
       restriccionesRevisadas: revisadas,
+      // El mandato vive en el Safe Action Plane, no en el onboarding: aquí sólo se LEE si existe y está vigente.
+      mandatoVigente: await this.hayMandatoVigente(org),
     });
   }
 

@@ -170,9 +170,11 @@ export async function asegurarAccionDeConversion(deps: {
  */
 export function estadoDeMedicion(mapeo: MapeoConversion | null, instalacion: EstadoMedicion | null): EstadoMedicion {
   if (mapeo === null || mapeo.externalId === null) return 'ACTION_MISSING';
+  // `DEGRADED` significa «estuvo verificada y dejó de registrar»: manda el presente, no el sello del pasado.
+  // Si la verificación histórica ganara, la degradación sería inalcanzable y se optimizaría a una señal muerta.
+  if (instalacion === 'DEGRADED') return 'DEGRADED';
   if (mapeo.verificacion === 'VERIFICADA') return 'VERIFIED';
   if (instalacion === 'VERIFIED') return 'VERIFIED';
-  if (instalacion === 'DEGRADED') return 'DEGRADED';
   if (instalacion === 'TRACKING_INSTALLED') return 'TRACKING_INSTALLED';
   return 'TRACKING_MISSING';
 }

@@ -94,6 +94,11 @@ export interface DatosDeReadiness {
   readonly modoOperativo: string;
   /** `true` cuando el usuario ya respondió las preguntas de límites (aunque haya dicho «no hay»). */
   readonly restriccionesRevisadas: boolean;
+  /**
+   * ¿Hay una autorización de presupuesto HUMANA vigente (Safe Action Plane)? Ningún formulario la produce: la
+   * firma una persona en un acto aparte. Se recibe como hecho para no tener que afirmar que falta cuando existe.
+   */
+  readonly mandatoVigente?: boolean;
 }
 
 const motivo = (campo: string, m: string, c: string): MotivoReadiness => ({ campo, motivo: m, comoSeResuelve: c });
@@ -183,7 +188,8 @@ function evaluacionDominio(d: DatosDeReadiness): DominioEvaluado {
   if (c.estado === 'EVALUATION_PROFILE_COMPLETE') return { dominio: 'EVALUATION', estado: 'COMPLETE', motivos: [] };
   const porAprender = d.politica.kpis.some((k) => k.rol === 'PRIMARY' && k.procedencia === 'TO_BE_LEARNED');
   const motivos = c.faltantes.map((f) =>
-    f.campo === 'successCriterion' && porAprender
+    (f.campo === 'successCriterion' || f.campo === 'primaryKpi') && porAprender
+      // El indicador SÍ se eligió; lo que falta es su meta. Decir «no hay indicador» sería falso.
       ? motivo(f.campo, 'la meta todavía no se conoce: se aprenderá observando los primeros datos', 'cuando haya datos, SOEC propondrá una meta para que la confirmes')
       : motivo(f.campo, f.motivo, f.comoSeResuelve),
   );
@@ -295,7 +301,7 @@ export function evaluarNiveles(d: DatosDeReadiness, dominios: readonly DominioEv
     ...bloq(d.gobierno?.campaignExecution === true, 'falta habilitar la ejecución de campañas (decisión de gobierno)'),
     ...bloq(d.modoOperativo === 'SUPERVISED_REAL' || d.modoOperativo === 'AUTONOMOUS_REAL', 'el modo actual es solo observar'),
     // La autorización financiera NO la produce el onboarding: la crea una persona en un acto aparte.
-    'falta una autorización de presupuesto firmada por una persona',
+    ...bloq(d.mandatoVigente === true, 'falta una autorización de presupuesto firmada por una persona'),
   ];
   const executionReady = ejecucion.length === 0;
 
