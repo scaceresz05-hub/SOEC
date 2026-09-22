@@ -202,10 +202,26 @@ export interface Recomendacion {
 
 export type EstadoPerfilEvaluacion = 'EVALUATION_PROFILE_COMPLETE' | 'EVALUATION_PROFILE_INCOMPLETE';
 
+/**
+ * ¿La meta con la que se juzga el resultado ya existe, o todavía se está aprendiendo?
+ *
+ *   `CONFIRMED`         hay un número declarado por el negocio (o una regla de éxito explícita).
+ *   `LEARNING_BASELINE` el negocio eligió QUÉ mirar pero dijo «todavía no sé qué número sería bueno».
+ *                       Es una respuesta legítima, no un hueco: la meta se aprenderá observando datos reales.
+ *
+ * La distinción existe para que «todavía no hay meta» NUNCA se lea como «cualquier resultado es bueno».
+ */
+export type LineaBaseEvaluacion = 'CONFIRMED' | 'LEARNING_BASELINE';
+
 export interface CompletitudPerfil {
   readonly estado: EstadoPerfilEvaluacion;
   readonly faltantes: readonly MotivoIncompletitud[];
   readonly recomendaciones: readonly Recomendacion[];
+  /**
+   * Estado de la META. Un perfil puede estar COMPLETO y aun así estar aprendiendo su línea base: se puede
+   * planificar y medir, pero no se decide nada que dependa de un número que todavía no existe.
+   */
+  readonly lineaBase: LineaBaseEvaluacion;
   /** Momento del último cambio de la política. `null` si la empresa no tiene ninguna todavía. */
   readonly actualizadoEn: string | null;
 }

@@ -50,10 +50,28 @@ const primario = <T extends { rol: string }>(xs: readonly T[]): T | null => xs.f
 const reglaDe = (reglas: readonly ReglaEvaluacion[], tipo: ReglaEvaluacion['tipo'], metrica?: ReglaEvaluacion['metrica']): ReglaEvaluacion | null =>
   reglas.find((r) => r.tipo === tipo && (metrica === undefined || r.metrica === metrica) && r.estado === 'CONFIGURED' && r.valor !== null) ?? null;
 
-/** KPI principal CONFIGURADO. Un KPI en estado `UNKNOWN` existe pero no sirve para evaluar todavía. */
+/** KPI principal CONFIGURADO: tiene su meta puesta y sirve para evaluar hoy. */
 function kpiPrincipal(kpis: readonly Kpi[]): Kpi | null {
   const p = primario(kpis);
   return p !== null && p.estado === 'CONFIGURED' ? p : null;
+}
+
+/**
+ * KPI principal DECLARADO: el negocio eligió QUÉ mirar, con meta o sin ella. Un KPI `UNKNOWN` cuya procedencia
+ * es `TO_BE_LEARNED` no es un hueco —es la respuesta «todavía no sé qué número sería bueno», que el asistente
+ * ofrece a propósito—. Exigir un número aquí obligaría a inventarlo, que es justo lo que no puede pasar.
+ */
+function kpiPrincipalDeclarado(kpis: readonly Kpi[]): Kpi | null {
+  const p = primario(kpis);
+  if (p === null) return null;
+  if (p.estado === 'CONFIGURED') return p;
+  return p.procedencia === 'TO_BE_LEARNED' ? p : null;
+}
+
+/** ¿La meta está por aprender? Sólo cuando el indicador está declarado y NO hay ningún número detrás. */
+function metaPorAprender(kpis: readonly Kpi[], reglas: readonly ReglaEvaluacion[]): boolean {
+  const declarado = kpiPrincipalDeclarado(kpis);
+  return declarado !== null && declarado.procedencia === 'TO_BE_LEARNED' && criterioDeExito(kpis, reglas) === null;
 }
 
 /** ¿Hay criterio de éxito? La meta del KPI principal vale; una regla SUCCESS explícita también. */
@@ -76,10 +94,12 @@ export function evaluarCompletitud(d: DatosDePolitica): CompletitudPerfil {
     faltantes.push({ campo, ...MOTIVOS[campo] });
   };
 
+  const aprendiendo = metaPorAprender(kpis, reglas);
   if (politica === null || politica.objectiveId.trim() === '') agregar('primaryObjective');
   if (primario(eventos) === null) agregar('primaryConversionEvent');
-  if (kpiPrincipal(kpis) === null) agregar('primaryKpi');
-  if (criterioDeExito(kpis, reglas) === null) agregar('successCriterion');
+  if (kpiPrincipalDeclarado(kpis) === null) agregar('primaryKpi');
+  // La meta puede estar POR APRENDER: eso no es un campo que falte, es un estado declarado de la línea base.
+  if (criterioDeExito(kpis, reglas) === null && !aprendiendo) agregar('successCriterion');
   // Sin mínimo de evidencia, una conclusión puede venir de un puñado de datos: es requisito, no recomendación.
   if (reglaDe(reglas, 'EVIDENCE_MINIMUM') === null) agregar('evidenceMinimum');
 
@@ -112,6 +132,7 @@ export function evaluarCompletitud(d: DatosDePolitica): CompletitudPerfil {
     estado: faltantes.length === 0 ? 'EVALUATION_PROFILE_COMPLETE' : 'EVALUATION_PROFILE_INCOMPLETE',
     faltantes,
     recomendaciones,
+    lineaBase: aprendiendo ? 'LEARNING_BASELINE' : 'CONFIRMED',
     actualizadoEn: politica?.updatedAt ?? null,
   };
 }
@@ -143,7 +164,12 @@ function contextoDirector(
  * llamador responde entonces `PROFILE_INCOMPLETE` con los motivos, en lugar de evaluar con huecos.
  */
 export function construirPerfilDeEvaluacion(d: DatosDePolitica): BusinessEvaluationProfile | null {
-  if (evaluarCompletitud(d).estado === 'EVALUATION_PROFILE_INCOMPLETE') return null;
+  const completitud = evaluarCompletitud(d);
+  if (completitud.estado === 'EVALUATION_PROFILE_INCOMPLETE') return null;
+  // LÍNEA BASE POR APRENDER: el perfil histórico exige un número (`criterio.meta`) y aquí no hay ninguno.
+  // Devolver cero, o el mínimo de evidencia, sería fabricar la meta que el negocio dijo no conocer. Se
+  // devuelve `null`: se puede entender, planificar y medir a la empresa; juzgar el resultado todavía no.
+  if (completitud.lineaBase === 'LEARNING_BASELINE') return null;
   const { politica, kpis, eventos, reglas, limites } = d.politica;
   if (politica === null) return null;
   const kpi = kpiPrincipal(kpis);

@@ -371,6 +371,59 @@ describe('aislamiento entre empresas', () => {
  * `USER_CONFIRMED` y lo reescribía en el negocio — llegando a pisar la REGIÓN con el nombre de la PROVINCIA y
  * a cambiar las prioridades de una oferta que nadie tocó.
  */
+/**
+ * REGLA DE LA FASE D · nadie tiene que inventar una meta para que su empresa quede preparada.
+ *
+ * Quien responde «todavía no sé qué número sería un buen resultado» elige igual QUÉ mirar, usa el punto de
+ * partida del sistema para la evidencia, y su perfil de evaluación queda COMPLETO — en modo aprendizaje. Lo
+ * que no puede pasar es que ese estado se convierta en «cualquier resultado vale».
+ */
+describe('no saber la meta todavía no bloquea la preparación', () => {
+  it('el asistente termina completo, sin un solo número inventado, y lo dice', async () => {
+    const a = app();
+    const cookie = await usuario(a, 'duena-sinmeta@soec.cl');
+    const org = await crearEmpresa(a, cookie, 'Empresa QA Sin Meta');
+    for (const r of RESPUESTAS) await responder(a, cookie, org, r.paso, r.respuestas); // medicion.conoceMeta = false
+
+    const politica = new RepositorioPolitica(pool);
+    const kpis = await politica.kpis(org);
+    const principal = kpis.find((k) => k.rol === 'PRIMARY')!;
+    // Se eligió el indicador; la meta queda declarada como POR APRENDER, no como cero ni como suposición.
+    expect(principal.clave).toBe('contactos');
+    expect(principal.targetValue).toBeNull();
+    expect(principal.procedencia).toBe('TO_BE_LEARNED');
+    const evidencia = (await politica.reglas(org)).find((r) => r.tipo === 'EVIDENCE_MINIMUM')!;
+    expect(evidencia.procedencia).toBe('SYSTEM_DEFAULT'); // recomendación del sistema, no decisión del negocio
+    expect(evidencia.nota ?? '').toContain('v1');
+
+    // La preparación del negocio deja de exigir un número: el dominio de evaluación queda resuelto.
+    const v = (await a.inject({ method: 'GET', url: '/onboarding', headers: { cookie, 'x-organization-slug': org } })).json();
+    const evaluacion = v.readiness.dominios.find((d: { dominio: string }) => d.dominio === 'EVALUATION');
+    expect(evaluacion.estado, JSON.stringify(evaluacion.motivos)).toBe('COMPLETE');
+
+    // Y el estado de la META se dice en voz alta, en lugar de esconderse detrás de un «completo».
+    const pol = (await a.inject({ method: 'GET', url: '/politica', headers: { cookie, 'x-organization-slug': org } })).json();
+    expect(pol.completitud.estado).toBe('EVALUATION_PROFILE_COMPLETE');
+    expect(pol.completitud.lineaBase).toBe('LEARNING_BASELINE');
+    await a.close();
+  });
+
+  it('declarar la meta después confirma la línea base, sin rehacer nada', async () => {
+    const a = app();
+    const cookie = await usuario(a, 'duena-conmeta@soec.cl');
+    const org = await crearEmpresa(a, cookie, 'Empresa QA Con Meta');
+    for (const r of RESPUESTAS) await responder(a, cookie, org, r.paso, r.respuestas);
+    await responder(a, cookie, org, 'medicion', { 'medicion.indicador': 'cantidad-contactos', 'medicion.conoceMeta': true, 'medicion.meta': 15, 'medicion.evidencia': 'prudente' });
+
+    const principal = (await new RepositorioPolitica(pool).kpis(org)).find((k) => k.rol === 'PRIMARY')!;
+    expect(principal.targetValue).toBe(15);
+    expect(principal.procedencia).toBe('USER_DEFINED');
+    const pol = (await a.inject({ method: 'GET', url: '/politica', headers: { cookie, 'x-organization-slug': org } })).json();
+    expect(pol.completitud.lineaBase).toBe('CONFIRMED');
+    await a.close();
+  });
+});
+
 describe('navegar por el asistente no confirma ni reescribe datos', () => {
   beforeEach(async () => {
     await migrarNegociosDelRegistro(pool);

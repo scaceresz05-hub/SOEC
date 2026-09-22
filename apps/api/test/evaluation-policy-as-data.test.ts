@@ -174,6 +174,67 @@ describe('1 · completitud: dice qué falta y cómo se resuelve', () => {
   });
 });
 
+/**
+ * LÍNEA BASE POR APRENDER (regla de la Fase D). Quien no sabe qué número sería un buen resultado NO tiene que
+ * inventarlo: elige qué mirar, dice «todavía no lo sé» y el perfil queda COMPLETO, en modo aprendizaje.
+ */
+describe('1.bis · «todavía no sé la meta» completa el perfil sin inventar ningún número', () => {
+  const sinMeta: PoliticaCompleta = {
+    politica: politicaBase(),
+    kpis: [kpi({ targetValue: null, estado: 'UNKNOWN', procedencia: 'TO_BE_LEARNED', nota: 'se aprenderá con los primeros datos' })],
+    eventos: [evento('whatsapp_intent')],
+    reglas: [regla({ procedencia: 'SYSTEM_DEFAULT' })],
+    limites: null,
+    canales: [],
+  };
+
+  it('el perfil se considera COMPLETO y la línea base queda en aprendizaje', () => {
+    const c = evaluarCompletitud(datos(sinMeta));
+    expect(c.estado).toBe('EVALUATION_PROFILE_COMPLETE');
+    expect(c.lineaBase).toBe('LEARNING_BASELINE');
+    expect(c.faltantes).toEqual([]);
+  });
+
+  it('no se fabrica ninguna meta: el perfil de evaluación histórico sigue siendo nulo', () => {
+    // Devolver un perfil con `meta: 0` sería inventar justo lo que el negocio dijo no saber.
+    expect(construirPerfilDeEvaluacion(datos(sinMeta))).toBeNull();
+    expect(sinMeta.kpis[0]!.targetValue).toBeNull();
+  });
+
+  it('el mínimo de evidencia del sistema se conserva como recomendación, no como decisión del negocio', () => {
+    expect(sinMeta.reglas[0]!.procedencia).toBe('SYSTEM_DEFAULT');
+    const c = evaluarCompletitud(datos(sinMeta));
+    expect(c.faltantes.map((f) => f.campo)).not.toContain('evidenceMinimum');
+  });
+
+  it('con una meta declarada la línea base pasa a confirmada y el perfil se reconstruye', () => {
+    const conMeta: PoliticaCompleta = { ...sinMeta, kpis: [kpi()] };
+    const c = evaluarCompletitud(datos(conMeta));
+    expect(c.lineaBase).toBe('CONFIRMED');
+    expect(construirPerfilDeEvaluacion(datos(conMeta))).not.toBeNull();
+  });
+
+  it('una regla de éxito explícita también confirma la línea base, aunque el KPI no traiga meta', () => {
+    const conRegla: PoliticaCompleta = {
+      ...sinMeta,
+      reglas: [...sinMeta.reglas, regla({ id: 'exito', tipo: 'SUCCESS', metrica: 'COST_PER_CONVERSION', comparador: 'LTE', valor: 25_000 })],
+    };
+    expect(evaluarCompletitud(datos(conRegla)).lineaBase).toBe('CONFIRMED');
+  });
+
+  it('un indicador ausente sigue faltando: esto no abre la puerta a perfiles vacíos', () => {
+    const sinIndicador: PoliticaCompleta = { ...sinMeta, kpis: [] };
+    const c = evaluarCompletitud(datos(sinIndicador));
+    expect(c.estado).toBe('EVALUATION_PROFILE_INCOMPLETE');
+    expect(c.faltantes.map((f) => f.campo)).toContain('primaryKpi');
+  });
+
+  it('un KPI en UNKNOWN que nadie declaró como «por aprender» tampoco vale', () => {
+    const ambiguo: PoliticaCompleta = { ...sinMeta, kpis: [kpi({ targetValue: null, estado: 'UNKNOWN', procedencia: 'UNCONFIGURED' })] };
+    expect(evaluarCompletitud(datos(ambiguo)).estado).toBe('EVALUATION_PROFILE_INCOMPLETE');
+  });
+});
+
 describe('2 · el modelo de KPI sirve a industrias distintas sin ramas de código', () => {
   const casos = [
     {

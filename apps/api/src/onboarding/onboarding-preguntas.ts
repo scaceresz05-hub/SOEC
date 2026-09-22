@@ -20,6 +20,7 @@
 import type { OfertaNegocio, PerfilNegocio, RestriccionNegocio, TerritorioNegocio } from '../negocio/negocio-pg';
 import type { CapacidadPersistida, Conexion } from '../conexion/conexion-pg';
 import type { PoliticaCompleta } from '../politica/politica-pg';
+import { DEFAULTS_EVIDENCIA_V1, VERSION_DEFAULTS_EVIDENCIA } from '../politica/politica-tipos';
 import type { IntencionPresupuesto, ObservacionSitio, RespuestaOnboarding } from './onboarding-pg';
 import {
   PASOS_EN_ORDEN,
@@ -440,8 +441,10 @@ const PASOS: readonly DefPaso[] = [
       },
       {
         id: 'medicion.conoceMeta',
-        etiqueta: '¿Tienes claro qué número sería un buen resultado?',
-        ayuda: 'Si no lo sabes, no pasa nada: lo aprendemos observando los primeros datos.',
+        etiqueta: '¿Sabes qué número sería un buen resultado?',
+        // Decir «no» es una respuesta COMPLETA, no un hueco: la meta se aprende y después se confirma. Nadie
+        // tiene que inventar una cifra para poder seguir.
+        ayuda: 'Responde «No» si todavía no lo sabes: SOEC la aprenderá con tus primeros datos y te la propondrá para que la confirmes. Mientras tanto no subirá presupuestos ni encenderá campañas por su cuenta.',
         tipo: 'SI_NO',
         requerida: true,
       },
@@ -461,7 +464,13 @@ const PASOS: readonly DefPaso[] = [
         ayuda: 'Sirve para no decidir con cuatro visitas. Si no lo sabes, usa el punto de partida prudente.',
         tipo: 'OPCION',
         opciones: () => [
-          { valor: 'prudente', etiqueta: 'Usa un punto de partida prudente', ayuda: 'Lo fija SOEC y podrás cambiarlo cuando quieras.' },
+          {
+            valor: 'prudente',
+            // El número se lee de los valores por defecto VERSIONADOS: así la pantalla nunca promete uno distinto
+            // del que se va a guardar, y queda claro que lo pone el sistema, no el negocio.
+            etiqueta: `Usar la recomendación de SOEC: ${DEFAULTS_EVIDENCIA_V1.IMPRESSIONS ?? 0} impresiones`,
+            ayuda: `Punto de partida prudente del sistema (${VERSION_DEFAULTS_EVIDENCIA}); queda guardado como recomendación de SOEC, no como decisión tuya, y puedes cambiarlo cuando quieras.`,
+          },
           { valor: 'propio', etiqueta: 'Yo defino cuántos' },
         ],
         requerida: true,

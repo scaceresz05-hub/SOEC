@@ -37,6 +37,12 @@ export interface ContextoGobierno {
   readonly gobiernoExternalMutations: boolean;
   readonly gobiernoCampaignExecution: boolean;
   readonly killSwitchAbierto: boolean;
+  /**
+   * ¿La META con la que se juzga el resultado ya existe? `false` mientras el negocio dijo «todavía no sé qué
+   * número sería bueno» y SOEC no la ha aprendido. Es legítimo operar así —se observa y se aprende—, pero
+   * nada que dependa de esa meta puede decidirse solo mientras tanto.
+   */
+  readonly lineaBaseConfirmada: boolean;
   /** Cambios ya aplicados hoy (cuenta contra el tope diario de la política). */
   readonly cambiosHoy: number;
   /** Horas desde el último cambio de ESTA palanca sobre ESTE objetivo. `null` ⇒ nunca. */
@@ -45,6 +51,14 @@ export interface ContextoGobierno {
   readonly horaLocal: number;
   readonly ahora: string;
 }
+
+/**
+ * Acciones cuyo acierto sólo puede juzgarse contra una META. Sin ella no hay forma de saber si subir el gasto
+ * o encender la campaña acerca o aleja del resultado, así que no se hacen solas.
+ */
+const ACCIONES_QUE_EXIGEN_META: ReadonlySet<Propuesta['accion']> = new Set([
+  'ADJUST_DAILY_BUDGET', 'ADJUST_MAX_CPC', 'ENABLE_CAMPAIGN',
+]);
 
 const bloquear = (motivo: string, puerta: string): ResultadoGobierno => ({ veredicto: 'BLOQUEAR', motivo, puerta });
 const aprobar = (motivo: string, puerta: string): ResultadoGobierno => ({ veredicto: 'PEDIR_APROBACION', motivo, puerta });
@@ -88,6 +102,16 @@ export function gobernar(p: Propuesta, c: ContextoGobierno): ResultadoGobierno {
     return aprobar(`«${p.accion}» no está entre las acciones que autorizaste para el modo automático`, 'ACCION_NO_PERMITIDA');
   }
   if (p.riesgo === 'PROHIBITED') return bloquear('esta acción no está permitida en ninguna circunstancia', 'ACCION_PROHIBIDA');
+
+  // 4.bis LÍNEA BASE. «Todavía no sé qué número sería bueno» es una respuesta válida, y NO significa «cualquier
+  // resultado es bueno». Mientras no haya meta, subir presupuesto, subir el techo de CPC o encender una
+  // campaña serían apuestas sin criterio: se dejan esperando la línea base, y las decide una persona.
+  if (!c.lineaBaseConfirmada && ACCIONES_QUE_EXIGEN_META.has(p.accion)) {
+    return aprobar(
+      'todavía no hay una meta con la que juzgar el resultado: SOEC está aprendiéndola con tus primeros datos',
+      'ESPERANDO_LINEA_BASE',
+    );
+  }
 
   // 5. ENCENDER UNA CAMPAÑA exige decirlo explícitamente. No se infiere del presupuesto ni del modo.
   if (p.accion === 'ENABLE_CAMPAIGN' && !c.politica.activacionAutonomaPermitida) {

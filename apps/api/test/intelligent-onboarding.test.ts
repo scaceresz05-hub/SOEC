@@ -231,7 +231,7 @@ describe('4 · la inspección del sitio es segura', () => {
 
 describe('5 · preparación por dominios y por niveles', () => {
   const completitud = (estado: CompletitudPerfil['estado'], faltantes: CompletitudPerfil['faltantes'] = []): CompletitudPerfil => ({
-    estado, faltantes, recomendaciones: [], actualizadoEn: null,
+    estado, faltantes, recomendaciones: [], lineaBase: 'CONFIRMED', actualizadoEn: null,
   });
 
   const datos = (over: Partial<DatosDeReadiness> = {}): DatosDeReadiness => ({

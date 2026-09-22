@@ -21,6 +21,7 @@ import { estadoDeMedicion } from '../ejecucion/conversiones';
 import { PgMandatoRepo } from '../accion/accion-pg';
 import { esActorSistema, restanteMinor, type Mandato } from '../accion/mandato';
 import { mutacionesExternasHabilitadas } from '../gobierno/kill-switch';
+import { evaluarCompletitud } from '../politica/politica-perfil';
 import type { GoogleAdsMutateHttpClient } from '../campana/google-ads-mutate-http';
 import {
   POLITICA_AUTONOMIA_POR_DEFECTO,
@@ -372,6 +373,8 @@ export class OptimizacionService {
           gobiernoExternalMutations: c.gobierno.externalMutations,
           gobiernoCampaignExecution: c.gobierno.campaignExecution,
           killSwitchAbierto: mutacionesExternasHabilitadas(this.env),
+          // Sin meta declarada ni aprendida, lo que dependa de ella no se decide solo (ESPERANDO_LINEA_BASE).
+          lineaBaseConfirmada: evaluarCompletitud({ perfil: c.perfil, politica: c.politicaEval }).lineaBase === 'CONFIRMED',
           cambiosHoy,
           horasDesdeUltimoCambioDeLaPalanca: ultima === null ? null : horasEntre(ahora, ultima.aplicadoEn),
           horaLocal: new Date(ahora).getUTCHours(),

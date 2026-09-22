@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { evaluarEvidencia, minimoDeEvidencia } from '../src/optimizacion/evidencia';
-import { decidir, juzgarEfecto, proponerAjusteDeCpc, proponerAjusteDePresupuesto, proponerNegativas, proponerPausaDePalabras, proponerPausaDeSeguridad, type ContextoDecision } from '../src/optimizacion/reglas';
+import { decidir, juzgarEfecto, proponerAjusteDeCpc, proponerAjusteDePresupuesto, proponerNegativas, proponerPausaDePalabras, proponerPausaDeSeguridad, type ContextoDecision, type Propuesta } from '../src/optimizacion/reglas';
 import { gobernar, puedeActivarse, acotarPorMandato, type ContextoGobierno } from '../src/optimizacion/gobierno';
 import { claveIdempotencia, numeroDe } from '../src/optimizacion/ejecutor-acciones';
 import { derivar, RIESGO_BASE, type MetricasObservadas } from '../src/optimizacion/optimizacion-tipos';
@@ -77,11 +77,54 @@ const politicaAutonomia = (over: Partial<PoliticaAutonomia> = {}): PoliticaAuton
 const gob = (over: Partial<ContextoGobierno> = {}): ContextoGobierno => ({
   modo: 'AUTONOMOUS', modoOperativo: 'AUTONOMOUS_REAL', politica: politicaAutonomia(), mandato: mandato(),
   capacidadEscritura: true, gobiernoExternalMutations: true, gobiernoCampaignExecution: true,
-  killSwitchAbierto: true, cambiosHoy: 0, horasDesdeUltimoCambioDeLaPalanca: null, horaLocal: 12, ahora: AHORA,
+  killSwitchAbierto: true, lineaBaseConfirmada: true, cambiosHoy: 0, horasDesdeUltimoCambioDeLaPalanca: null, horaLocal: 12, ahora: AHORA,
   ...over,
 });
 
 // ── 1. PORTERO DE EVIDENCIA ─────────────────────────────────────────────────────────────────────
+
+/**
+ * SEGURIDAD DE LA LÍNEA BASE. «Todavía no sé qué número sería bueno» NO puede leerse como «cualquier resultado
+ * es bueno»: mientras no haya meta, lo que sólo se puede juzgar contra una meta no se hace solo.
+ */
+describe('0 · sin meta aprendida, nada que dependa de la meta se decide solo', () => {
+  const propuesta = (accion: Propuesta['accion'], over: Partial<Propuesta> = {}): Propuesta => ({
+    accion,
+    objetivo: { tipo: accion === 'ADD_NEGATIVE_KEYWORD' ? 'SEARCH_TERM' : 'CAMPAIGN', id: '900', nombre: 'campaña' },
+    estadoActual: 'x', estadoPropuesto: 'y', evidenciaRefs: [], politicaRefs: [],
+    efectoEsperado: 'x', riesgo: RIESGO_BASE[accion], confianza: 'MEDIA', reversible: true,
+    motivo: 'prueba', impactoMaximoClp: 0,
+    ...over,
+  });
+
+  const conTodo = {
+    accionesPermitidas: ['PAUSE_CAMPAIGN', 'ADD_NEGATIVE_KEYWORD', 'ADJUST_DAILY_BUDGET', 'ADJUST_MAX_CPC', 'ENABLE_CAMPAIGN'] as Propuesta['accion'][],
+    activacionAutonomaPermitida: true,
+  };
+
+  it.each(['ADJUST_DAILY_BUDGET', 'ADJUST_MAX_CPC', 'ENABLE_CAMPAIGN'] as const)(
+    '%s espera a que exista la meta, y la decide una persona',
+    (accion) => {
+      const r = gobernar(propuesta(accion), gob({ lineaBaseConfirmada: false, politica: politicaAutonomia(conTodo) }));
+      expect(r.puerta).toBe('ESPERANDO_LINEA_BASE');
+      expect(r.veredicto).toBe('PEDIR_APROBACION');
+      expect(r.motivo).toContain('meta');
+    },
+  );
+
+  it('lo que reduce exposición sigue funcionando sin meta: pausar y negativizar', () => {
+    for (const accion of ['PAUSE_CAMPAIGN', 'ADD_NEGATIVE_KEYWORD'] as const) {
+      const r = gobernar(propuesta(accion), gob({ lineaBaseConfirmada: false, politica: politicaAutonomia(conTodo) }));
+      expect(r.puerta, accion).not.toBe('ESPERANDO_LINEA_BASE');
+    }
+  });
+
+  it('con la meta confirmada, subir presupuesto vuelve a estar dentro de lo autorizado', () => {
+    const r = gobernar(propuesta('ADJUST_DAILY_BUDGET'), gob({ lineaBaseConfirmada: true, politica: politicaAutonomia(conTodo) }));
+    expect(r.puerta).not.toBe('ESPERANDO_LINEA_BASE');
+    expect(r.veredicto).toBe('EJECUTAR');
+  });
+});
 
 describe('portero de evidencia', () => {
   const base = {
