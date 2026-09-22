@@ -23,6 +23,7 @@ import {
   exigirEstado,
   exigirMetrica,
   exigirModoCanal,
+  exigirProcedencia,
   exigirRol,
   exigirTipoKpi,
   exigirTipoRegla,
@@ -66,6 +67,7 @@ export interface EntradaKpi {
   readonly baselineValue?: number | null;
   readonly tolerance?: number | null;
   readonly estado?: string;
+  readonly procedencia?: string;
   readonly nota?: string | null;
   readonly orden?: number;
 }
@@ -85,6 +87,7 @@ export interface EntradaRegla {
   readonly comparador?: string;
   readonly valor?: number | null;
   readonly estado?: string;
+  readonly procedencia?: string;
   readonly nota?: string | null;
 }
 
@@ -265,6 +268,10 @@ export class PoliticaService {
           tolerance: fraccionOpcional(k.tolerance, 'tolerancia'),
           // Un indicador sin meta no puede declararse CONFIGURADO: sería una meta invisible.
           estado: k.estado !== undefined ? exigirEstado(k.estado) : (numeroOpcional(k.targetValue, 'meta') !== null ? 'CONFIGURED' : 'UNKNOWN'),
+          // Sin meta no hay decisión de nadie: se declara qué es (por aprender) en lugar de firmar un número.
+          procedencia: k.procedencia !== undefined
+            ? exigirProcedencia(k.procedencia)
+            : (numeroOpcional(k.targetValue, 'meta') !== null ? 'USER_DEFINED' : 'TO_BE_LEARNED'),
           nota: this.textoOpcional(k.nota ?? null, 'nota', 500),
           orden: enteroPositivoOpcional(k.orden, 'orden') ?? 100,
         });
@@ -295,6 +302,9 @@ export class PoliticaService {
           comparador: exigirComparador(r.comparador ?? (tipo === 'PAUSE' ? 'LTE' : 'GTE')),
           valor,
           estado: r.estado !== undefined ? exigirEstado(r.estado) : (valor !== null ? 'CONFIGURED' : 'UNKNOWN'),
+          procedencia: r.procedencia !== undefined
+            ? exigirProcedencia(r.procedencia)
+            : (valor !== null ? 'USER_DEFINED' : 'UNCONFIGURED'),
           nota: this.textoOpcional(r.nota ?? null, 'nota', 500),
         });
       }

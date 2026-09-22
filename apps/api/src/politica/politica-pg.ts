@@ -25,6 +25,7 @@ import type {
   EstadoDato,
   MetricaRegla,
   ModoCanal,
+  ProcedenciaValor,
   RolMetrica,
   TipoKpi,
   TipoRegla,
@@ -75,6 +76,8 @@ export interface Kpi {
   readonly baselineValue: number | null;
   readonly tolerance: number | null;
   readonly estado: EstadoDato;
+  /** De dónde salió la meta: la persona, un punto de partida del sistema, lo aprendido o nada. */
+  readonly procedencia: ProcedenciaValor;
   readonly nota: string | null;
   readonly orden: number;
 }
@@ -97,6 +100,8 @@ export interface ReglaEvaluacion {
   /** `null` con estado `UNKNOWN` significa «este negocio no ha fijado el valor», no cero. */
   readonly valor: number | null;
   readonly estado: EstadoDato;
+  /** De dónde salió el umbral. Un default del sistema NUNCA se presenta como decisión del negocio. */
+  readonly procedencia: ProcedenciaValor;
   readonly nota: string | null;
 }
 
@@ -217,6 +222,22 @@ export const politicaMigrations: ReadonlyArray<Migration> = [
       );
     `,
   },
+  {
+    // Fase D: PROCEDENCIA de cada valor de política. Un punto de partida del sistema y una decisión del
+    // negocio no pueden verse igual; y lo que nadie fijó tiene que poder decirse sin inventar un número.
+    id: '0002_procedencia_de_valores',
+    sql: `
+      alter table business_kpi add column if not exists procedencia text not null default 'USER_DEFINED';
+      alter table business_evaluation_rule add column if not exists procedencia text not null default 'USER_DEFINED';
+      -- Lo que vino del módulo TypeScript histórico se marca como tal (no como decisión reciente de nadie).
+      update business_kpi k set procedencia = 'MIGRATED'
+        where procedencia = 'USER_DEFINED'
+          and exists (select 1 from business_evaluation_policy p where p.organization_id = k.organization_id and p.origen = 'MIGRACION');
+      update business_evaluation_rule r set procedencia = 'MIGRATED'
+        where procedencia = 'USER_DEFINED'
+          and exists (select 1 from business_evaluation_policy p where p.organization_id = r.organization_id and p.origen = 'MIGRACION');
+    `,
+  },
 ];
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v ?? ''));
@@ -259,6 +280,7 @@ const aKpi = (r: Record<string, unknown>): Kpi => ({
   baselineValue: num(r.baseline_value),
   tolerance: num(r.tolerance),
   estado: String(r.estado) as EstadoDato,
+  procedencia: String(r.procedencia ?? 'USER_DEFINED') as ProcedenciaValor,
   nota: texto(r.nota),
   orden: Number(r.orden ?? 100),
 });
@@ -280,6 +302,7 @@ const aRegla = (r: Record<string, unknown>): ReglaEvaluacion => ({
   comparador: String(r.comparador) as Comparador,
   valor: num(r.valor),
   estado: String(r.estado) as EstadoDato,
+  procedencia: String(r.procedencia ?? 'USER_DEFINED') as ProcedenciaValor,
   nota: texto(r.nota),
 });
 
@@ -368,15 +391,15 @@ export class RepositorioPolitica {
   async guardarKpi(q: Queryable, k: Kpi): Promise<void> {
     await q.query(
       `insert into business_kpi (organization_id, id, rol, clave, display_name, tipo, unidad, direccion,
-         event_key, target_value, baseline_value, tolerance, estado, nota, orden)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         event_key, target_value, baseline_value, tolerance, estado, procedencia, nota, orden)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        on conflict (organization_id, id) do update set rol = excluded.rol, clave = excluded.clave,
          display_name = excluded.display_name, tipo = excluded.tipo, unidad = excluded.unidad,
          direccion = excluded.direccion, event_key = excluded.event_key, target_value = excluded.target_value,
          baseline_value = excluded.baseline_value, tolerance = excluded.tolerance, estado = excluded.estado,
-         nota = excluded.nota, orden = excluded.orden`,
+         procedencia = excluded.procedencia, nota = excluded.nota, orden = excluded.orden`,
       [k.organizationId, k.id, k.rol, k.clave, k.displayName, k.tipo, k.unidad, k.direccion, k.eventKey,
-        k.targetValue, k.baselineValue, k.tolerance, k.estado, k.nota, k.orden],
+        k.targetValue, k.baselineValue, k.tolerance, k.estado, k.procedencia, k.nota, k.orden],
     );
   }
 
@@ -415,11 +438,12 @@ export class RepositorioPolitica {
 
   async guardarRegla(q: Queryable, r: ReglaEvaluacion): Promise<void> {
     await q.query(
-      `insert into business_evaluation_rule (organization_id, id, tipo, metrica, comparador, valor, estado, nota)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)
+      `insert into business_evaluation_rule (organization_id, id, tipo, metrica, comparador, valor, estado, procedencia, nota)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        on conflict (organization_id, id) do update set tipo = excluded.tipo, metrica = excluded.metrica,
-         comparador = excluded.comparador, valor = excluded.valor, estado = excluded.estado, nota = excluded.nota`,
-      [r.organizationId, r.id, r.tipo, r.metrica, r.comparador, r.valor, r.estado, r.nota],
+         comparador = excluded.comparador, valor = excluded.valor, estado = excluded.estado,
+         procedencia = excluded.procedencia, nota = excluded.nota`,
+      [r.organizationId, r.id, r.tipo, r.metrica, r.comparador, r.valor, r.estado, r.procedencia, r.nota],
     );
   }
 

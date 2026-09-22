@@ -85,14 +85,17 @@ export function guardarVerticales(identity: IdentityService) {
 /**
  * Registra la superficie vertical dentro de un ámbito encapsulado protegido por el gateway.
  * `registrarSuperficie` recibe el ámbito (plugin) y añade todas las rutas verticales sobre él.
+ *
+ * Recibe además `identity`: hay superficies que necesitan la vía GOBERNADA de identidad —por ejemplo cambiar
+ * el modo operativo, con su permiso, su política y su auditoría— y no deben reimplementarla por su cuenta.
  */
 export function registrarVerticalesAutenticadas(
   app: FastifyInstance,
   identity: IdentityService,
-  registrarSuperficie: (scope: FastifyInstance) => void,
+  registrarSuperficie: (scope: FastifyInstance, identity: IdentityService) => void,
 ): void {
   app.register(async (scope) => {
     scope.addHook('preHandler', guardarVerticales(identity));
-    registrarSuperficie(scope);
+    registrarSuperficie(scope, identity);
   });
 }

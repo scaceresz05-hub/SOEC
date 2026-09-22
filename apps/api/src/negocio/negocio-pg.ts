@@ -306,11 +306,15 @@ export class RepositorioNegocios {
       : null;
   }
 
-  async actualizarPerfil(org: string, cambios: CambiosPerfil): Promise<PerfilNegocio | null> {
+  /**
+   * Edita el perfil. `q` permite hacerlo DENTRO de una transacción ajena (el asistente de incorporación
+   * escribe perfil, oferta y territorio en un solo movimiento); sin `q` usa el pool, como siempre.
+   */
+  async actualizarPerfil(org: string, cambios: CambiosPerfil, q: Queryable = this.pool): Promise<PerfilNegocio | null> {
     const entradas = Object.entries(cambios).filter(([, v]) => v !== undefined) as Array<[keyof CambiosPerfil, unknown]>;
     if (entradas.length === 0) return this.perfil(org);
     const sets = entradas.map(([k], i) => `${COLUMNAS_EDITABLES[k]} = $${i + 2}`);
-    const { rows } = await this.pool.query(
+    const { rows } = await q.query(
       `update business_profile set ${sets.join(', ')}, updated_at = now() where organization_id = $1 returning *`,
       [org, ...entradas.map(([, v]) => v)],
     );

@@ -61,9 +61,9 @@ export default function NuevaEmpresaPage() {
         primaryObjective: objetivo || null,
       });
       fijarOrgActiva(negocio.perfil.organizationId); // queda como empresa activa
-      // El alta continúa donde tiene sentido: conectar sus fuentes y decidir sus permisos. El panel todavía no
-      // tiene nada que mostrar, y mandar allí a alguien que acaba de crear su empresa sería un callejón.
-      router.push('/negocios/conexiones');
+      // El alta continúa en el ASISTENTE: unas preguntas en lenguaje de negocio dejan la empresa entendida.
+      // Mandar a alguien que acaba de crear su empresa a un panel vacío sería un callejón.
+      router.push('/negocios/onboarding');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'no se pudo crear la empresa');
       setCreando(false);

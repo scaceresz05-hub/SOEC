@@ -149,6 +149,7 @@ import { registerSaludRoutes } from './operacion/salud-routes';
 import { registerNegocioRoutes, registerNegocioTenantRoutes } from './negocio/negocio-routes';
 import { registerConexionRoutes } from './conexion/conexion-routes';
 import { registerPoliticaRoutes } from './politica/politica-routes';
+import { registerOnboardingRoutes } from './onboarding/onboarding-routes';
 import { crearDepositoSecretosConexion } from './conexion/secreto-conexion';
 import { refrescarNegociosDelRuntime } from './conexion/snapshot';
 import { registerAcquisitionRoutes } from './acquisition-routes';
@@ -414,7 +415,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // HTTP token/cuentas). Compartida por el callback público y las rutas autenticadas. Null si falta pool/config.
   const composicionGoogleAds = deps.googleAdsComposicion !== undefined ? deps.googleAdsComposicion : deps.pool ? crearComposicionGoogleAdsOAuth(deps.pool, process.env) : null;
 
-  const registrarSuperficieVertical = (target: FastifyInstance): void => {
+  const registrarSuperficieVertical = (target: FastifyInstance, identityDelGateway?: IdentityService): void => {
     registerModelRoutes(target, deps.store);
     registerEceRoutes(target, deps.store);
     registerOperationsRoutes(target, deps.store);
@@ -453,6 +454,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // POLÍTICA DE EVALUACIÓN COMO DATO (Autonomy Fase C): objetivos, indicadores y criterios se configuran
       // desde la interfaz. Completarla vuelve EVALUABLE al negocio; no autoriza gasto ni ejecución.
       registerPoliticaRoutes(target, pool, { refrescar });
+      // ONBOARDING INTELIGENTE (Autonomy Fase D): el asistente que traduce el lenguaje del dueño a
+      // configuración de marketing. Con `identity` puede aplicar el modo operativo por su vía gobernada.
+      registerOnboardingRoutes(target, pool, { refrescar, ...(identityDelGateway ? { identity: identityDelGateway } : {}) });
     }
     registerAcquisitionRoutes(target, deps.store); // Acquisition Engine (sólo lectura / shadow)
     // OAuth READ-ONLY de Meta — rutas AUTENTICADAS (start/connection/assets/binding). El CALLBACK va aparte,

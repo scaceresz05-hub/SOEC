@@ -76,6 +76,29 @@ export const METRICAS_REGLA: readonly MetricaRegla[] = [
 export const COMPARADORES: readonly Comparador[] = ['GTE', 'LTE', 'GT', 'LT'];
 export const MODOS_CANAL: readonly ModoCanal[] = ['ALLOWED', 'FORBIDDEN'];
 
+/**
+ * PROCEDENCIA de un valor de política (Fase D). Sin esto, un umbral puesto por el sistema para no dejar un
+ * hueco es indistinguible de una decisión del negocio — y eso es exactamente lo que no puede pasar:
+ *
+ *   USER_DEFINED   lo fijó una persona del negocio
+ *   SYSTEM_DEFAULT punto de partida prudente y VERSIONADO del sistema, con fundamento escrito
+ *   LEARNED        se aprendió observando datos reales
+ *   MIGRATED       venía del módulo TypeScript histórico
+ *   TO_BE_LEARNED  el negocio no lo sabe todavía y se aprenderá con datos iniciales (no es cero, no es meta)
+ *   UNCONFIGURED   nadie lo fijó y el sistema NO lo inventa
+ */
+export type ProcedenciaValor =
+  | 'USER_DEFINED'
+  | 'SYSTEM_DEFAULT'
+  | 'LEARNED'
+  | 'MIGRATED'
+  | 'TO_BE_LEARNED'
+  | 'UNCONFIGURED';
+
+export const PROCEDENCIAS: readonly ProcedenciaValor[] = [
+  'USER_DEFINED', 'SYSTEM_DEFAULT', 'LEARNED', 'MIGRATED', 'TO_BE_LEARNED', 'UNCONFIGURED',
+];
+
 export class PoliticaInvalidaError extends Error {}
 
 const en = <T extends string>(valores: readonly T[], v: unknown, campo: string): T => {
@@ -92,6 +115,20 @@ export const exigirTipoRegla = (v: unknown): TipoRegla => en(TIPOS_REGLA, v, 'ti
 export const exigirMetrica = (v: unknown): MetricaRegla => en(METRICAS_REGLA, v, 'métrica');
 export const exigirComparador = (v: unknown): Comparador => en(COMPARADORES, v, 'comparador');
 export const exigirModoCanal = (v: unknown): ModoCanal => en(MODOS_CANAL, v, 'modo de canal');
+export const exigirProcedencia = (v: unknown): ProcedenciaValor => en(PROCEDENCIAS, v, 'procedencia');
+
+/**
+ * PUNTOS DE PARTIDA del sistema, versionados y con fundamento escrito. Sólo existen donde hay una razón
+ * interna clara; donde no la hay, el valor queda `UNCONFIGURED` y se dice, en lugar de inventarlo.
+ *
+ * `IMPRESSIONS = 1000`: piso documentado desde el primer piloto — a un CTR observado ~2,5 % equivale a ~25
+ * clics, mínimo razonable para empezar a observar señal de conversión. No está calibrado para forzar ninguna
+ * conclusión: por debajo, la evaluación prevalece en OBSERVAR/NO_EVALUABLE.
+ */
+export const DEFAULTS_EVIDENCIA_V1: Readonly<Partial<Record<MetricaRegla, number>>> = {
+  IMPRESSIONS: 1000,
+};
+export const VERSION_DEFAULTS_EVIDENCIA = 'v1' as const;
 
 /** Clave de evento/KPI: minúsculas, números, `_`, `-` y `:` (los eventos Growth usan `service_viewed:<slug>`). */
 export function exigirClave(v: unknown, campo: string): string {

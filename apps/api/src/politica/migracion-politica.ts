@@ -125,6 +125,7 @@ export async function migrarPoliticasDelRegistro(
           baselineValue: p.criterio.lineaBase,
           tolerance: p.criterio.tolerancia,
           estado: 'CONFIGURED',
+          procedencia: 'MIGRATED',
           nota: null,
           orden: 0,
         });
@@ -132,16 +133,16 @@ export async function migrarPoliticasDelRegistro(
         // ── REGLAS: mínimo de evidencia, pausa y escalamiento, con los valores vigentes ──
         await repo.guardarRegla(c, {
           organizationId: org, id: 'evidencia-impresiones', tipo: 'EVIDENCE_MINIMUM', metrica: 'IMPRESSIONS',
-          comparador: 'GTE', valor: p.criterio.muestraMinima, estado: 'CONFIGURED',
+          comparador: 'GTE', valor: p.criterio.muestraMinima, estado: 'CONFIGURED', procedencia: 'MIGRATED',
           nota: 'piso de impresiones antes de concluir; lo leen la evaluación y la optimización',
         });
         await repo.guardarRegla(c, {
           organizationId: org, id: 'pausa-tasa-conversion', tipo: 'PAUSE', metrica: 'CONVERSION_RATE',
-          comparador: 'LTE', valor: p.policy.umbralPausaTasaConversion, estado: 'CONFIGURED', nota: null,
+          comparador: 'LTE', valor: p.policy.umbralPausaTasaConversion, estado: 'CONFIGURED', procedencia: 'MIGRATED', nota: null,
         });
         await repo.guardarRegla(c, {
           organizationId: org, id: 'escalamiento-tasa-conversion', tipo: 'ESCALATION', metrica: 'CONVERSION_RATE',
-          comparador: 'GTE', valor: p.policy.umbralEscalamiento, estado: 'CONFIGURED',
+          comparador: 'GTE', valor: p.policy.umbralEscalamiento, estado: 'CONFIGURED', procedencia: 'MIGRATED',
           nota: 'escalar siempre requiere aprobación humana',
         });
 

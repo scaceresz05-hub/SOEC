@@ -35,6 +35,21 @@
 > demás. Los bloqueadores 4 y 5 del TOP 5 (motor de investigación/generación y optimización que ejecuta)
 > siguen intactos: SOEC ya puede evaluar cualquier empresa, todavía no puede promocionarla sola.
 
+> **Actualización 2026-09-21 — Autonomy Fase D ejecutada.** Cifras de línea base intactas.
+> [INTELLIGENT_BUSINESS_ONBOARDING.md](../autonomy/INTELLIGENT_BUSINESS_ONBOARDING.md): existe el asistente
+> que faltaba entre «crear una empresa» y «tenerla configurada». Una persona sin conocimientos de marketing
+> digital contesta preguntas en lenguaje de negocio y SOEC las traduce a perfil, oferta, territorio, objetivo,
+> conversiones, restricciones, política de evaluación, techo de inversión y modo operativo, con procedencia
+> (`USER · WEBSITE · CONNECTOR · DERIVED`) y sin inventar umbrales (`TO_BE_LEARNED` / `SYSTEM_DEFAULT` /
+> `UNCONFIGURED`). Se añade el read model `BusinessReadiness` por dominios y cinco niveles de preparación
+> independientes, que sustituyen cualquier «porcentaje completo». **Con esto queda cubierto el inventario de
+> onboarding que esta auditoría reclamaba** (§«onboarding inventory» y «universal form spec»): el recorrido
+> `+ Nueva empresa → empresa preparada` ya no pasa por un desarrollador. Las capacidades derivadas son sólo de
+> LECTURA; la ejecución de campañas y el gasto autónomo siguen exigiendo gobierno y una autorización
+> financiera humana, y el asistente NO crea mandatos. Los bloqueadores 4 y 5 del TOP 5 (investigación y
+> generación reales; optimización que ejecuta) siguen intactos: SOEC ya recibe, entiende y prepara una empresa
+> sola, pero todavía no investiga el mercado ni propone campañas por sí mismo.
+
 **Método:** lectura del código ejecutable (no de la documentación), distinguiendo qué está cableado en el runtime (`apps/api/src/server.ts`, rutas registradas en `app.ts`) de lo que existe como tipo, motor puro o fixture. Toda afirmación lleva evidencia `archivo:línea`. Vocabulario: `IMPLEMENTADO_Y_USADO · IMPLEMENTADO_PARCIAL · IMPLEMENTADO_PERO_NO_CONECTADO · MOCK · SOLO_TIPO_O_DOC · LEGACY · AUSENTE`.
 
 ---

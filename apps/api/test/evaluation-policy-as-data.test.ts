@@ -80,6 +80,7 @@ const kpi = (over: Partial<Kpi> = {}): Kpi => ({
   baselineValue: 0,
   tolerance: 0.2,
   estado: 'CONFIGURED',
+  procedencia: 'USER_DEFINED',
   nota: null,
   orden: 0,
   ...over,
@@ -93,6 +94,7 @@ const regla = (over: Partial<ReglaEvaluacion> = {}): ReglaEvaluacion => ({
   comparador: 'GTE',
   valor: 1000,
   estado: 'CONFIGURED',
+  procedencia: 'USER_DEFINED',
   nota: null,
   ...over,
 });

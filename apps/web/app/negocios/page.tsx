@@ -836,7 +836,8 @@ export default function Panel(): React.ReactElement {
           <Callout tono="info" ico="ℹ">Una fuente «no conectada» no es un error ni un cero: es algo que todavía no configuraste. A medida que conectes fuentes, SOEC podrá decir más.</Callout>
           {/* Conectar una fuente y decidir qué puede hacer SOEC con ella se hace desde la propia interfaz. */}
           <p style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Link className="btn primary" href="/negocios/conexiones">Conectar fuentes y permisos →</Link>
+            <Link className="btn primary" href="/negocios/onboarding">Cuéntanos de tu negocio →</Link>
+            <Link className="btn" href="/negocios/conexiones">Conectar fuentes y permisos →</Link>
             <Link className="btn" href="/negocios/objetivos">Objetivos y criterios →</Link>
           </p>
           <div className="card" style={{ marginTop: 12 }}>

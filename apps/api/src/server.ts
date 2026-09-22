@@ -34,6 +34,7 @@ import { migrarConexionesDelRegistro } from './conexion/migracion-conexiones';
 import { crearDepositoSecretosConexion, crearAlmacenDeLecturaDeSecretos } from './conexion/secreto-conexion';
 import { crearDescubridorPorCapacidad, crearElegiblesPorCapacidad, iniciarRefrescoDeNegocios, refrescarNegociosDelRuntime } from './conexion/snapshot';
 import { politicaMigrations } from './politica/politica-pg';
+import { onboardingMigrations } from './onboarding/onboarding-pg';
 import { migrarPoliticasDelRegistro } from './politica/migracion-politica';
 import { PoliticaService } from './politica/politica-service';
 import { estadoKillSwitch, crearEvaluadorPausaSeguridad } from './gobierno';
@@ -133,6 +134,9 @@ async function main(): Promise<void> {
   // Se migra SÓLO lo que existe: SmileFlow completa, CP con su embudo (queda incompleta y lo dice), C Y P nada.
   const migracionPoliticas = await migrarPoliticasDelRegistro(pool);
   console.log(JSON.stringify({ politicaComoDato: migracionPoliticas }));
+  await runMigrations(pool, onboardingMigrations); // Autonomy Fase D: asistente de incorporación
+  // No hay migración de datos: el asistente se apoya en lo que ya está persistido y precarga lo que SOEC
+  // sabe. Una empresa histórica lo abre y encuentra sus respuestas puestas, no un formulario vacío.
   // PRIMER SNAPSHOT: desde aquí el runtime resuelve `organización → negocio / perfil / fuentes` contra la
   // BASE. Se fija ANTES de atender la primera petición para que ninguna resuelva con el registro histórico.
   const snapshotInicial = await refrescarNegociosDelRuntime(pool);
