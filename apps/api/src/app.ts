@@ -150,6 +150,9 @@ import { registerNegocioRoutes, registerNegocioTenantRoutes } from './negocio/ne
 import { registerConexionRoutes } from './conexion/conexion-routes';
 import { registerPoliticaRoutes } from './politica/politica-routes';
 import { registerOnboardingRoutes } from './onboarding/onboarding-routes';
+import { registerInvestigacionRoutes } from './investigacion/investigacion-routes';
+import { proveedoresDeOrganizacion } from './investigacion/composicion';
+import type { DepsInvestigacion } from './investigacion/investigacion-service';
 import { crearDepositoSecretosConexion } from './conexion/secreto-conexion';
 import { refrescarNegociosDelRuntime } from './conexion/snapshot';
 import { registerAcquisitionRoutes } from './acquisition-routes';
@@ -191,6 +194,12 @@ export interface AppDeps {
   rateLimit?: AuthRateLimitConfig;
   /** Limitador de acciones de generación (Tramo J). Inyectable en tests; default generoso si se omite. */
   generationRateLimit?: RateLimiter;
+  /**
+   * Override de los proveedores de INVESTIGACIÓN (Autonomy Fase E). SÓLO para tests deterministas: permite
+   * demostrar «misma evidencia ⇒ mismo plan» sin salir a la red. Omitido en producción, donde la composición
+   * real decide por empresa qué fuentes hay y registra las que faltan como no disponibles.
+   */
+  proveedoresInvestigacion?: (org: string) => Promise<DepsInvestigacion>;
 }
 
 function header(req: FastifyRequest, name: string): string | undefined {
@@ -457,6 +466,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // ONBOARDING INTELIGENTE (Autonomy Fase D): el asistente que traduce el lenguaje del dueño a
       // configuración de marketing. Con `identity` puede aplicar el modo operativo por su vía gobernada.
       registerOnboardingRoutes(target, pool, { refrescar, ...(identityDelGateway ? { identity: identityDelGateway } : {}) });
+      // INVESTIGACIÓN Y PLANIFICACIÓN (Autonomy Fase E): el negocio pide «investigar mi mercado» y SOEC produce
+      // evidencia, hallazgos, veredicto por canal y un plan EN BORRADOR. Ninguna ruta publica nada.
+      registerInvestigacionRoutes(target, pool, {
+        refrescar,
+        proveedores: deps.proveedoresInvestigacion ?? ((org) => proveedoresDeOrganizacion(org, {
+          pool,
+          env: process.env,
+          composicionGoogleAds: composicionGoogleAds,
+          log: (i) => console.log(JSON.stringify(i)),
+        })),
+      });
     }
     registerAcquisitionRoutes(target, deps.store); // Acquisition Engine (sólo lectura / shadow)
     // OAuth READ-ONLY de Meta — rutas AUTENTICADAS (start/connection/assets/binding). El CALLBACK va aparte,

@@ -50,6 +50,23 @@
 > generación reales; optimización que ejecuta) siguen intactos: SOEC ya recibe, entiende y prepara una empresa
 > sola, pero todavía no investiga el mercado ni propone campañas por sí mismo.
 
+> **Actualización 2026-09-21 — Autonomy Fase E ejecutada.** Cifras de línea base intactas.
+> [AUTONOMOUS_RESEARCH_AND_CAMPAIGN_PLANNING.md](../autonomy/AUTONOMOUS_RESEARCH_AND_CAMPAIGN_PLANNING.md):
+> existe el motor de investigación que el bloqueador 4 declaraba ausente, y existe **sin SDKs de proveedor de
+> modelos**: la corrida (`ResearchRun`) recoge demanda de búsqueda real por la API de Google Ads (sólo lectura,
+> sin depender de una campaña activa), territorios ejecutables reales, una auditoría comercial acotada del
+> propio sitio y competidores «insuficientes» cuando no hay fuente; deriva intención con reglas auditables,
+> compatibilidad de landing, veredicto por canal con motivos y hallazgos con su evidencia. Todo con clase de
+> evidencia, fuente, período, geografía y fecha; `PARTIAL` es válido y nada se fabrica. El planificador puro
+> produce un `CampaignPlan` **en borrador** versionado, explicable decisión por decisión y con las cuatro cifras
+> de presupuesto separadas (techo declarado ≠ gasto propuesto ≠ oportunidad de mercado ≠ gasto autorizado).
+> Así, **el bloqueador 4 pasa de AUSENTE a cubierto en su mitad de investigación y estrategia**; su otra mitad
+> —generación de creatividades— sigue declarada como requisito, no resuelta. El bloqueador 5 (optimización que
+> ejecuta) sigue intacto **a propósito**: esta fase no crea campañas ni conversiones, no cambia presupuestos y
+> no gasta (Google CREATE = 0, Meta CREATE = 0, mutaciones externas = 0, gasto = 0), y `EXECUTION_READY` es
+> `false` por construcción mientras no existan anuncios escritos y una conversión verificada. SOEC ya investiga
+> el mercado de cualquier empresa y propone cómo competir en él; publicar sigue siendo una decisión humana.
+
 **Método:** lectura del código ejecutable (no de la documentación), distinguiendo qué está cableado en el runtime (`apps/api/src/server.ts`, rutas registradas en `app.ts`) de lo que existe como tipo, motor puro o fixture. Toda afirmación lleva evidencia `archivo:línea`. Vocabulario: `IMPLEMENTADO_Y_USADO · IMPLEMENTADO_PARCIAL · IMPLEMENTADO_PERO_NO_CONECTADO · MOCK · SOLO_TIPO_O_DOC · LEGACY · AUSENTE`.
 
 ---

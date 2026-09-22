@@ -1,0 +1,111 @@
+/**
+ * apps/api · INVESTIGACIÓN AUTÓNOMA · composición de proveedores por organización.
+ *
+ * Aquí se decide, para CADA empresa y en cada corrida, qué fuentes hay realmente disponibles. Dos reglas:
+ *
+ *  · NO SE DEPENDE DE UNA CAMPAÑA ACTIVA. Para investigar basta una cuenta conectada: el identificador de
+ *    cliente sale de la conexión persistida (Fase B) o de la propia conexión OAuth, no de una campaña existente.
+ *    Una empresa nueva que acaba de conectar Google puede investigar el primer día.
+ *  · FAIL-CLOSED Y EXPLÍCITO. Sin conexión, sin capacidad de lectura o sin configuración de la plataforma, el
+ *    proveedor simplemente no se construye: la corrida registrará la fuente como no disponible con su motivo,
+ *    en lugar de inventar datos.
+ *
+ * El coordinador de consultas es COMPARTIDO por proceso: dos empresas investigando a la vez no se pisan, pero
+ * dos pantallas de la misma empresa no producen dos llamadas a Google.
+ */
+import type { Pool } from 'pg';
+import { obtenerAccessTokenDeOrg } from '../acquisition/google-ads-oauth-flow';
+import type { ComponentesFlujoGoogleAds } from '../acquisition/google-ads-oauth-flow';
+import { GoogleAdsMutateHttpClient } from '../campana/google-ads-mutate-http';
+import { RepositorioConexiones } from '../conexion/conexion-pg';
+import { CoordinadorDeConsultas, crearProveedorDemandaGoogle, crearProveedorGeoGoogle } from './google-providers';
+import { crearProveedorSitio } from './sitio-auditoria';
+import { competidoresSinFuente } from './proveedores';
+import type { DepsInvestigacion } from './investigacion-service';
+
+/** Un único coordinador por proceso: es la defensa de cuota, y compartirla es justamente el objetivo. */
+export const coordinadorGlobal = new CoordinadorDeConsultas();
+
+export interface OpcionesComposicion {
+  readonly pool: Pool;
+  readonly env: NodeJS.ProcessEnv;
+  readonly composicionGoogleAds: ComponentesFlujoGoogleAds | null | undefined;
+  readonly log?: (info: Record<string, unknown>) => void;
+}
+
+/**
+ * Identificadores de la cuenta de Google Ads de la organización, tomados de lo PERSISTIDO. Primero la conexión
+ * del negocio (Fase B); si no declara cuenta, la conexión OAuth. `null` ⇒ no hay cuenta con la que investigar.
+ */
+async function cuentaDeGoogle(pool: Pool, org: string): Promise<{ customerId: string; loginCustomerId: string } | null> {
+  const conexion = await new RepositorioConexiones(pool).buscar(org, 'GOOGLE_ADS');
+  if (conexion !== null && conexion.estado === 'CONNECTED') {
+    const cfg = conexion.configuracion as { customerId?: string; loginCustomerId?: string };
+    const customerId = (cfg.customerId ?? conexion.externalAccountId ?? '').replace(/\D/g, '');
+    if (customerId !== '') {
+      const login = (cfg.loginCustomerId ?? conexion.loginAccountId ?? customerId).replace(/\D/g, '');
+      return { customerId, loginCustomerId: login === '' ? customerId : login };
+    }
+  }
+  // La cuenta puede estar conectada por OAuth sin que nadie haya declarado todavía campaña ni recurso.
+  try {
+    const { rows } = await pool.query(
+      `select customer_id, login_customer_id from google_ads_connection
+       where organization_id = $1 and estado = 'CONNECTED' and customer_id is not null
+       order by updated_at desc limit 1`,
+      [org],
+    );
+    const r = rows[0] as { customer_id: string | null; login_customer_id: string | null } | undefined;
+    if (r?.customer_id) {
+      const customerId = String(r.customer_id).replace(/\D/g, '');
+      const login = String(r.login_customer_id ?? r.customer_id).replace(/\D/g, '');
+      return { customerId, loginCustomerId: login === '' ? customerId : login };
+    }
+  } catch {
+    // El esquema OAuth puede no existir en un despliegue mínimo: no es un fallo del negocio.
+  }
+  return null;
+}
+
+/**
+ * Proveedores disponibles para una organización. La auditoría del propio sitio SIEMPRE está disponible (es
+ * HTTP y el sitio es del negocio); las fuentes de Google dependen de que haya cuenta conectada y permiso de
+ * lectura.
+ */
+export async function proveedoresDeOrganizacion(org: string, o: OpcionesComposicion): Promise<DepsInvestigacion> {
+  const base: DepsInvestigacion = {
+    sitio: crearProveedorSitio({}),
+    mercado: competidoresSinFuente,
+    ...(o.log ? { log: o.log } : {}),
+  };
+
+  const capacidades = await new RepositorioConexiones(o.pool).capacidades(org);
+  const habilitadas = new Set(capacidades.filter((c) => c.habilitada).map((c) => c.capacidad));
+  const puedeLeer = habilitadas.has('MEDICION_REAL') || habilitadas.has('AUTONOMIA_ADS');
+  const developerToken = o.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+
+  if (!o.composicionGoogleAds || !developerToken || !puedeLeer) {
+    return base; // sin plataforma configurada o sin permiso de lectura: fuentes de Google no disponibles
+  }
+  const cuenta = await cuentaDeGoogle(o.pool, org);
+  if (cuenta === null) return base;
+
+  const cliente = new GoogleAdsMutateHttpClient({
+    resolverAccessToken: () => obtenerAccessTokenDeOrg(o.composicionGoogleAds!, org),
+    developerToken,
+    loginCustomerId: cuenta.loginCustomerId,
+    ...(o.log ? { logger: (i: unknown) => o.log?.({ googleAdsInvestigacion: i }) } : {}),
+  });
+  const deps = {
+    cliente,
+    customerId: cuenta.customerId,
+    org,
+    coordinador: coordinadorGlobal,
+    ...(o.log ? { log: o.log } : {}),
+  };
+  return {
+    ...base,
+    demanda: crearProveedorDemandaGoogle(deps),
+    geo: crearProveedorGeoGoogle(deps),
+  };
+}

@@ -77,6 +77,19 @@ export class GoogleSearchError extends Error {
 }
 
 /** Región geo resuelta por Google (SuggestGeoTargetConstants). */
+/**
+ * Idea de palabra clave con sus métricas históricas, tal como las devuelve KeywordPlanIdeaService (LECTURA).
+ * `null` en una métrica significa que Google no la informó — nunca cero.
+ */
+export interface IdeaDePalabraClave {
+  readonly texto: string;
+  readonly avgMonthlySearches: number | null;
+  readonly competition: string | null;
+  readonly competitionIndex: number | null;
+  readonly lowTopOfPageBidMicros: number | null;
+  readonly highTopOfPageBidMicros: number | null;
+}
+
 export interface GeoTargetSugerido {
   readonly name: string;
   readonly canonicalName: string;
@@ -312,6 +325,68 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
       const criterionId = g.id ?? (g.resourceName ?? '').replace(/^geoTargetConstants\//, '');
       return { name: g.name ?? '', canonicalName: g.canonicalName ?? '', criterionId, targetType: g.targetType ?? '', countryCode: g.countryCode ?? '', status: g.status ?? '' };
     });
+  }
+
+  /**
+   * KeywordPlanIdeaService.GenerateKeywordIdeas (READ ONLY). Devuelve ideas de palabras clave con sus métricas
+   * históricas a partir de semillas del negocio y, si se pasa, de su propio sitio.
+   *
+   * NO crea ningún plan, ninguna campaña y ningún presupuesto: es una consulta de investigación. No depende de
+   * que exista una campaña activa. El customerId es el de la cuenta CONECTADA de la organización.
+   */
+  async generarIdeasDePalabras(
+    customerId: string,
+    peticion: { readonly semillas: readonly string[]; readonly url?: string | null; readonly geoTargetIds?: readonly string[]; readonly languageId?: string },
+  ): Promise<readonly IdeaDePalabraClave[]> {
+    const accessToken = await this.deps.resolverAccessToken();
+    if (!accessToken) throw new Error('NO_ACCESS_TOKEN');
+    const url = urlAutorizada(`${this.apiBaseUrl}/${API_VERSION}/customers/${customerId}:generateKeywordIdeas`);
+    if (url === null) throw new Error('HOST_NO_AUTORIZADO');
+
+    const semillas = peticion.semillas.map((s) => s.trim()).filter((s) => s.length > 0).slice(0, 20);
+    if (semillas.length === 0) return [];
+    // Semilla: palabras del negocio y —cuando existe— su propio sitio. Nunca términos inventados aquí.
+    const seed = peticion.url
+      ? { keywordAndUrlSeed: { url: peticion.url, keywords: semillas } }
+      : { keywordSeed: { keywords: semillas } };
+    const body = {
+      ...seed,
+      ...(peticion.geoTargetIds && peticion.geoTargetIds.length > 0
+        ? { geoTargetConstants: peticion.geoTargetIds.map((id) => `geoTargetConstants/${id}`) }
+        : {}),
+      language: `languageConstants/${peticion.languageId ?? '1003'}`, // 1003 = español
+      keywordPlanNetwork: 'GOOGLE_SEARCH',
+      includeAdultKeywords: false,
+      pageSize: 200,
+    };
+
+    const res = await this.fetchFn(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': this.deps.developerToken, 'login-customer-id': this.deps.loginCustomerId, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const requestId = res.headers.get('request-id') ?? res.headers.get('x-request-id') ?? null;
+    if (!res.ok) {
+      const cuerpo = await res.text();
+      const f = parseGoogleAdsFailure(cuerpo);
+      const primero = f.googleErrors[0];
+      const cuerpoResumen = f.status === null && primero === undefined ? resumenDeCuerpo(cuerpo) : null;
+      throw new GoogleSearchError({ httpStatus: res.status, requestId, status: f.status, code: primero?.errorCode ?? null, message: mensajeSanitizado(primero?.message ?? null), errorPath: primero?.errorPath ?? null, fieldPathElements: primero?.fieldPathElements ?? [], cuerpoResumen });
+    }
+    const j = (await res.json()) as {
+      results?: Array<{ text?: string; keywordIdeaMetrics?: { avgMonthlySearches?: string | number; competition?: string; competitionIndex?: string | number; lowTopOfPageBidMicros?: string | number; highTopOfPageBidMicros?: string | number } }>;
+    };
+    const num = (v: unknown): number | null => (v === null || v === undefined ? null : Number.isFinite(Number(v)) ? Number(v) : null);
+    return (j.results ?? [])
+      .filter((r) => typeof r.text === 'string' && r.text.trim() !== '')
+      .map((r) => ({
+        texto: String(r.text).trim(),
+        avgMonthlySearches: num(r.keywordIdeaMetrics?.avgMonthlySearches),
+        competition: r.keywordIdeaMetrics?.competition ?? null,
+        competitionIndex: num(r.keywordIdeaMetrics?.competitionIndex),
+        lowTopOfPageBidMicros: num(r.keywordIdeaMetrics?.lowTopOfPageBidMicros),
+        highTopOfPageBidMicros: num(r.keywordIdeaMetrics?.highTopOfPageBidMicros),
+      }));
   }
 
   /**
