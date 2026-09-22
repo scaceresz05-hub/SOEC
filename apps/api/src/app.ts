@@ -153,7 +153,7 @@ import { registerOnboardingRoutes } from './onboarding/onboarding-routes';
 import { registerInvestigacionRoutes } from './investigacion/investigacion-routes';
 import { proveedoresDeOrganizacion } from './investigacion/composicion';
 import { registerEjecucionRoutes } from './ejecucion/ejecucion-routes';
-import { clienteDeEscrituraGoogle, crearObservadorDeEventos } from './ejecucion/composicion';
+import { clienteDeEscrituraGoogle, clienteDeLecturaGoogle, crearObservadorDeEventos } from './ejecucion/composicion';
 import { registerOptimizacionRoutes } from './optimizacion/optimizacion-routes';
 import type { GoogleAdsMutateHttpClient } from './campana/google-ads-mutate-http';
 import type { DepsInvestigacion } from './investigacion/investigacion-service';
@@ -503,9 +503,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // verificar → aprender. En modo observación o supervisado no puede mutar nada por su cuenta.
       registerOptimizacionRoutes(target, pool, {
         refrescar,
-        clienteGoogle: deps.ejecucionGoogle ?? ((org) => clienteDeEscrituraGoogle(org, {
-          pool, env: process.env, composicionGoogleAds, log: (i) => console.log(JSON.stringify(i)),
-        })),
+        // Escritura si la empresa la autorizó; si no, LECTURA — basta para observar y para el modo sombra.
+        clienteGoogle: deps.ejecucionGoogle ?? (async (org) => {
+          const opciones = { pool, env: process.env, composicionGoogleAds, log: (i: Record<string, unknown>) => console.log(JSON.stringify(i)) };
+          return (await clienteDeEscrituraGoogle(org, opciones)) ?? (await clienteDeLecturaGoogle(org, opciones));
+        }),
         log: (i) => console.log(JSON.stringify(i)),
       });
     }

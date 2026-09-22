@@ -146,7 +146,8 @@ export class OptimizacionService {
 
     const cfg = (conexion?.configuracion ?? {}) as { customerId?: string };
     const customerId = (cfg.customerId ?? conexion?.externalAccountId ?? '').replace(/\D/g, '') || null;
-    const campaignId = peticion?.recursosExternos?.campaigns?.[0]?.split('/').pop() ?? null;
+    const campaignId = peticion?.recursosExternos?.campaigns?.[0]?.split('/').pop()
+      ?? await this.campaniaVinculadaHistorica(org);
 
     return {
       perfil,
@@ -202,6 +203,28 @@ export class OptimizacionService {
         faltanParaActivar: activacion.faltan,
       },
     };
+  }
+
+  /**
+   * Campaña vinculada por el camino HISTÓRICO (antes de que existieran las peticiones de ejecución). Se usa
+   * sólo para OBSERVAR: permite correr el ciclo en modo sombra sobre una campaña que SOEC creó en su día,
+   * sin inventar ningún vínculo. Si no hay binding con identificador real, no hay campaña que mirar.
+   */
+  private async campaniaVinculadaHistorica(org: string): Promise<string | null> {
+    try {
+      const { rows } = await this.pool.query(
+        `select payload->>'providerResourceId' as recurso
+         from events
+         where organization_id = $1 and type = 'provider-resource-binding.registrado'
+           and payload->>'entityType' = 'campaign' and payload->>'providerResourceId' is not null
+         order by sequence desc limit 1`,
+        [org],
+      );
+      const recurso = (rows[0] as { recurso?: string } | undefined)?.recurso ?? null;
+      return recurso === null ? null : (recurso.split('/').pop() ?? null);
+    } catch {
+      return null;
+    }
   }
 
   private mandatoVigente(m: Mandato | null): boolean {

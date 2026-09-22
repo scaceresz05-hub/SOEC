@@ -58,6 +58,27 @@ export async function clienteDeEscrituraGoogle(org: string, o: OpcionesComposici
 }
 
 /**
+ * Cliente de LECTURA para una organización. Exige capacidad de MEDICIÓN o de AUTONOMÍA, no la de escritura:
+ * observar una campaña no es cambiarla. Es lo que permite correr el ciclo en modo SOMBRA sobre cuentas reales
+ * sin concederle a SOEC ningún permiso de escritura.
+ */
+export async function clienteDeLecturaGoogle(org: string, o: OpcionesComposicionEjecucion): Promise<GoogleAdsMutateHttpClient | null> {
+  const developerToken = o.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  if (!o.composicionGoogleAds || !developerToken) return null;
+  const capacidades = await new RepositorioConexiones(o.pool).capacidades(org);
+  const habilitadas = new Set(capacidades.filter((c) => c.habilitada).map((c) => c.capacidad));
+  if (!habilitadas.has('MEDICION_REAL') && !habilitadas.has('AUTONOMIA_ADS')) return null;
+  const cuenta = await cuentaDe(o.pool, org);
+  if (cuenta === null) return null;
+  return new GoogleAdsMutateHttpClient({
+    resolverAccessToken: () => obtenerAccessTokenDeOrg(o.composicionGoogleAds!, org),
+    developerToken,
+    loginCustomerId: cuenta.loginCustomerId,
+    ...(o.log ? { logger: (i: unknown) => o.log?.({ googleAdsLecturaOptimizacion: i }) } : {}),
+  });
+}
+
+/**
  * Señal observada de una conversión: cuántos eventos de ese tipo ha visto SOEC. Es lo ÚNICO que convierte
  * «medición instalada» en «medición verificada». Si no hay nada observado, devuelve cero — nunca un supuesto.
  */
