@@ -200,7 +200,11 @@ export function evaluarPreparacionComercial(d: DatosPreparacion): PreparacionCom
   items.push(
     d.investigacion === null || d.plan === null
       ? it('INVESTIGACION_Y_PLAN', negocioListo ? 'SYSTEM_ACTION_REQUIRED' : 'MISSING',
-          d.investigacion === null ? 'no se ha investigado el mercado' : 'hay investigación pero no hay plan',
+          d.investigacion === null
+            ? 'no se ha investigado el mercado'
+            : d.investigacion.fresca
+              ? 'hay investigación y todavía no hay plan'
+              : `la última investigación no pudo completarse (${d.investigacion.estado.toLowerCase()})`,
           negocioListo ? 'SOEC puede investigar y planificar sin intervención' : 'primero completar los datos del negocio')
       : !d.investigacion.fresca || !d.plan.vigente
         ? it('INVESTIGACION_Y_PLAN', 'SYSTEM_ACTION_REQUIRED', 'la investigación o el plan quedaron desactualizados al cambiar el negocio', 'SOEC puede volver a investigar y replanificar')

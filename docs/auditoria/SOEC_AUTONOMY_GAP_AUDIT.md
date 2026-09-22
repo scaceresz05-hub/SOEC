@@ -107,6 +107,22 @@
 > Con los cinco bloqueadores del TOP 5 cerrados, lo que queda no es una pieza ausente sino la aceptación
 > extremo a extremo con una empresa real.
 
+> **Actualización 2026-09-22 — Autonomy Fase H ejecutada (aceptación, no construcción).** Cifras de línea
+> base intactas. [END_TO_END_AUTONOMOUS_MARKETING_ACCEPTANCE.md](../autonomy/END_TO_END_AUTONOMOUS_MARKETING_ACCEPTANCE.md):
+> una empresa nueva recorre las 33 etapas por las rutas reales, con el proceso reiniciándose cinco veces por el
+> camino, y su historia se reconstruye entera desde la última decisión hasta la primera respuesta. Se midió
+> además cómo se rompe (15 fallos controlados), qué no puede violar ninguna ruta (6 invariantes) y qué ve quien
+> no tiene permiso (403, sin excepción).
+> **Recuento de autonomía, con la distinción que importa:** la COBERTURA DE COMPONENTES sube a 78 % porque las
+> piezas existen y encajan; la AUTONOMÍA EFECTIVA EXTREMO A EXTREMO —una empresa real, con dinero real, sin
+> intervención— queda en ~45 %, y lo que la limita ya no es código ausente sino **actos humanos legítimos**
+> (conectar la cuenta, firmar el mandato, abrir el gobierno, instalar la medición) más un canario externo que
+> nadie ha autorizado. Son dos números distintos a propósito: confundirlos sería el error que esta auditoría
+> nació para evitar.
+> `NEW_BUSINESS_REQUIRES_CODE_TODAY` pasa a **NO** y `NEW_BUSINESS_REQUIRES_DEPLOY_TODAY` a **NO**: quince
+> tablas sostienen a una empresa nueva y el registro histórico registra cero usos para ella.
+> Sigue abierto: `LIVE_CANARY = BLOCKED_EXTERNAL`, `PHYSICAL_DEVICE_QA = PENDING_EXTERNAL`, Meta sin escritura.
+
 **Método:** lectura del código ejecutable (no de la documentación), distinguiendo qué está cableado en el runtime (`apps/api/src/server.ts`, rutas registradas en `app.ts`) de lo que existe como tipo, motor puro o fixture. Toda afirmación lleva evidencia `archivo:línea`. Vocabulario: `IMPLEMENTADO_Y_USADO · IMPLEMENTADO_PARCIAL · IMPLEMENTADO_PERO_NO_CONECTADO · MOCK · SOLO_TIPO_O_DOC · LEGACY · AUSENTE`.
 
 ---
