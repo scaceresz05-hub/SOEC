@@ -67,6 +67,26 @@
 > `false` por construcción mientras no existan anuncios escritos y una conversión verificada. SOEC ya investiga
 > el mercado de cualquier empresa y propone cómo competir en él; publicar sigue siendo una decisión humana.
 
+> **Actualización 2026-09-22 — Autonomy Fase F ejecutada.** Cifras de línea base intactas.
+> [CONVERSION_AND_CAMPAIGN_EXECUTION.md](../autonomy/CONVERSION_AND_CAMPAIGN_EXECUTION.md): el camino que
+> únicamente existía para UNA empresa —el que creó la campaña de SmileFlow— es ahora una capacidad
+> multiempresa, **sin un segundo ejecutor**: el materializador y el transporte atómico son los mismos, y su
+> estado por defecto pasa de `ENABLED` a `PAUSED`. Una empresa elegible va del plan versionado a una campaña
+> REAL (presupuesto, campaña, grupos, anuncios, palabras, negativas, geografía e idioma) sin código ni deploy
+> por empresa. Con esto **el bloqueador 2 del TOP 5 queda cerrado**: la creación de campaña ya no está atada a
+> `org-smileflow` ni a un envelope literal, sino a una `CampaignExecutionRequest` con paquete congelado,
+> idempotencia estructural, libro de ejecución, reconciliación remota y detección de deriva.
+> Se añade el modelo de CONVERSIONES como capa general (evento interno ≠ acción externa ≠ medición instalada
+> ≠ medición verificada), con identidad estable que impide duplicar acciones, y el puerto
+> `TrackingDeploymentProvider` que sustituye como arquitectura al patrón «editar a mano la web de cada
+> empresa» — donde no hay vía segura, se bloquea con instrucciones en vez de fingir `VERIFIED`.
+> Los límites se mantienen y ahora están probados: toda campaña nace `PAUSED` (prueba de arquitectura), el
+> presupuesto materializado nunca supera el mandato humano, los textos se validan contra las restricciones
+> declaradas ANTES de publicar, y `AUTONOMOUS_REAL` sigue sin poder crear nada. El bloqueador 5
+> (optimización que ejecuta) sigue intacto **a propósito**: SOEC ya puede crear la campaña, todavía no puede
+> encenderla ni tocarla después. Meta queda `BLOCKED_EXTERNAL`: `ads_management` es un scope prohibido en su
+> OAuth de sólo lectura.
+
 **Método:** lectura del código ejecutable (no de la documentación), distinguiendo qué está cableado en el runtime (`apps/api/src/server.ts`, rutas registradas en `app.ts`) de lo que existe como tipo, motor puro o fixture. Toda afirmación lleva evidencia `archivo:línea`. Vocabulario: `IMPLEMENTADO_Y_USADO · IMPLEMENTADO_PARCIAL · IMPLEMENTADO_PERO_NO_CONECTADO · MOCK · SOLO_TIPO_O_DOC · LEGACY · AUSENTE`.
 
 ---
