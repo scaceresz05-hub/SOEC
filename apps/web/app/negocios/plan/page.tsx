@@ -59,8 +59,16 @@ const ESTRUCTURA: Record<string, string> = {
   CAMPANA_POR_OFERTA: 'una campaña por servicio',
 };
 
-const clp = (v: number | null | undefined): string =>
-  v === null || v === undefined ? 'sin definir' : `$${Math.round(v).toLocaleString('es-CL')}`;
+/**
+ * Importe en unidades MENORES → texto con su moneda. La moneda la manda el servidor: poner «$» a ciegas
+ * etiquetaría como pesos el presupuesto de un negocio que factura en otra moneda.
+ */
+const dinero = (v: number | null | undefined, moneda: string): string => {
+  if (v === null || v === undefined) return 'sin definir';
+  const decimales = moneda === 'CLP' || moneda === 'JPY' ? 0 : 2;
+  return new Intl.NumberFormat('es-CL', { style: 'currency', currency: moneda, maximumFractionDigits: decimales })
+    .format(v / 10 ** decimales);
+};
 const fecha = (v: string | null): string => (v === null ? '—' : new Date(v).toLocaleString());
 const seccion = { marginBottom: 32 } as const;
 const titulo = { fontSize: 18, marginBottom: 8 } as const;
@@ -112,6 +120,7 @@ export default function PlanPage() {
   }
 
   const plan = vista?.plan ?? null;
+  const moneda = vista?.moneda ?? 'CLP';
   const pendientes = plan === null
     ? []
     : Object.entries(plan.readiness).filter(([dim, ok]) => ok === false && dim !== 'EXECUTION_READY');
@@ -165,7 +174,7 @@ export default function PlanPage() {
               <li>Qué se promociona: {plan.ofertas.length > 0 ? plan.ofertas.join(', ') : 'sin servicios prioritarios definidos'}</li>
               <li>Cómo se organiza: {ESTRUCTURA[plan.estructura.tipo] ?? plan.estructura.tipo} — {plan.estructura.justificacion}</li>
               <li>Cómo se compran las visitas: {PUJA[plan.puja.estrategia] ?? plan.puja.estrategia}
-                {plan.puja.techoCpcClp !== null ? `, hasta ${clp(plan.puja.techoCpcClp)} por visita` : ''} — {plan.puja.justificacion}</li>
+                {plan.puja.techoCpcClp !== null ? `, hasta ${dinero(plan.puja.techoCpcClp, moneda)} por visita` : ''} — {plan.puja.justificacion}</li>
               <li>
                 Dónde se mostraría:{' '}
                 {plan.geografia.targets.length > 0
@@ -190,12 +199,12 @@ export default function PlanPage() {
           <section style={seccion}>
             <h2 style={titulo}>Cuánto propone invertir</h2>
             <ul style={{ paddingLeft: 18 }}>
-              <li>Tu tope declarado: <strong>{clp(plan.presupuesto.techoDeclaradoClp)}</strong>
+              <li>Tu tope declarado: <strong>{dinero(plan.presupuesto.techoDeclaradoClp, moneda)}</strong>
                 {plan.presupuesto.modalidadTecho !== null ? ` (${plan.presupuesto.modalidadTecho === 'MENSUAL' ? 'al mes' : 'al día'})` : ''}</li>
-              <li>Lo que este plan propone gastar por día: <strong>{clp(plan.presupuesto.propuestoDiarioClp)}</strong></li>
-              <li>Lo que costaría atender toda la demanda observada: {clp(plan.presupuesto.oportunidadDiariaClp)}
+              <li>Lo que este plan propone gastar por día: <strong>{dinero(plan.presupuesto.propuestoDiarioClp, moneda)}</strong></li>
+              <li>Lo que costaría atender toda la demanda observada: {dinero(plan.presupuesto.oportunidadDiariaClp, moneda)}
                 <span style={apagado}> (es una estimación de lo que existe, no una recomendación)</span></li>
-              <li>Costo estimado por visita: {clp(plan.presupuesto.costoPorClicEstimadoClp)}</li>
+              <li>Costo estimado por visita: {dinero(plan.presupuesto.costoPorClicEstimadoClp, moneda)}</li>
             </ul>
             <p style={{ marginTop: 8 }}>{plan.presupuesto.explicacion}</p>
             <p style={{ color: '#b58900', marginTop: 8 }}>

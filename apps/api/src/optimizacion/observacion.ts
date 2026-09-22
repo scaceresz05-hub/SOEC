@@ -11,6 +11,7 @@
  *    camino de seguridad conserva su lectura propia porque necesita frescura independiente.
  */
 import type { GoogleAdsMutateHttpClient } from '../campana/google-ads-mutate-http';
+import { deMicros } from '../dinero';
 import type { RendimientoEntidad, RendimientoPalabra, RendimientoTermino, SnapshotObservacion } from './optimizacion-pg';
 import {
   VENTANA_DIAS_POR_DEFECTO,
@@ -24,11 +25,14 @@ type ClienteLectura = Pick<GoogleAdsMutateHttpClient, 'buscar'>;
 
 /** Convierte un valor del proveedor a número, o `null` si no vino. Jamás devuelve 0 por ausencia. */
 const n = (v: unknown): MetricaOpcional => (v === null || v === undefined || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null);
-/** Micros → unidad monetaria. `null` si no hay dato. */
-const clp = (v: unknown): MetricaOpcional => {
-  const x = n(v);
-  return x === null ? null : x / 1_000_000;
-};
+/**
+ * Micros de la plataforma → unidades MENORES de la moneda del negocio. `null` si no hay dato.
+ *
+ * La conversión NO es siempre dividir por un millón: eso sólo vale en monedas SIN decimales (CLP, JPY). En
+ * euros o dólares, un millón de micros es 1,00 —es decir, 100 unidades menores—, y confundirlo haría que SOEC
+ * leyera un gasto cien veces menor del real y decidiera sobre él.
+ */
+const enMenores = (v: unknown, moneda: string): MetricaOpcional => deMicros(n(v), moneda);
 const suma = (a: MetricaOpcional, b: MetricaOpcional): MetricaOpcional => (a === null && b === null ? null : (a ?? 0) + (b ?? 0));
 
 export function ventanaDe(ahora: string, dias = VENTANA_DIAS_POR_DEFECTO): VentanaObservacion {
@@ -45,6 +49,8 @@ export interface EntradaObservacion {
   readonly campaignId: string;
   readonly ventana: VentanaObservacion;
   readonly saludMedicion: SaludMedicion;
+  /** Moneda ISO del negocio: sin ella no se pueden leer los importes de la plataforma sin suponer. */
+  readonly moneda: string;
   readonly ahora: string;
   readonly log?: (info: Record<string, unknown>) => void;
 }
@@ -76,7 +82,7 @@ export async function observar(e: EntradaObservacion): Promise<SnapshotObservaci
     let estado: string | null = null; let presupuesto: number | null = null;
     for (const f of filas) {
       const m = (f as { metrics?: Record<string, unknown> }).metrics ?? {};
-      spend = suma(spend, clp(m.costMicros));
+      spend = suma(spend, enMenores(m.costMicros, e.moneda));
       impressions = suma(impressions, n(m.impressions));
       clicks = suma(clicks, n(m.clicks));
       conversions = suma(conversions, n(m.conversions));
@@ -131,7 +137,7 @@ async function leerEntidades(
       if (k.id === '') continue;
       const m = (f as { metrics?: Record<string, unknown> }).metrics ?? {};
       const acc = agg.get(k.id) ?? { nombre: k.nombre, estado: k.estado, spend: null, impressions: null, clicks: null, conversions: null };
-      acc.spend = suma(acc.spend, clp(m.costMicros));
+      acc.spend = suma(acc.spend, enMenores(m.costMicros, e.moneda));
       acc.impressions = suma(acc.impressions, n(m.impressions));
       acc.clicks = suma(acc.clicks, n(m.clicks));
       acc.conversions = suma(acc.conversions, n(m.conversions));
@@ -165,7 +171,7 @@ async function leerPalabras(e: EntradaObservacion, wc: string): Promise<readonly
       const clave = `${adGroupId}:${criterionId}:${texto}`;
       const m = (f as { metrics?: Record<string, unknown> }).metrics ?? {};
       const previo = agg.get(clave);
-      const spend = suma(previo?.spend ?? null, clp(m.costMicros));
+      const spend = suma(previo?.spend ?? null, enMenores(m.costMicros, e.moneda));
       const impressions = suma(previo?.impressions ?? null, n(m.impressions));
       const clicks = suma(previo?.clicks ?? null, n(m.clicks));
       const conversions = suma(previo?.conversions ?? null, n(m.conversions));
@@ -197,7 +203,7 @@ async function leerTerminos(e: EntradaObservacion, wc: string): Promise<readonly
       const m = (f as { metrics?: Record<string, unknown> }).metrics ?? {};
       const palabra = (f as { segments?: { keyword?: { info?: { text?: string } } } }).segments?.keyword?.info?.text ?? null;
       const acc = agg.get(termino) ?? { palabra, spend: null, impressions: null, clicks: null, conversions: null };
-      acc.spend = suma(acc.spend, clp(m.costMicros));
+      acc.spend = suma(acc.spend, enMenores(m.costMicros, e.moneda));
       acc.impressions = suma(acc.impressions, n(m.impressions));
       acc.clicks = suma(acc.clicks, n(m.clicks));
       acc.conversions = suma(acc.conversions, n(m.conversions));

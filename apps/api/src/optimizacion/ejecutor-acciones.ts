@@ -13,6 +13,7 @@
  */
 import type { GoogleAdsMutateHttpClient } from '../campana/google-ads-mutate-http';
 import type { GoogleAdsMutateRequest } from '../campana/google-ads-materializer';
+import { aMicros, deMicros } from '../dinero';
 import type { DecisionOptimizacion } from './optimizacion-pg';
 import { normalizar, type ResultadoAccion, type VerificacionRemota } from './optimizacion-tipos';
 
@@ -42,6 +43,8 @@ export interface EntradaAplicacion {
   readonly cliente: Cliente;
   readonly customerId: string;
   readonly campaignId: string;
+  /** Moneda ISO del negocio. Sin ella no se puede convertir a micros sin suponer cuántos decimales tiene. */
+  readonly moneda: string;
   /** Recurso ya aplicado con esta misma clave, si lo hubiera (idempotencia consultada por el servicio). */
   readonly yaAplicado: boolean;
   readonly log?: (info: Record<string, unknown>) => void;
@@ -133,7 +136,9 @@ async function construirRequest(e: EntradaAplicacion): Promise<GoogleAdsMutateRe
       // Si el presupuesto real ya no es el que la decisión vio, alguien lo cambió por fuera: no se pisa.
       if (actualClp !== null && Math.abs(presupuesto.montoClp - actualClp) > Math.max(1, actualClp * 0.02)) return 'OBJETIVO_CAMBIADO';
       if (Math.round(presupuesto.montoClp) === Math.round(nuevoClp)) return null;
-      return op({ campaignBudgetOperation: { update: { resourceName: presupuesto.resourceName, amountMicros: String(Math.round(nuevoClp) * 1_000_000) }, updateMask: 'amount_micros' } });
+      const micros = aMicros(Math.round(nuevoClp), e.moneda);
+      if (micros === null) return 'NO_SOPORTADA';
+      return op({ campaignBudgetOperation: { update: { resourceName: presupuesto.resourceName, amountMicros: String(micros) }, updateMask: 'amount_micros' } });
     }
 
     case 'ADJUST_MAX_CPC': {
@@ -141,7 +146,7 @@ async function construirRequest(e: EntradaAplicacion): Promise<GoogleAdsMutateRe
       if (nuevoClp === null) return 'NO_SOPORTADA';
       return op({ campaignOperation: { update: {
         resourceName: `customers/${cid}/campaigns/${e.campaignId}`,
-        targetSpend: { cpcBidCeilingMicros: String(Math.round(nuevoClp) * 1_000_000) },
+        targetSpend: { cpcBidCeilingMicros: String(aMicros(Math.round(nuevoClp), e.moneda) ?? 0) },
       }, updateMask: 'target_spend.cpc_bid_ceiling_micros' } });
     }
 
@@ -174,7 +179,7 @@ async function presupuestoDeLaCampania(e: EntradaAplicacion): Promise<{ resource
     const filas = await e.cliente.buscar(e.customerId, `SELECT campaign_budget.resource_name, campaign_budget.amount_micros FROM campaign WHERE campaign.id = ${e.campaignId} LIMIT 1`);
     const b = (filas[0] as { campaignBudget?: { resourceName?: string; amountMicros?: unknown } } | undefined)?.campaignBudget;
     if (b?.resourceName === undefined) return null;
-    return { resourceName: b.resourceName, montoClp: Number(b.amountMicros ?? 0) / 1_000_000 };
+    return { resourceName: b.resourceName, montoClp: deMicros(Number(b.amountMicros ?? 0), e.moneda) ?? 0 };
   } catch {
     return null;
   }

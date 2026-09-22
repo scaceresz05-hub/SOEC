@@ -15,6 +15,7 @@ import type { OfertaNegocio, PerfilNegocio } from '../negocio/negocio-pg';
 import type { GeoEjecutable } from '../investigacion/investigacion-pg';
 import type { GrupoDelPlan, PlanCampania } from '../investigacion/plan-pg';
 import type { Mandato } from '../accion/mandato';
+import { aMicros } from '../dinero';
 import {
   EjecucionInvalidaError,
   MAX_LARGO_DESCRIPCION,
@@ -115,8 +116,6 @@ export interface EntradaPaquete {
   readonly ahora: string;
 }
 
-const MICROS = 1_000_000;
-
 /** Días (al menos 1) que cubre el mandato: sirve para repartir el tope en un presupuesto diario. */
 export function diasDelMandato(m: Mandato): number {
   const ms = Date.parse(m.periodEnd) - Date.parse(m.periodStart);
@@ -132,7 +131,12 @@ export function presupuestoDiarioDe(plan: PlanCampania, mandato: Mandato): { clp
   const delPlan = plan.presupuesto.propuestoDiarioClp;
   const elegido = delPlan === null ? delMandato : Math.min(delPlan, delMandato);
   if (elegido <= 0) throw new EjecucionInvalidaError('el presupuesto autorizado no alcanza para un día de campaña');
-  return { clp: elegido, micros: elegido * MICROS, origen: delPlan !== null && delPlan <= delMandato ? 'PLAN' : 'MANDATO' };
+  // El importe vive en unidades MENORES; los micros que entiende la plataforma se calculan CON la moneda del
+  // mandato. Multiplicar por un millón a ciegas enviaría 100 veces el presupuesto autorizado en cualquier
+  // moneda con decimales. El campo `clp` conserva su nombre histórico: su contenido son unidades menores.
+  const micros = aMicros(elegido, mandato.currency);
+  if (micros === null) throw new EjecucionInvalidaError(`la autorización de presupuesto no declara una moneda válida (${mandato.currency})`);
+  return { clp: elegido, micros, origen: delPlan !== null && delPlan <= delMandato ? 'PLAN' : 'MANDATO' };
 }
 
 /** Nombre de campaña legible y estable: se puede reconocer en la cuenta del cliente sin abrir SOEC. */
@@ -207,7 +211,7 @@ export function construirPaquete(e: EntradaPaquete): PaqueteDeEjecucion {
       presupuestoDiarioClp: presupuesto.clp,
       puja: {
         estrategia: e.plan.puja.estrategia,
-        techoCpcMicros: e.plan.puja.techoCpcClp === null ? null : e.plan.puja.techoCpcClp * MICROS,
+        techoCpcMicros: aMicros(e.plan.puja.techoCpcClp, e.mandato.currency),
       },
       idiomaConstantId: e.perfil.language.startsWith('es') ? '1003' : '1000',
       geo,

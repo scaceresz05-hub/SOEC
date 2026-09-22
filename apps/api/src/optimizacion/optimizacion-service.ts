@@ -22,6 +22,7 @@ import { PgMandatoRepo } from '../accion/accion-pg';
 import { esActorSistema, restanteMinor, type Mandato } from '../accion/mandato';
 import { mutacionesExternasHabilitadas } from '../gobierno/kill-switch';
 import { evaluarCompletitud } from '../politica/politica-perfil';
+import { exigirMismaMoneda, normalizarMoneda } from '../dinero';
 import type { GoogleAdsMutateHttpClient } from '../campana/google-ads-mutate-http';
 import {
   POLITICA_AUTONOMIA_POR_DEFECTO,
@@ -65,6 +66,8 @@ export interface VistaOptimizacion {
   readonly aprendizajes: readonly { readonly accion: string; readonly efectoEsperado: string; readonly resultado: string; readonly evaluadoEn: string | null }[];
   readonly historial: readonly { readonly id: string; readonly estado: EstadoCiclo; readonly modo: ModoCiclo; readonly iniciadoEn: string; readonly decisiones: number }[];
   readonly campania: { readonly id: string | null; readonly estado: string | null; readonly puedeActivarse: boolean; readonly faltanParaActivar: readonly string[] } | null;
+  /** Moneda ISO de los importes de esta vista. Sin ella, la pantalla no puede ponerles un símbolo sin mentir. */
+  readonly moneda: string;
 }
 
 export interface DepsOptimizacion {
@@ -196,7 +199,7 @@ export class OptimizacionService {
 
     return {
       organizationId: org, ciclo, snapshot, decisiones, pendientes, aplicadas,
-      politica: c.politicaAutonomia, modoOperativo, evidencia, aprendizajes, historial,
+      politica: c.politicaAutonomia, modoOperativo, evidencia, aprendizajes, historial, moneda: this.moneda(c),
       campania: c.campaignId === null ? null : {
         id: c.campaignId,
         estado: snapshot?.campania.estado ?? null,
@@ -315,7 +318,7 @@ export class OptimizacionService {
       // ── OBSERVAR ──
       const snapshot = await observar({
         organizationId: org, cicloId: id, cliente, customerId: c.customerId, campaignId: c.campaignId,
-        ventana, saludMedicion: c.salud, ahora, ...(this.deps.log ? { log: this.deps.log } : {}),
+        ventana, saludMedicion: c.salud, moneda: this.moneda(c), ahora, ...(this.deps.log ? { log: this.deps.log } : {}),
       });
       await enTransaccion(this.pool, async (tx) => {
         await this.repo.guardarSnapshot(tx, snapshot);
@@ -388,7 +391,7 @@ export class OptimizacionService {
           pendientes += 1;
           continue;
         }
-        const r = await this.ejecutarDecision(org, id, decision, cliente, c.customerId, c.campaignId, snapshot, ahora);
+        const r = await this.ejecutarDecision(org, id, decision, cliente, c.customerId, c.campaignId, snapshot, ahora, this.moneda(c));
         if (r) ejecutadas += 1;
       }
 
@@ -435,15 +438,27 @@ export class OptimizacionService {
     });
   }
 
+  /**
+   * MONEDA con la que se leen y escriben importes en la plataforma. Sale del perfil del negocio; si el mandato
+   * declara otra, no se opera con ninguna de las dos a ciegas: se devuelve la del negocio y el gobierno del
+   * mandato hará el resto. Comparar o convertir importes de monedas distintas es la clase de error que no se
+   * detecta hasta que alguien gasta cien veces lo que creía.
+   */
+  private moneda(c: { readonly perfil: { readonly currency: string }; readonly mandato: Mandato | null }): string {
+    const delNegocio = normalizarMoneda(c.perfil.currency) ?? 'CLP';
+    return c.mandato === null ? delNegocio : (exigirMismaMoneda(delNegocio, c.mandato.currency) ?? delNegocio);
+  }
+
   /** Aplica una decisión ya gobernada: idempotencia, escritura, verificación y registro de aprendizaje. */
   private async ejecutarDecision(
     org: string, cicloId: string, d: DecisionOptimizacion, cliente: GoogleAdsMutateHttpClient,
     customerId: string, campaignId: string, snapshot: SnapshotObservacion | null, ahora: string,
+    moneda: string,
   ): Promise<boolean> {
     const clave = claveIdempotencia(d, campaignId);
     const previa = await this.repo.accionPorClave(org, clave);
     const r = await aplicarDecision({
-      decision: d, cliente, customerId, campaignId, yaAplicado: previa !== null,
+      decision: d, cliente, customerId, campaignId, moneda, yaAplicado: previa !== null,
       ...(this.deps.log ? { log: this.deps.log } : {}),
     });
 
@@ -520,7 +535,7 @@ export class OptimizacionService {
       ? { ...d, estadoPropuesto: String(entrada.ajuste.estadoPropuesto) }
       : d;
 
-    const aplicada = await this.ejecutarDecision(org, p.cicloId, decisionFinal, cliente, c.customerId, c.campaignId, null, ahora);
+    const aplicada = await this.ejecutarDecision(org, p.cicloId, decisionFinal, cliente, c.customerId, c.campaignId, null, ahora, this.moneda(c));
     await enTransaccion(this.pool, async (tx) => {
       await this.repo.guardarPendiente(tx, {
         ...p, estado: aplicada ? 'APPLIED' : 'ADJUSTED', resueltoPor: actor, resueltoEn: ahora,
@@ -594,7 +609,7 @@ export class OptimizacionService {
       creadoEn: ahora,
     };
     await enTransaccion(this.pool, async (tx) => { await this.repo.guardarDecision(tx, decision); });
-    const aplicada = await this.ejecutarDecision(org, id, decision, cliente, c.customerId, c.campaignId, null, ahora);
+    const aplicada = await this.ejecutarDecision(org, id, decision, cliente, c.customerId, c.campaignId, null, ahora, this.moneda(c));
     await this.cerrar(org, id, aplicada ? 'VERIFIED' : 'FAILED', aplicada ? null : 'la plataforma no confirmó el encendido', { activacion: true });
     await enTransaccion(this.pool, async (tx) => {
       await this.negocios.registrarAuditoria(tx, {

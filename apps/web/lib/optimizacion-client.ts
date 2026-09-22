@@ -10,6 +10,8 @@ export interface Requisito { requisito: string; veredicto: string; motivo: strin
 
 export interface VistaOptimizacion {
   organizationId: string;
+  /** Moneda ISO de los importes de la vista (en unidades menores de esa moneda). */
+  moneda?: string;
   ciclo: {
     id: string; modo: string; estado: string; motivo: string | null;
     ventana: { desde: string; hasta: string; dias: number };

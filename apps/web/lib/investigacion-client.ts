@@ -45,6 +45,8 @@ export interface VistaInvestigacion {
 }
 
 export interface VistaPlan {
+  /** Moneda ISO de los importes del plan (vienen en unidades menores de esta moneda). */
+  moneda?: string;
   organizationId: string;
   plan: {
     id: string;

@@ -17,12 +17,15 @@ import { RepositorioOnboarding } from '../onboarding/onboarding-pg';
 import { RepositorioInvestigacion } from './investigacion-pg';
 import { RepositorioPlan, type GrupoDelPlan, type PlanCampania } from './plan-pg';
 import { planificar } from './planificador';
+import { normalizarMoneda } from '../dinero';
 
 export class NegocioSinPerfilError extends Error {}
 export class SinInvestigacionError extends Error {}
 
 export interface VistaPlan {
   readonly organizationId: string;
+  /** Moneda ISO de los importes del plan. Los números van en unidades menores de ESTA moneda. */
+  readonly moneda: string;
   readonly plan: PlanCampania | null;
   readonly grupos: readonly GrupoDelPlan[];
   readonly historial: readonly { readonly id: string; readonly version: number; readonly estado: string; readonly creadoEn: string }[];
@@ -69,7 +72,8 @@ export class PlanService {
 
   /** Último plan, sus grupos y el historial. Comprueba en la lectura si el plan quedó viejo. */
   async estado(org: string): Promise<VistaPlan> {
-    if ((await this.negocios.perfil(org)) === null) throw new NegocioSinPerfilError(`el negocio '${org}' no existe`);
+    const perfil = await this.negocios.perfil(org);
+    if (perfil === null) throw new NegocioSinPerfilError(`el negocio '${org}' no existe`);
     let plan = await this.repo.ultimoPlan(org);
 
     if (plan !== null && (plan.estado === 'DRAFT' || plan.estado === 'NON_EXECUTABLE')) {
@@ -102,6 +106,8 @@ export class PlanService {
       puedeGenerar: corridaUtil === null
         ? { puede: false, motivo: 'primero hay que investigar el mercado' }
         : { puede: true, motivo: null },
+      // Los importes del plan están en unidades menores de ESTA moneda; la pantalla necesita saber cuál es.
+      moneda: normalizarMoneda(perfil?.currency) ?? 'CLP',
     };
   }
 

@@ -41,7 +41,16 @@ const ACCIONES_CONFIGURABLES: { id: string; etiqueta: string; nota: string }[] =
   { id: 'ADJUST_MAX_CPC', etiqueta: 'Ajustar el precio máximo por visita', nota: 'sólo en campañas que lo usan' },
 ];
 
-const clp = (v: number | null | undefined): string => (v === null || v === undefined ? 'sin dato' : `$${Math.round(v).toLocaleString('es-CL')}`);
+/**
+ * Importe en unidades MENORES → texto con SU moneda. El servidor dice cuál es: escribir «$» sin preguntarla
+ * convertiría cualquier importe en pesos a los ojos de quien lo lee.
+ */
+const dinero = (v: number | null | undefined, moneda: string): string => {
+  if (v === null || v === undefined) return 'sin dato';
+  const decimales = moneda === 'CLP' || moneda === 'JPY' ? 0 : 2;
+  return new Intl.NumberFormat('es-CL', { style: 'currency', currency: moneda, maximumFractionDigits: decimales })
+    .format(v / 10 ** decimales);
+};
 const num = (v: number | null | undefined): string => (v === null || v === undefined ? 'sin dato' : Math.round(v).toLocaleString('es-CL'));
 
 export default function DirectorPage() {
@@ -97,6 +106,7 @@ export default function DirectorPage() {
   const politica = vista?.politica ?? null;
   const modo = vista?.modoOperativo ?? null;
   const automatico = modo === 'AUTONOMOUS_REAL';
+  const moneda = vista?.moneda ?? 'CLP';
 
   return (
     <main className="wrap" style={{ maxWidth: 860, margin: '0 auto', padding: '32px 16px' }}>
@@ -130,7 +140,7 @@ export default function DirectorPage() {
                   <li>Qué se espera conseguir: {p.decision.efectoEsperado}</li>
                   <li>Cambio: {p.decision.estadoActual} → <strong>{p.decision.estadoPropuesto}</strong></li>
                   <li>Riesgo: {ETIQUETA_RIESGO[p.decision.riesgo] ?? p.decision.riesgo}
-                    {p.decision.impactoMaximoClp !== null && <> · impacto máximo posible: {clp(p.decision.impactoMaximoClp)}</>}
+                    {p.decision.impactoMaximoClp !== null && <> · impacto máximo posible: {dinero(p.decision.impactoMaximoClp, moneda)}</>}
                     {p.decision.reversible && ' · se puede deshacer'}</li>
                 </ul>
               )}
@@ -167,8 +177,8 @@ export default function DirectorPage() {
         )}
         {vista?.snapshot != null && (
           <ul style={{ paddingLeft: 18, marginTop: 8 }}>
-            <li>Gasto: {clp(vista.snapshot.campania.spend)} · visitas: {num(vista.snapshot.campania.clicks)} · veces que apareció: {num(vista.snapshot.campania.impressions)}</li>
-            <li>Clientes registrados: {num(vista.snapshot.campania.conversions)}{vista.snapshot.campania.cpa !== null && <> · costo por cliente: {clp(vista.snapshot.campania.cpa)}</>}</li>
+            <li>Gasto: {dinero(vista.snapshot.campania.spend, moneda)} · visitas: {num(vista.snapshot.campania.clicks)} · veces que apareció: {num(vista.snapshot.campania.impressions)}</li>
+            <li>Clientes registrados: {num(vista.snapshot.campania.conversions)}{vista.snapshot.campania.cpa !== null && <> · costo por cliente: {dinero(vista.snapshot.campania.cpa, moneda)}</>}</li>
             <li>Medición: {ETIQUETA_MEDICION[vista.snapshot.saludMedicion] ?? vista.snapshot.saludMedicion}</li>
           </ul>
         )}
