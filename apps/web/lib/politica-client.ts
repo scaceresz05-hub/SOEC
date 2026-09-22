@@ -40,6 +40,9 @@ export interface ReglaEvaluacion {
   comparador: string;
   valor: number | null;
   estado: EstadoDato;
+  /** Quién puso el número: la persona, el sistema, lo aprendido… La pantalla lo necesita para no confundirlos. */
+  procedencia?: string;
+  nota?: string | null;
 }
 
 export interface MotivoIncompletitud {
@@ -81,6 +84,8 @@ export interface VistaPolitica {
     estado: EstadoPerfil;
     faltantes: MotivoIncompletitud[];
     recomendaciones: { campo: string; motivo: string }[];
+    /** `LEARNING_BASELINE` ⇒ el indicador está elegido y la meta se está aprendiendo. */
+    lineaBase?: 'CONFIRMED' | 'LEARNING_BASELINE';
     actualizadoEn: string | null;
   };
   referencias: {
@@ -89,6 +94,8 @@ export interface VistaPolitica {
     restricciones: { id: string; tipo: string; texto: string }[];
   };
   perfilEvaluableDisponible: boolean;
+  /** Punto de partida que recomienda SOEC para el mínimo de evidencia. Lo fija el servidor, no la pantalla. */
+  recomendacionEvidencia?: { metrica: string; valor: number; version: string } | null;
 }
 
 /**
@@ -145,9 +152,15 @@ export interface DocumentoPolitica {
   kpis?: Array<{
     id?: string; clave: string; displayName?: string; rol?: RolMetrica; tipo?: string; unidad?: string;
     direccion?: string; eventKey?: string | null; targetValue?: number | null; baselineValue?: number | null; tolerance?: number | null;
+    /** Sin meta, el servidor lo guarda como `TO_BE_LEARNED`: se declara qué falta en vez de firmar un número. */
+    estado?: string; procedencia?: string; nota?: string | null;
   }>;
   kpisEliminados?: string[];
-  reglas?: Array<{ id?: string; tipo: string; metrica: string; comparador?: string; valor?: number | null; estado?: string }>;
+  reglas?: Array<{
+    id?: string; tipo: string; metrica: string; comparador?: string; valor?: number | null; estado?: string;
+    /** `SYSTEM_DEFAULT` cuando el número lo pone SOEC; `USER_DEFINED` cuando lo escribe una persona. */
+    procedencia?: string; nota?: string | null;
+  }>;
   reglasEliminadas?: string[];
   limites?: {
     maxDailyBudgetClp?: number | null; maxCpcClp?: number | null; maxVariationPct?: number | null;
@@ -167,4 +180,76 @@ export async function guardarPolitica(org: string, doc: DocumentoPolitica): Prom
       body: JSON.stringify(doc),
     }),
   );
+}
+
+/** Lo que la pantalla de objetivos tiene que saber para armar el documento que se guarda. */
+export interface FormularioObjetivos {
+  readonly objetivo: string;
+  readonly contexto: string;
+  readonly accion: string;
+  readonly accionLibre: string;
+  readonly indicador: string;
+  /** `SI` ⇒ el negocio declara su meta. `TODAVIA_NO` ⇒ la aprende SOEC y NADIE inventa un número. */
+  readonly conoceMeta: 'SI' | 'TODAVIA_NO' | '';
+  readonly meta: string;
+  readonly horizonte: string;
+  /** `RECOMENDADA` usa el punto de partida del sistema; `PROPIA`, el número que escriba la persona. */
+  readonly modoEvidencia: 'RECOMENDADA' | 'PROPIA';
+  readonly evidencia: string;
+  readonly pausa: string;
+}
+
+/**
+ * Traduce el formulario al documento de política. Pura a propósito: es la regla que decide qué procedencia
+ * lleva cada número, y eso se prueba sin navegador.
+ *
+ *  · Elegir el indicador YA vale: se envía aunque no haya meta, y el servidor lo guarda como `TO_BE_LEARNED`.
+ *    Antes sólo se enviaba con un número, así que «todavía no lo sé» dejaba a la empresa sin indicador.
+ *  · La evidencia recomendada se envía con `SYSTEM_DEFAULT` y su versión: es una sugerencia del sistema, no
+ *    una decisión del negocio, y así queda escrito.
+ */
+export function documentoDeObjetivos(
+  f: FormularioObjetivos,
+  recomendacion: { metrica: string; valor: number; version: string } | null | undefined,
+): DocumentoPolitica {
+  const eventKey = f.accion === 'OTRA' ? f.accionLibre.trim().toLowerCase().replace(/\s+/g, '_') : f.accion;
+  const elegido = INDICADORES_FRECUENTES.find((i) => i.clave === f.indicador) ?? null;
+  const doc: DocumentoPolitica = {
+    objetivoText: f.objetivo.trim() || null,
+    businessContext: f.contexto.trim() || null,
+    evaluationHorizonDays: f.horizonte.trim() === '' ? null : Number(f.horizonte),
+  };
+  if (eventKey) {
+    doc.eventos = [{ eventKey, rol: 'PRIMARY', orden: 0, displayName: ACCIONES_FRECUENTES.find((a) => a.eventKey === eventKey)?.etiqueta ?? null }];
+  }
+  if (elegido !== null) {
+    const conMeta = f.conoceMeta === 'SI' && f.meta.trim() !== '';
+    doc.kpis = [{
+      id: 'principal', clave: elegido.clave, displayName: elegido.etiqueta, rol: 'PRIMARY',
+      tipo: elegido.tipo, unidad: elegido.unidad, direccion: elegido.direccion,
+      eventKey: eventKey || null,
+      targetValue: conMeta ? Number(f.meta.replace(',', '.')) : null,
+      baselineValue: 0,
+      tolerance: 0.2,
+      ...(conMeta ? {} : { nota: 'el negocio todavía no conoce la meta; SOEC la aprenderá con los primeros datos' }),
+    }];
+  }
+  const reglas: NonNullable<DocumentoPolitica['reglas']> = [];
+  if (f.modoEvidencia === 'RECOMENDADA' && recomendacion) {
+    reglas.push({
+      id: 'evidencia-impresiones', tipo: 'EVIDENCE_MINIMUM', metrica: recomendacion.metrica, comparador: 'GTE',
+      valor: recomendacion.valor, procedencia: 'SYSTEM_DEFAULT',
+      nota: `punto de partida del sistema (${recomendacion.version}); puedes cambiarlo cuando quieras`,
+    });
+  } else if (f.modoEvidencia === 'PROPIA' && f.evidencia.trim() !== '') {
+    reglas.push({
+      id: 'evidencia-impresiones', tipo: 'EVIDENCE_MINIMUM', metrica: 'IMPRESSIONS', comparador: 'GTE',
+      valor: Number(f.evidencia), procedencia: 'USER_DEFINED',
+    });
+  }
+  if (f.pausa.trim() !== '') {
+    reglas.push({ id: 'pausa-tasa-conversion', tipo: 'PAUSE', metrica: 'CONVERSION_RATE', comparador: 'LTE', valor: Number(f.pausa.replace(',', '.')) });
+  }
+  if (reglas.length > 0) doc.reglas = reglas;
+  return doc;
 }

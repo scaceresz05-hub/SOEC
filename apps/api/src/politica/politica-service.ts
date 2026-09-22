@@ -17,6 +17,8 @@ import { RepositorioPolitica, type CambiosPolitica, type PoliticaCompleta } from
 import { construirPerfilDeEvaluacion, evaluarCompletitud, type DatosDePolitica } from './politica-perfil';
 import {
   PoliticaInvalidaError,
+  DEFAULTS_EVIDENCIA_V1,
+  VERSION_DEFAULTS_EVIDENCIA,
   exigirClave,
   exigirComparador,
   exigirDireccion,
@@ -52,7 +54,22 @@ export interface VistaPolitica {
   };
   /** `true` sólo cuando la política reconstruye un perfil de evaluación válido. */
   readonly perfilEvaluableDisponible: boolean;
+  /**
+   * Punto de partida que RECOMIENDA el sistema para el mínimo de evidencia, con su versión. Viaja en la vista
+   * para que la interfaz muestre EXACTAMENTE el número que se va a guardar: una cifra escrita a mano en la
+   * pantalla y otra en el servidor es cómo se rompe la confianza en lo que uno acepta.
+   */
+  readonly recomendacionEvidencia: { readonly metrica: string; readonly valor: number; readonly version: string } | null;
 }
+
+/**
+ * La recomendación del sistema para el mínimo de evidencia. Se deriva de los valores por defecto VERSIONADOS,
+ * de modo que pantalla y base de datos no puedan discrepar: lo que se muestra es lo que se guarda.
+ */
+export const RECOMENDACION_EVIDENCIA: { readonly metrica: string; readonly valor: number; readonly version: string } | null =
+  DEFAULTS_EVIDENCIA_V1.IMPRESSIONS === undefined
+    ? null
+    : { metrica: 'IMPRESSIONS', valor: DEFAULTS_EVIDENCIA_V1.IMPRESSIONS, version: VERSION_DEFAULTS_EVIDENCIA };
 
 export interface EntradaKpi {
   readonly id?: string;
@@ -199,6 +216,7 @@ export class PoliticaService {
       completitud,
       referencias: d.referencias,
       perfilEvaluableDisponible: construirPerfilDeEvaluacion(d) !== null,
+      recomendacionEvidencia: RECOMENDACION_EVIDENCIA,
     };
   }
 

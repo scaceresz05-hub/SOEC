@@ -18,6 +18,7 @@ import {
   ACCIONES_FRECUENTES,
   INDICADORES_FRECUENTES,
   TITULO_FALTANTE,
+  documentoDeObjetivos,
   guardarPolitica,
   leerPolitica,
   type DocumentoPolitica,
@@ -42,9 +43,12 @@ export default function ObjetivosPage() {
   const [accion, setAccion] = useState('');
   const [accionLibre, setAccionLibre] = useState('');
   const [indicador, setIndicador] = useState('');
+  const [conoceMeta, setConoceMeta] = useState<'SI' | 'TODAVIA_NO' | ''>('');
   const [meta, setMeta] = useState('');
   const [horizonte, setHorizonte] = useState('30');
-  const [evidencia, setEvidencia] = useState('500');
+  // La cifra recomendada la trae el servidor; la pantalla nunca inventa la suya.
+  const [modoEvidencia, setModoEvidencia] = useState<'RECOMENDADA' | 'PROPIA'>('RECOMENDADA');
+  const [evidencia, setEvidencia] = useState('');
   const [pausa, setPausa] = useState('');
   const [restriccion, setRestriccion] = useState('');
 
@@ -68,9 +72,14 @@ export default function ObjetivosPage() {
       if (kpi) {
         setIndicador((prev) => (prev === '' ? kpi.clave : prev));
         setMeta((prev) => (prev === '' && kpi.targetValue !== null ? String(kpi.targetValue) : prev));
+        // Si ya dijo «todavía no lo sé», la pantalla lo recuerda en vez de volver a pedir un número.
+        setConoceMeta((prev) => (prev === '' ? (kpi.targetValue !== null ? 'SI' : 'TODAVIA_NO') : prev));
       }
       const ev = v.politica.reglas.find((r) => r.tipo === 'EVIDENCE_MINIMUM' && r.valor !== null);
-      if (ev?.valor != null) setEvidencia(String(ev.valor));
+      if (ev?.valor != null) {
+        setModoEvidencia(ev.procedencia === 'SYSTEM_DEFAULT' ? 'RECOMENDADA' : 'PROPIA');
+        if (ev.procedencia !== 'SYSTEM_DEFAULT') setEvidencia(String(ev.valor));
+      }
       const pa = v.politica.reglas.find((r) => r.tipo === 'PAUSE' && r.valor !== null);
       if (pa?.valor != null) setPausa(String(pa.valor));
       if (v.politica.politica?.evaluationHorizonDays != null) setHorizonte(String(v.politica.politica.evaluationHorizonDays));
@@ -97,34 +106,10 @@ export default function ObjetivosPage() {
     }
   }
 
-  function documento(): DocumentoPolitica {
-    const eventKey = accion === 'OTRA' ? accionLibre.trim().toLowerCase().replace(/\s+/g, '_') : accion;
-    const elegido = INDICADORES_FRECUENTES.find((i) => i.clave === indicador) ?? null;
-    const doc: DocumentoPolitica = {
-      objetivoText: objetivo.trim() || null,
-      businessContext: contexto.trim() || null,
-      evaluationHorizonDays: horizonte.trim() === '' ? null : Number(horizonte),
-    };
-    if (eventKey) {
-      doc.eventos = [{ eventKey, rol: 'PRIMARY', orden: 0, displayName: ACCIONES_FRECUENTES.find((a) => a.eventKey === eventKey)?.etiqueta ?? null }];
-    }
-    if (elegido && meta.trim() !== '') {
-      doc.kpis = [{
-        id: 'principal', clave: elegido.clave, displayName: elegido.etiqueta, rol: 'PRIMARY',
-        tipo: elegido.tipo, unidad: elegido.unidad, direccion: elegido.direccion,
-        eventKey: eventKey || null, targetValue: Number(meta.replace(',', '.')), baselineValue: 0, tolerance: 0.2,
-      }];
-    }
-    const reglas: NonNullable<DocumentoPolitica['reglas']> = [];
-    if (evidencia.trim() !== '') {
-      reglas.push({ id: 'evidencia-impresiones', tipo: 'EVIDENCE_MINIMUM', metrica: 'IMPRESSIONS', comparador: 'GTE', valor: Number(evidencia) });
-    }
-    if (pausa.trim() !== '') {
-      reglas.push({ id: 'pausa-tasa-conversion', tipo: 'PAUSE', metrica: 'CONVERSION_RATE', comparador: 'LTE', valor: Number(pausa.replace(',', '.')) });
-    }
-    if (reglas.length > 0) doc.reglas = reglas;
-    return doc;
-  }
+  const documento = (): DocumentoPolitica => documentoDeObjetivos(
+    { objetivo, contexto, accion, accionLibre, indicador, conoceMeta, meta, horizonte, modoEvidencia, evidencia, pausa },
+    vista?.recomendacionEvidencia ?? null,
+  );
 
   if (org === null) {
     return (
@@ -152,6 +137,12 @@ export default function ObjetivosPage() {
       {vista !== null && (
         <div className="card" style={{ padding: 12, marginBottom: 24, border: '1px solid var(--borde, #eee)' }}>
           <strong>{completo ? '✓ Tu negocio ya es evaluable' : 'Falta información para poder evaluarte'}</strong>
+          {completo && vista.completitud.lineaBase === 'LEARNING_BASELINE' && (
+            <p style={{ margin: '8px 0 0' }}>
+              SOEC está aprendiendo tu meta con los primeros datos. Hasta que la confirmes, no subirá
+              presupuestos ni encenderá campañas por su cuenta.
+            </p>
+          )}
           {!completo && (
             <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
               {vista.completitud.faltantes.map((f) => (
@@ -192,13 +183,38 @@ export default function ObjetivosPage() {
         </select>
       </label>
 
-      <label style={bloque}>
-        <span style={etiqueta}>¿Cuál es tu meta?</span>
-        <input value={meta} onChange={(e) => setMeta(e.target.value)} placeholder="un número" style={campo} />
-        <span style={{ color: 'var(--muted, #666)' }}>
-          {INDICADORES_FRECUENTES.find((i) => i.clave === indicador)?.ayudaMeta ?? 'Elige antes el indicador.'}
-        </span>
-      </label>
+      <section style={bloque}>
+        <span style={etiqueta}>¿Sabes qué número sería un buen resultado?</span>
+        <div style={{ display: 'flex', gap: 8, margin: '6px 0' }}>
+          {([['SI', 'Sí, te lo digo'], ['TODAVIA_NO', 'Todavía no lo sé — que SOEC la aprenda']] as const).map(([v, t]) => (
+            <button
+              key={v}
+              type="button"
+              className="btn"
+              onClick={() => setConoceMeta(v)}
+              style={{ padding: '10px 14px', fontWeight: conoceMeta === v ? 700 : 400, borderWidth: conoceMeta === v ? 2 : 1 }}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+        {conoceMeta === 'SI' && (
+          <label style={{ display: 'block' }}>
+            <span style={etiqueta}>¿Cuál es tu meta?</span>
+            <input value={meta} onChange={(e) => setMeta(e.target.value)} placeholder="un número" style={campo} />
+            <span style={{ color: 'var(--muted, #666)' }}>
+              {INDICADORES_FRECUENTES.find((i) => i.clave === indicador)?.ayudaMeta ?? 'Elige antes el indicador.'}
+            </span>
+          </label>
+        )}
+        {conoceMeta === 'TODAVIA_NO' && (
+          <p style={{ color: 'var(--muted, #666)', margin: 0 }}>
+            Perfecto: no hace falta inventar un número. SOEC la aprenderá observando tus primeros datos y te la
+            propondrá para que la confirmes. Mientras tanto no subirá presupuestos, no subirá el precio por
+            visita y no encenderá campañas por su cuenta.
+          </p>
+        )}
+      </section>
 
       {vista !== null && vista.referencias.oferta.length > 0 && (
         <section style={{ marginBottom: 24 }}>
@@ -283,14 +299,36 @@ export default function ObjetivosPage() {
             <span style={etiqueta}>¿En cuántos días esperas ver el resultado?</span>
             <input value={horizonte} onChange={(e) => setHorizonte(e.target.value)} style={campo} />
           </label>
-          <label style={bloque}>
+          <section style={bloque}>
             <span style={etiqueta}>¿Cuántas veces debe mostrarse tu anuncio antes de concluir algo?</span>
-            <input value={evidencia} onChange={(e) => setEvidencia(e.target.value)} style={campo} />
+            <div style={{ display: 'flex', gap: 8, margin: '6px 0', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setModoEvidencia('RECOMENDADA')}
+                style={{ padding: '10px 14px', fontWeight: modoEvidencia === 'RECOMENDADA' ? 700 : 400, borderWidth: modoEvidencia === 'RECOMENDADA' ? 2 : 1 }}
+              >
+                {vista?.recomendacionEvidencia
+                  ? `Usar la recomendación de SOEC: ${vista.recomendacionEvidencia.valor.toLocaleString('es-CL')} impresiones`
+                  : 'Usar la recomendación de SOEC'}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setModoEvidencia('PROPIA')}
+                style={{ padding: '10px 14px', fontWeight: modoEvidencia === 'PROPIA' ? 700 : 400, borderWidth: modoEvidencia === 'PROPIA' ? 2 : 1 }}
+              >
+                Yo defino cuántas
+              </button>
+            </div>
+            {modoEvidencia === 'PROPIA' && (
+              <input value={evidencia} onChange={(e) => setEvidencia(e.target.value)} placeholder="un número" style={campo} />
+            )}
             <span style={{ color: 'var(--muted, #666)' }}>
-              Sirve para no sacar conclusiones con muy pocos datos. Si no lo sabes, 500 es un punto de partida
-              prudente que puedes cambiar después.
+              Sirve para no sacar conclusiones con muy pocos datos. La recomendación la pone SOEC y queda
+              guardada como tal —no como una decisión tuya—, y puedes cambiarla cuando quieras.
             </span>
-          </label>
+          </section>
           <label style={bloque}>
             <span style={etiqueta}>¿Por debajo de qué resultado convendría detener el gasto?</span>
             <input value={pausa} onChange={(e) => setPausa(e.target.value)} placeholder="fracción, por ejemplo 0,005" style={campo} />
