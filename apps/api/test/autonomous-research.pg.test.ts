@@ -535,6 +535,35 @@ describe('frescura y envejecimiento', () => {
     await a.close();
   });
 
+  it('repetir la investigación NO vacía la pantalla: lo re-observado pasa a la corrida nueva', async () => {
+    // Regresión de un defecto encontrado en el smoke productivo: las evidencias, términos, hallazgos y geos se
+    // guardan con id determinista, así que al re-observarlos la segunda corrida los ACTUALIZABA pero seguían
+    // colgando de la corrida anterior. Como la lectura filtra por corrida, una investigación recién hecha
+    // aparecía vacía.
+    const a = app(proveedoresSimulados());
+    const { cookie, org } = await empresaPreparada(a, 'duena-repite@soec.cl', 'Empresa QA Research Repite');
+
+    const primera = await investigar(a, cookie, org);
+    const idPrimera = primera.corrida.id as string;
+    const terminosPrimera = (primera.terminos as Vista[]).length;
+    expect(terminosPrimera).toBeGreaterThan(0);
+
+    const segunda = await investigar(a, cookie, org, true);
+    expect(segunda.corrida.id).not.toBe(idPrimera);
+    // Lo mismo que se vio antes se vuelve a ver: la corrida nueva no hereda una pantalla en blanco.
+    expect((segunda.terminos as Vista[]).length).toBe(terminosPrimera);
+    expect((segunda.evidencias as Vista[]).length).toBe((primera.evidencias as Vista[]).length);
+    expect((segunda.hallazgos as Vista[]).length).toBe((primera.hallazgos as Vista[]).length);
+    expect((segunda.geos as Vista[]).length).toBe((primera.geos as Vista[]).length);
+
+    // Y la corrida vieja deja de reclamarlos: cada dato pertenece a UNA corrida, la que lo observó por última vez.
+    const { rows } = await pool.query(
+      'select count(*)::int as n from research_keyword where organization_id = $1 and run_id = $2', [org, idPrimera],
+    );
+    expect(rows[0].n).toBe(0);
+    await a.close();
+  });
+
   it('LA INVESTIGACIÓN CUESTA: abrirla otra vez no vuelve a consultar; repetirla es un acto explícito', async () => {
     const contador = { demanda: 0, sitio: 0, geo: 0 };
     const a = app(proveedoresSimulados({ contador }));

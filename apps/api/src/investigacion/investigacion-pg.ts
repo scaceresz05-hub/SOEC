@@ -368,7 +368,11 @@ export class RepositorioInvestigacion {
     await q.query(
       `insert into research_evidence (organization_id, id, run_id, clase, fuente, statement, datos, periodo, geografia, observado_en)
        values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10)
-       on conflict (organization_id, id) do update set datos = excluded.datos, statement = excluded.statement`,
+       -- Re-observar un dato lo ADSCRIBE A LA CORRIDA NUEVA y refresca su procedencia. Sin esto, una evidencia
+       -- vista otra vez seguiría colgando de la corrida vieja y desaparecería de la investigación recién hecha.
+       on conflict (organization_id, id) do update set run_id = excluded.run_id, clase = excluded.clase,
+         fuente = excluded.fuente, statement = excluded.statement, datos = excluded.datos, periodo = excluded.periodo,
+         geografia = excluded.geografia, observado_en = excluded.observado_en`,
       [e.organizationId, e.id, e.runId, e.clase, e.fuente, e.statement, JSON.stringify(e.datos), e.periodo, e.geografia, e.observadoEn],
     );
   }
@@ -387,8 +391,9 @@ export class RepositorioInvestigacion {
     await q.query(
       `insert into research_finding (organization_id, id, run_id, tipo, statement, evidencia_ids, confianza, area_impacto, descubierto_en, expira_en)
        values ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10)
-       on conflict (organization_id, id) do update set statement = excluded.statement, evidencia_ids = excluded.evidencia_ids,
-         confianza = excluded.confianza`,
+       on conflict (organization_id, id) do update set run_id = excluded.run_id, tipo = excluded.tipo,
+         statement = excluded.statement, evidencia_ids = excluded.evidencia_ids, confianza = excluded.confianza,
+         area_impacto = excluded.area_impacto, descubierto_en = excluded.descubierto_en, expira_en = excluded.expira_en`,
       [h.organizationId, h.id, h.runId, h.tipo, h.statement, JSON.stringify(h.evidenciaIds), h.confianza, h.areaImpacto,
         h.descubiertoEn, h.expiraEn],
     );
@@ -410,8 +415,12 @@ export class RepositorioInvestigacion {
          intencion_confianza, intencion_evidencia, oferta_slug, geografia, idioma, metricas, clase, fuente, elegibilidad,
          motivo_exclusion, observado_en)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15,$16,$17,$18)
-       on conflict (organization_id, id) do update set metricas = excluded.metricas, intencion = excluded.intencion,
-         elegibilidad = excluded.elegibilidad, motivo_exclusion = excluded.motivo_exclusion`,
+       on conflict (organization_id, id) do update set run_id = excluded.run_id, metricas = excluded.metricas,
+         intencion = excluded.intencion, intencion_metodo = excluded.intencion_metodo,
+         intencion_confianza = excluded.intencion_confianza, intencion_evidencia = excluded.intencion_evidencia,
+         oferta_slug = excluded.oferta_slug, geografia = excluded.geografia, idioma = excluded.idioma,
+         clase = excluded.clase, fuente = excluded.fuente, elegibilidad = excluded.elegibilidad,
+         motivo_exclusion = excluded.motivo_exclusion, observado_en = excluded.observado_en`,
       [t.organizationId, t.id, t.runId, t.termino, t.terminoNormalizado, t.intencion, t.intencionMetodo,
         t.intencionConfianza, t.intencionEvidencia, t.ofertaSlug, t.geografia, t.idioma, JSON.stringify(t.metricas),
         t.clase, t.fuente, t.elegibilidad, t.motivoExclusion, t.observadoEn],
@@ -437,8 +446,8 @@ export class RepositorioInvestigacion {
       `insert into research_geo_target (organization_id, id, run_id, solicitado, disponible, target_id, target_tipo,
          nombre_canonico, aproximacion, riesgo_derrame)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-       on conflict (organization_id, id) do update set disponible = excluded.disponible, target_id = excluded.target_id,
-         target_tipo = excluded.target_tipo, nombre_canonico = excluded.nombre_canonico,
+       on conflict (organization_id, id) do update set run_id = excluded.run_id, disponible = excluded.disponible,
+         target_id = excluded.target_id, target_tipo = excluded.target_tipo, nombre_canonico = excluded.nombre_canonico,
          aproximacion = excluded.aproximacion, riesgo_derrame = excluded.riesgo_derrame`,
       [g.organizationId, g.id, g.runId, g.solicitado, g.disponible, g.targetId, g.targetTipo, g.nombreCanonico,
         g.aproximacion, g.riesgoDerrame],
