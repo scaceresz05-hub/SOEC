@@ -21,6 +21,7 @@ import {
   documentoDeObjetivos,
   guardarPolitica,
   leerPolitica,
+  type CampoObjetivos,
   type DocumentoPolitica,
   type VistaPolitica,
 } from '../../../lib/politica-client';
@@ -36,6 +37,9 @@ export default function ObjetivosPage() {
   const [aviso, setAviso] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [avanzada, setAvanzada] = useState(false);
+  // Qué campos tocó la persona. La precarga NO cuenta: mostrar un valor no es decidirlo.
+  const [tocados, setTocados] = useState<ReadonlySet<CampoObjetivos>>(new Set());
+  const marcar = (campo: CampoObjetivos): void => setTocados((previos) => new Set([...previos, campo]));
 
   // Formulario en lenguaje de negocio.
   const [objetivo, setObjetivo] = useState('');
@@ -109,6 +113,7 @@ export default function ObjetivosPage() {
   const documento = (): DocumentoPolitica => documentoDeObjetivos(
     { objetivo, contexto, accion, accionLibre, indicador, conoceMeta, meta, horizonte, modoEvidencia, evidencia, pausa },
     vista?.recomendacionEvidencia ?? null,
+    tocados,
   );
 
   if (org === null) {
@@ -157,12 +162,12 @@ export default function ObjetivosPage() {
 
       <label style={bloque}>
         <span style={etiqueta}>¿Qué quieres conseguir?</span>
-        <input value={objetivo} onChange={(e) => setObjetivo(e.target.value)} placeholder="Por ejemplo: más pacientes nuevos" style={campo} />
+        <input value={objetivo} onChange={(e) => { setObjetivo(e.target.value); marcar('objetivo'); }} placeholder="Por ejemplo: más pacientes nuevos" style={campo} />
       </label>
 
       <label style={bloque}>
         <span style={etiqueta}>¿Qué acción de un cliente consideras importante?</span>
-        <select value={accion} onChange={(e) => setAccion(e.target.value)} style={campo}>
+        <select value={accion} onChange={(e) => { setAccion(e.target.value); marcar('accion'); }} style={campo}>
           <option value="">Elige una…</option>
           {ACCIONES_FRECUENTES.map((a) => <option key={a.eventKey} value={a.eventKey}>{a.etiqueta}</option>)}
           <option value="OTRA">Otra acción…</option>
@@ -171,13 +176,13 @@ export default function ObjetivosPage() {
       {accion === 'OTRA' && (
         <label style={bloque}>
           <span style={etiqueta}>¿Cuál?</span>
-          <input value={accionLibre} onChange={(e) => setAccionLibre(e.target.value)} placeholder="descríbela en pocas palabras" style={campo} />
+          <input value={accionLibre} onChange={(e) => { setAccionLibre(e.target.value); marcar('accionLibre'); }} placeholder="descríbela en pocas palabras" style={campo} />
         </label>
       )}
 
       <label style={bloque}>
         <span style={etiqueta}>¿Con qué lo medimos?</span>
-        <select value={indicador} onChange={(e) => setIndicador(e.target.value)} style={campo}>
+        <select value={indicador} onChange={(e) => { setIndicador(e.target.value); marcar('indicador'); }} style={campo}>
           <option value="">Elige uno…</option>
           {INDICADORES_FRECUENTES.map((i) => <option key={i.clave} value={i.clave}>{i.etiqueta}</option>)}
         </select>
@@ -191,7 +196,7 @@ export default function ObjetivosPage() {
               key={v}
               type="button"
               className="btn"
-              onClick={() => setConoceMeta(v)}
+              onClick={() => { setConoceMeta(v); marcar('conoceMeta'); }}
               style={{ padding: '10px 14px', fontWeight: conoceMeta === v ? 700 : 400, borderWidth: conoceMeta === v ? 2 : 1 }}
             >
               {t}
@@ -201,7 +206,7 @@ export default function ObjetivosPage() {
         {conoceMeta === 'SI' && (
           <label style={{ display: 'block' }}>
             <span style={etiqueta}>¿Cuál es tu meta?</span>
-            <input value={meta} onChange={(e) => setMeta(e.target.value)} placeholder="un número" style={campo} />
+            <input value={meta} onChange={(e) => { setMeta(e.target.value); marcar('meta'); }} placeholder="un número" style={campo} />
             <span style={{ color: 'var(--muted, #666)' }}>
               {INDICADORES_FRECUENTES.find((i) => i.clave === indicador)?.ayudaMeta ?? 'Elige antes el indicador.'}
             </span>
@@ -297,7 +302,7 @@ export default function ObjetivosPage() {
         <section style={{ marginBottom: 24, paddingLeft: 12, borderLeft: '3px solid var(--borde, #eee)' }}>
           <label style={bloque}>
             <span style={etiqueta}>¿En cuántos días esperas ver el resultado?</span>
-            <input value={horizonte} onChange={(e) => setHorizonte(e.target.value)} style={campo} />
+            <input value={horizonte} onChange={(e) => { setHorizonte(e.target.value); marcar('horizonte'); }} style={campo} />
           </label>
           <section style={bloque}>
             <span style={etiqueta}>¿Cuántas veces debe mostrarse tu anuncio antes de concluir algo?</span>
@@ -305,7 +310,7 @@ export default function ObjetivosPage() {
               <button
                 type="button"
                 className="btn"
-                onClick={() => setModoEvidencia('RECOMENDADA')}
+                onClick={() => { setModoEvidencia('RECOMENDADA'); marcar('modoEvidencia'); }}
                 style={{ padding: '10px 14px', fontWeight: modoEvidencia === 'RECOMENDADA' ? 700 : 400, borderWidth: modoEvidencia === 'RECOMENDADA' ? 2 : 1 }}
               >
                 {vista?.recomendacionEvidencia
@@ -315,14 +320,14 @@ export default function ObjetivosPage() {
               <button
                 type="button"
                 className="btn"
-                onClick={() => setModoEvidencia('PROPIA')}
+                onClick={() => { setModoEvidencia('PROPIA'); marcar('modoEvidencia'); }}
                 style={{ padding: '10px 14px', fontWeight: modoEvidencia === 'PROPIA' ? 700 : 400, borderWidth: modoEvidencia === 'PROPIA' ? 2 : 1 }}
               >
                 Yo defino cuántas
               </button>
             </div>
             {modoEvidencia === 'PROPIA' && (
-              <input value={evidencia} onChange={(e) => setEvidencia(e.target.value)} placeholder="un número" style={campo} />
+              <input value={evidencia} onChange={(e) => { setEvidencia(e.target.value); marcar('evidencia'); }} placeholder="un número" style={campo} />
             )}
             <span style={{ color: 'var(--muted, #666)' }}>
               Sirve para no sacar conclusiones con muy pocos datos. La recomendación la pone SOEC y queda
@@ -331,7 +336,7 @@ export default function ObjetivosPage() {
           </section>
           <label style={bloque}>
             <span style={etiqueta}>¿Por debajo de qué resultado convendría detener el gasto?</span>
-            <input value={pausa} onChange={(e) => setPausa(e.target.value)} placeholder="fracción, por ejemplo 0,005" style={campo} />
+            <input value={pausa} onChange={(e) => { setPausa(e.target.value); marcar('pausa'); }} placeholder="fracción, por ejemplo 0,005" style={campo} />
             <span style={{ color: 'var(--muted, #666)' }}>Opcional. Detener siempre exige tu permiso aparte.</span>
           </label>
           <p style={{ color: 'var(--muted, #666)' }}>
@@ -346,7 +351,13 @@ export default function ObjetivosPage() {
         className="btn primary"
         disabled={ocupado}
         onClick={() => void conCarga(async () => {
-          const v = await guardarPolitica(org, documento());
+          const doc = documento();
+          if (Object.keys(doc).length === 0) {
+            setAviso('No cambiaste nada, así que no se guardó nada.');
+            return;
+          }
+          const v = await guardarPolitica(org, doc);
+          setTocados(new Set());
           setVista(v);
           setAviso(v.completitud.estado === 'EVALUATION_PROFILE_COMPLETE'
             ? 'Guardado. Tu negocio ya es evaluable.'

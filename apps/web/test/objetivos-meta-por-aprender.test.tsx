@@ -13,7 +13,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement as h } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { documentoDeObjetivos, type FormularioObjetivos, type VistaPolitica } from '../lib/politica-client';
+import { documentoDeObjetivos, type CampoObjetivos, type FormularioObjetivos, type VistaPolitica } from '../lib/politica-client';
 import ObjetivosPage from '../app/negocios/objetivos/page';
 
 vi.mock('../lib/org-activa', async (orig) => {
@@ -22,6 +22,9 @@ vi.mock('../lib/org-activa', async (orig) => {
 });
 
 const RECOMENDACION = { metrica: 'IMPRESSIONS', valor: 1000, version: 'v1' };
+
+/** Lo que toca quien entra a configurar su medición: indicador, modo de meta y evidencia. Nada más. */
+const TOCADOS_MEDICION: ReadonlySet<CampoObjetivos> = new Set(['indicador', 'conoceMeta', 'modoEvidencia']);
 
 const formulario = (over: Partial<FormularioObjetivos> = {}): FormularioObjetivos => ({
   objetivo: 'más pacientes nuevos',
@@ -56,7 +59,7 @@ afterEach(() => {
 
 describe('documento que se envía al guardar', () => {
   it('«todavía no lo sé» envía el indicador SIN meta: el servidor lo guarda como por aprender', () => {
-    const doc = documentoDeObjetivos(formulario(), RECOMENDACION);
+    const doc = documentoDeObjetivos(formulario(), RECOMENDACION, TOCADOS_MEDICION);
     expect(doc.kpis).toHaveLength(1);
     expect(doc.kpis![0]!.clave).toBe('contactos');
     expect(doc.kpis![0]!.targetValue).toBeNull();
@@ -64,7 +67,7 @@ describe('documento que se envía al guardar', () => {
   });
 
   it('la evidencia recomendada viaja con el número del SERVIDOR y como recomendación suya', () => {
-    const doc = documentoDeObjetivos(formulario(), RECOMENDACION);
+    const doc = documentoDeObjetivos(formulario(), RECOMENDACION, TOCADOS_MEDICION);
     const ev = doc.reglas!.find((r) => r.tipo === 'EVIDENCE_MINIMUM')!;
     expect(ev.valor).toBe(1000);
     expect(ev.procedencia).toBe('SYSTEM_DEFAULT');
@@ -72,21 +75,64 @@ describe('documento que se envía al guardar', () => {
   });
 
   it('sin recomendación del servidor no se inventa ningún número en la pantalla', () => {
-    const doc = documentoDeObjetivos(formulario(), null);
+    const doc = documentoDeObjetivos(formulario(), null, TOCADOS_MEDICION);
     expect((doc.reglas ?? []).some((r) => r.tipo === 'EVIDENCE_MINIMUM')).toBe(false);
   });
 
   it('quien escribe su propio número, lo firma', () => {
-    const doc = documentoDeObjetivos(formulario({ modoEvidencia: 'PROPIA', evidencia: '2500' }), RECOMENDACION);
+    const doc = documentoDeObjetivos(formulario({ modoEvidencia: 'PROPIA', evidencia: '2500' }), RECOMENDACION, new Set(['modoEvidencia', 'evidencia']));
     const ev = doc.reglas!.find((r) => r.tipo === 'EVIDENCE_MINIMUM')!;
     expect(ev.valor).toBe(2500);
     expect(ev.procedencia).toBe('USER_DEFINED');
   });
 
   it('declarar la meta la envía tal cual, firmada por el negocio', () => {
-    const doc = documentoDeObjetivos(formulario({ conoceMeta: 'SI', meta: '15' }), RECOMENDACION);
+    const doc = documentoDeObjetivos(formulario({ conoceMeta: 'SI', meta: '15' }), RECOMENDACION, new Set(['indicador', 'conoceMeta', 'meta']));
     expect(doc.kpis![0]!.targetValue).toBe(15);
     expect(doc.kpis![0]!.nota).toBeUndefined();
+  });
+});
+
+/**
+ * EFECTOS COLATERALES. El formulario se precarga con lo que SOEC ya sabe —el objetivo que vive en el perfil
+ * del negocio, un horizonte sugerido de 30 días—. Guardar la MEDICIÓN no puede convertir eso en decisiones
+ * declaradas de la empresa: un campo que nadie tocó no viaja, y el servidor sólo escribe lo que recibe.
+ */
+describe('guardar sólo cambia lo que la persona tocó', () => {
+  it('configurar la medición no escribe el objetivo ni el horizonte', () => {
+    const doc = documentoDeObjetivos(
+      formulario({ objetivo: 'captar pacientes / evaluaciones odontológicas', horizonte: '30' }),
+      RECOMENDACION,
+      TOCADOS_MEDICION,
+    );
+    expect('objetivoText' in doc).toBe(false);
+    expect('evaluationHorizonDays' in doc).toBe(false);
+    expect('businessContext' in doc).toBe(false);
+    // Y lo que sí se tocó, sí viaja.
+    expect(doc.kpis).toHaveLength(1);
+    expect(doc.reglas!.some((r) => r.tipo === 'EVIDENCE_MINIMUM')).toBe(true);
+  });
+
+  it('sin tocar nada, no se envía nada', () => {
+    const doc = documentoDeObjetivos(formulario(), RECOMENDACION, new Set());
+    expect(Object.keys(doc)).toEqual([]);
+  });
+
+  it('cambiar el horizonte a propósito sí lo guarda', () => {
+    const doc = documentoDeObjetivos(formulario({ horizonte: '45' }), RECOMENDACION, new Set(['horizonte']));
+    expect(doc.evaluationHorizonDays).toBe(45);
+    expect('objetivoText' in doc).toBe(false);
+  });
+
+  it('escribir el objetivo a propósito sí lo guarda', () => {
+    const doc = documentoDeObjetivos(formulario({ objetivo: 'llenar la agenda de marzo' }), RECOMENDACION, new Set(['objetivo']));
+    expect(doc.objetivoText).toBe('llenar la agenda de marzo');
+    expect('evaluationHorizonDays' in doc).toBe(false);
+  });
+
+  it('la acción del cliente tampoco se reescribe por pasar por la pantalla', () => {
+    const doc = documentoDeObjetivos(formulario(), RECOMENDACION, TOCADOS_MEDICION);
+    expect('eventos' in doc).toBe(false);
   });
 });
 

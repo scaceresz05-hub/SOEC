@@ -182,6 +182,11 @@ export async function guardarPolitica(org: string, doc: DocumentoPolitica): Prom
   );
 }
 
+/** Campos del formulario de objetivos. Se usan para saber cuáles tocó la persona. */
+export type CampoObjetivos =
+  | 'objetivo' | 'contexto' | 'accion' | 'accionLibre' | 'indicador'
+  | 'conoceMeta' | 'meta' | 'horizonte' | 'modoEvidencia' | 'evidencia' | 'pausa';
+
 /** Lo que la pantalla de objetivos tiene que saber para armar el documento que se guarda. */
 export interface FormularioObjetivos {
   readonly objetivo: string;
@@ -200,29 +205,33 @@ export interface FormularioObjetivos {
 }
 
 /**
- * Traduce el formulario al documento de política. Pura a propósito: es la regla que decide qué procedencia
- * lleva cada número, y eso se prueba sin navegador.
+ * Traduce el formulario al documento de política. Pura a propósito: aquí vive la regla de qué se guarda y con
+ * qué procedencia, y eso se prueba sin navegador.
  *
+ *  · SÓLO SE ENVÍA LO QUE LA PERSONA TOCÓ. El formulario se precarga con lo que SOEC ya sabe (el objetivo del
+ *    perfil, un horizonte sugerido); enviarlo todo convertía esos valores mostrados en decisiones guardadas
+ *    de la empresa, aunque nadie los hubiera mirado. Un campo intacto no se manda, y el servidor no lo toca.
  *  · Elegir el indicador YA vale: se envía aunque no haya meta, y el servidor lo guarda como `TO_BE_LEARNED`.
- *    Antes sólo se enviaba con un número, así que «todavía no lo sé» dejaba a la empresa sin indicador.
  *  · La evidencia recomendada se envía con `SYSTEM_DEFAULT` y su versión: es una sugerencia del sistema, no
  *    una decisión del negocio, y así queda escrito.
  */
 export function documentoDeObjetivos(
   f: FormularioObjetivos,
   recomendacion: { metrica: string; valor: number; version: string } | null | undefined,
+  tocados: ReadonlySet<CampoObjetivos>,
 ): DocumentoPolitica {
+  const toco = (...campos: readonly CampoObjetivos[]): boolean => campos.some((c) => tocados.has(c));
   const eventKey = f.accion === 'OTRA' ? f.accionLibre.trim().toLowerCase().replace(/\s+/g, '_') : f.accion;
   const elegido = INDICADORES_FRECUENTES.find((i) => i.clave === f.indicador) ?? null;
   const doc: DocumentoPolitica = {
-    objetivoText: f.objetivo.trim() || null,
-    businessContext: f.contexto.trim() || null,
-    evaluationHorizonDays: f.horizonte.trim() === '' ? null : Number(f.horizonte),
+    ...(toco('objetivo') ? { objetivoText: f.objetivo.trim() || null } : {}),
+    ...(toco('contexto') ? { businessContext: f.contexto.trim() || null } : {}),
+    ...(toco('horizonte') ? { evaluationHorizonDays: f.horizonte.trim() === '' ? null : Number(f.horizonte) } : {}),
   };
-  if (eventKey) {
+  if (eventKey && toco('accion', 'accionLibre')) {
     doc.eventos = [{ eventKey, rol: 'PRIMARY', orden: 0, displayName: ACCIONES_FRECUENTES.find((a) => a.eventKey === eventKey)?.etiqueta ?? null }];
   }
-  if (elegido !== null) {
+  if (elegido !== null && toco('indicador', 'conoceMeta', 'meta')) {
     const conMeta = f.conoceMeta === 'SI' && f.meta.trim() !== '';
     doc.kpis = [{
       id: 'principal', clave: elegido.clave, displayName: elegido.etiqueta, rol: 'PRIMARY',
@@ -235,19 +244,19 @@ export function documentoDeObjetivos(
     }];
   }
   const reglas: NonNullable<DocumentoPolitica['reglas']> = [];
-  if (f.modoEvidencia === 'RECOMENDADA' && recomendacion) {
+  if (toco('modoEvidencia', 'evidencia') && f.modoEvidencia === 'RECOMENDADA' && recomendacion) {
     reglas.push({
       id: 'evidencia-impresiones', tipo: 'EVIDENCE_MINIMUM', metrica: recomendacion.metrica, comparador: 'GTE',
       valor: recomendacion.valor, procedencia: 'SYSTEM_DEFAULT',
       nota: `punto de partida del sistema (${recomendacion.version}); puedes cambiarlo cuando quieras`,
     });
-  } else if (f.modoEvidencia === 'PROPIA' && f.evidencia.trim() !== '') {
+  } else if (toco('modoEvidencia', 'evidencia') && f.modoEvidencia === 'PROPIA' && f.evidencia.trim() !== '') {
     reglas.push({
       id: 'evidencia-impresiones', tipo: 'EVIDENCE_MINIMUM', metrica: 'IMPRESSIONS', comparador: 'GTE',
       valor: Number(f.evidencia), procedencia: 'USER_DEFINED',
     });
   }
-  if (f.pausa.trim() !== '') {
+  if (toco('pausa') && f.pausa.trim() !== '') {
     reglas.push({ id: 'pausa-tasa-conversion', tipo: 'PAUSE', metrica: 'CONVERSION_RATE', comparador: 'LTE', valor: Number(f.pausa.replace(',', '.')) });
   }
   if (reglas.length > 0) doc.reglas = reglas;
