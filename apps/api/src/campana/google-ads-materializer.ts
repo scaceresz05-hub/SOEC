@@ -13,6 +13,7 @@
  */
 import type { MarketingPlan } from './marketing-plan';
 import type { GeoPolicy, GeoRegionResuelta } from './geo-policy';
+import type { PaqueteDeEjecucion } from '../ejecucion/paquete';
 
 export interface OpcionesMaterializacion {
   readonly customerId: string;
@@ -21,7 +22,10 @@ export interface OpcionesMaterializacion {
   /** 'YYYY-MM-DD HH:mm:ss'. Campaign.end_date_time = inicio + 9 días 23:59:59 (10 días calendario inclusivos). */
   readonly endDateTime: string;
   readonly validateOnly: boolean;
-  /** Estado inicial de la campaña (semántica de activación prevista). */
+  /**
+   * Estado inicial de la campaña. Por defecto `PAUSED`: crear no es activar, y una campaña que nace encendida
+   * gasta dinero de alguien antes de que nadie la mire. Encenderla es una decisión aparte, de otra fase.
+   */
   readonly campaignStatus?: 'ENABLED' | 'PAUSED';
 }
 
@@ -84,7 +88,7 @@ export function materializarGoogleAdsMutate(plan: MarketingPlan, geo: GeoPolicy,
     advertisingChannelType: 'SEARCH',
     // Obligatorio desde v21+ (regulación UE de publicidad política). SmileFlow es SaaS dental: no la contiene.
     containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
-    status: opts.campaignStatus ?? 'ENABLED',
+    status: opts.campaignStatus ?? 'PAUSED',
     campaignBudget: budgetRN,
     [bidding.field]: {},
     networkSettings: { ...NETWORK_SETTINGS_V2 },
@@ -136,4 +140,119 @@ export function contarOperaciones(req: GoogleAdsMutateRequest): Record<string, n
   }
   out.total = req.mutateOperations.length;
   return out;
+}
+
+// ── MATERIALIZACIÓN GENERAL (multiempresa) ──────────────────────────────────────────────────────
+//
+// Mismo ejecutor, misma request atómica, mismas reglas: lo único que cambia es que la entrada ya no es el plan
+// de UNA empresa concreta, sino el PAQUETE CONGELADO que produce la planificación para cualquier empresa
+// (`apps/api/src/ejecucion/paquete.ts`). El camino por-plan histórico se conserva encima, como adaptador.
+//
+// INVARIANTE DE ESTA FASE: la campaña se crea `PAUSED` y sus grupos también. Dos puertas, no una: quien la
+// encienda en el futuro tendrá que abrirlas a propósito.
+
+/** Puja de Google derivada de la estrategia propuesta por el plan. No se inventa ninguna otra. */
+export function pujaGoogleDePaquete(p: PaqueteDeEjecucion): Record<string, unknown> {
+  const techo = p.campania.puja.techoCpcMicros;
+  switch (p.campania.puja.estrategia) {
+    case 'MAXIMIZE_CONVERSIONS':
+      return { maximizeConversions: {} };
+    case 'MANUAL_CPC':
+      return { manualCpc: { enhancedCpcEnabled: false } };
+    case 'MAXIMIZE_CLICKS_WITH_CPC_CEILING':
+    default:
+      // «Maximizar clics con techo» es `targetSpend` con tope de CPC: compra visitas sin superar el precio.
+      return { targetSpend: techo === null ? {} : { cpcBidCeilingMicros: String(techo) } };
+  }
+}
+
+/**
+ * Convierte el paquete congelado en UNA sola request de `GoogleAdsService.Mutate` (`partialFailure=false`):
+ * presupuesto → campaña → grupos → anuncios → palabras → negativas → geografía → idioma. Los recursos padre
+ * usan nombres temporales para que los hijos los referencien dentro de la MISMA request; si Google rechaza una
+ * operación, no queda nada a medias.
+ */
+export function materializarPaqueteGoogleAds(
+  p: PaqueteDeEjecucion,
+  opts: { readonly validateOnly: boolean },
+): GoogleAdsMutateRequest | null {
+  if (p.grupos.length === 0 || p.campania.geo.filter((g) => !g.negativo).length === 0) return null;
+
+  const cid = p.cuenta.customerId;
+  let temp = 0;
+  const rn = (coleccion: string): string => `customers/${cid}/${coleccion}/-${(temp += 1)}`;
+  const ops: MutateOperationGoogle[] = [];
+
+  // 1) Presupuesto DIARIO propio de esta campaña (jamás compartido con otra).
+  const budgetRN = rn('campaignBudgets');
+  ops.push({ campaignBudgetOperation: { create: {
+    resourceName: budgetRN,
+    name: `${p.campania.nombre} · presupuesto`,
+    amountMicros: String(p.campania.presupuestoDiarioMicros),
+    deliveryMethod: 'STANDARD',
+    explicitlyShared: false,
+  } } });
+
+  // 2) Campaña — SIEMPRE en pausa, sin red de display ni partners, y sólo a quien está EN el territorio.
+  const campaignRN = rn('campaigns');
+  ops.push({ campaignOperation: { create: {
+    resourceName: campaignRN,
+    name: p.campania.nombre,
+    advertisingChannelType: 'SEARCH',
+    containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
+    status: p.estadoInicial,
+    campaignBudget: budgetRN,
+    ...pujaGoogleDePaquete(p),
+    networkSettings: { ...NETWORK_SETTINGS_V2 },
+    geoTargetTypeSetting: { positiveGeoTargetType: 'PRESENCE', negativeGeoTargetType: 'PRESENCE' },
+  } } });
+
+  // 3) Grupos + anuncios. El grupo nace en pausa: segunda puerta.
+  for (const g of p.grupos) {
+    const agRN = rn('adGroups');
+    ops.push({ adGroupOperation: { create: {
+      resourceName: agRN, name: g.nombre, campaign: campaignRN, status: 'PAUSED', type: 'SEARCH_STANDARD',
+    } } });
+    for (const a of g.anuncios) {
+      ops.push({ adGroupAdOperation: { create: {
+        adGroup: agRN,
+        status: 'ENABLED', // el anuncio vive dentro de un grupo pausado dentro de una campaña pausada
+        ad: {
+          responsiveSearchAd: {
+            headlines: a.titulares.map((t) => ({ text: t })),
+            descriptions: a.descripciones.map((t) => ({ text: t })),
+          },
+          finalUrls: [g.urlFinal],
+        },
+      } } });
+    }
+    for (const k of g.palabras) {
+      ops.push({ adGroupCriterionOperation: { create: {
+        adGroup: agRN, status: 'ENABLED', keyword: { text: k.texto, matchType: k.concordancia },
+      } } });
+    }
+  }
+
+  // 4) Negativas de campaña: sólo las que el plan justificó, no todo el catálogo de candidatas.
+  for (const n of p.negativas) {
+    ops.push({ campaignCriterionOperation: { create: {
+      campaign: campaignRN, negative: true, keyword: { text: n.texto, matchType: n.concordancia },
+    } } });
+  }
+
+  // 5) Geografía: únicamente los objetivos que la plataforma confirmó (nunca un radio silencioso).
+  for (const geo of p.campania.geo) {
+    ops.push({ campaignCriterionOperation: { create: {
+      campaign: campaignRN,
+      ...(geo.negativo ? { negative: true } : {}),
+      location: { geoTargetConstant: `geoTargetConstants/${geo.criterionId}` },
+    } } });
+  }
+
+  // 6) Idioma declarado por el negocio.
+  ops.push({ campaignCriterionOperation: { create: {
+    campaign: campaignRN, language: { languageConstant: `languageConstants/${p.campania.idiomaConstantId}` },
+  } } });
+
+  return { mutateOperations: ops, partialFailure: false, ...(opts.validateOnly ? { validateOnly: true } : {}) };
 }

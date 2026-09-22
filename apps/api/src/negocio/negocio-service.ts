@@ -188,4 +188,22 @@ export class NegocioService {
   async descubrirOperativos(): Promise<readonly PerfilNegocio[]> {
     return this.repo.listarTodos();
   }
+
+  /**
+   * Cambia la postura de gobierno del negocio (qué puede hacer SOEC en sus cuentas). Acto humano y auditado.
+   * El gasto autónomo NO se toca aquí: no existe parámetro para encenderlo.
+   */
+  async actualizarGobierno(
+    org: string,
+    actor: string,
+    cambios: { readonly externalMutations?: boolean; readonly campaignExecution?: boolean; readonly automaticSafetyPause?: boolean },
+  ): Promise<NegocioCompleto> {
+    const perfil = await this.repo.perfil(org);
+    if (perfil === null) throw new NegocioNoEncontradoError(`el negocio '${org}' no existe`);
+    await enTransaccion(this.pool, async (c) => {
+      await this.repo.actualizarGobierno(c, org, cambios);
+      await this.repo.registrarAuditoria(c, { organizationId: org, actor, action: 'BUSINESS_GOVERNANCE_UPDATED', changedFields: { ...cambios } });
+    });
+    return this.leer(org);
+  }
 }

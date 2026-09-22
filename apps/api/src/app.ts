@@ -152,6 +152,9 @@ import { registerPoliticaRoutes } from './politica/politica-routes';
 import { registerOnboardingRoutes } from './onboarding/onboarding-routes';
 import { registerInvestigacionRoutes } from './investigacion/investigacion-routes';
 import { proveedoresDeOrganizacion } from './investigacion/composicion';
+import { registerEjecucionRoutes } from './ejecucion/ejecucion-routes';
+import { clienteDeEscrituraGoogle, crearObservadorDeEventos } from './ejecucion/composicion';
+import type { GoogleAdsMutateHttpClient } from './campana/google-ads-mutate-http';
 import type { DepsInvestigacion } from './investigacion/investigacion-service';
 import { crearDepositoSecretosConexion } from './conexion/secreto-conexion';
 import { refrescarNegociosDelRuntime } from './conexion/snapshot';
@@ -200,6 +203,14 @@ export interface AppDeps {
    * real decide por empresa qué fuentes hay y registra las que faltan como no disponibles.
    */
   proveedoresInvestigacion?: (org: string) => Promise<DepsInvestigacion>;
+  /**
+   * Override del camino de ESCRITURA a Google Ads (Autonomy Fase F). SÓLO para tests deterministas: permite
+   * demostrar que la campaña nace en pausa y que reintentar no duplica, sin tocar ninguna cuenta real. Omitido
+   * en producción, donde la composición exige conexión, cuenta y la capacidad `ESCRITURA_ADS` encendida.
+   */
+  ejecucionGoogle?: (org: string) => Promise<GoogleAdsMutateHttpClient | null>;
+  /** Override de la señal observada de conversiones (Fase F). Sólo tests. */
+  ejecucionObservarEventos?: (org: string, eventKey: string) => Promise<{ readonly observados: number; readonly desde: string | null }>;
 }
 
 function header(req: FastifyRequest, name: string): string | undefined {
@@ -476,6 +487,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           composicionGoogleAds: composicionGoogleAds,
           log: (i) => console.log(JSON.stringify(i)),
         })),
+      });
+      // EJECUCIÓN (Autonomy Fase F): del plan aprobado a una campaña REAL… que nace EN PAUSA y no gasta.
+      // Ninguna de estas rutas puede activar una campaña: el verbo no existe en el servicio.
+      registerEjecucionRoutes(target, pool, {
+        refrescar,
+        clienteGoogle: deps.ejecucionGoogle ?? ((org) => clienteDeEscrituraGoogle(org, {
+          pool, env: process.env, composicionGoogleAds, log: (i) => console.log(JSON.stringify(i)),
+        })),
+        observarEventos: deps.ejecucionObservarEventos ?? crearObservadorDeEventos(pool),
+        log: (i) => console.log(JSON.stringify(i)),
       });
     }
     registerAcquisitionRoutes(target, deps.store); // Acquisition Engine (sólo lectura / shadow)

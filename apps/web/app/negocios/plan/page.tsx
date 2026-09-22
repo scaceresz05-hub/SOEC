@@ -121,6 +121,7 @@ export default function PlanPage() {
       <p style={{ marginBottom: 8, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <Link href="/negocios">← Volver al panel</Link>
         <Link href="/negocios/investigacion">Investigación de mercado →</Link>
+        <Link href="/negocios/campana">Preparar campaña →</Link>
       </p>
       <h1 style={{ marginBottom: 4 }}>Plan de marketing</h1>
       <p style={{ ...apagado, marginBottom: 24 }}>

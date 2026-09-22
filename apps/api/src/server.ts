@@ -37,6 +37,7 @@ import { politicaMigrations } from './politica/politica-pg';
 import { onboardingMigrations } from './onboarding/onboarding-pg';
 import { investigacionMigrations } from './investigacion/investigacion-pg';
 import { planMigrations } from './investigacion/plan-pg';
+import { ejecucionMigrations } from './ejecucion/ejecucion-pg';
 import { migrarPoliticasDelRegistro } from './politica/migracion-politica';
 import { PoliticaService } from './politica/politica-service';
 import { estadoKillSwitch, crearEvaluadorPausaSeguridad } from './gobierno';
@@ -139,6 +140,7 @@ async function main(): Promise<void> {
   await runMigrations(pool, onboardingMigrations); // Autonomy Fase D: asistente de incorporación
   await runMigrations(pool, investigacionMigrations); // Autonomy Fase E: investigación con evidencia
   await runMigrations(pool, planMigrations); // Autonomy Fase E: planes de campaña en borrador
+  await runMigrations(pool, ejecucionMigrations); // Autonomy Fase F: peticiones de ejecución, conversiones y medición
   // No hay migración de datos: el asistente se apoya en lo que ya está persistido y precarga lo que SOEC
   // sabe. Una empresa histórica lo abre y encuentra sus respuestas puestas, no un formulario vacío.
   // PRIMER SNAPSHOT: desde aquí el runtime resuelve `organización → negocio / perfil / fuentes` contra la

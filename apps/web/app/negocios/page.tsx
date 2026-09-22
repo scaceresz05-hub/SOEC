@@ -842,6 +842,8 @@ export default function Panel(): React.ReactElement {
             {/* Investigar y planificar sólo consulta y propone: ni publica campañas ni gasta presupuesto. */}
             <Link className="btn" href="/negocios/investigacion">Investigar mi mercado →</Link>
             <Link className="btn" href="/negocios/plan">Plan de marketing →</Link>
+            {/* Crear la campaña es un acto humano y explícito: la campaña nace en pausa. */}
+            <Link className="btn" href="/negocios/campana">Preparar campaña →</Link>
           </p>
           <div className="card" style={{ marginTop: 12 }}>
             {negocio.fuentes.map((f) => {

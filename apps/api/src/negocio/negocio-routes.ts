@@ -83,6 +83,30 @@ export function registerNegocioTenantRoutes(app: FastifyInstance, pool: Pool): v
     }
   });
 
+  /**
+   * POSTURA DE GOBIERNO: qué se le permite a SOEC en las cuentas del negocio. Es un acto EXPLÍCITO de una
+   * persona con permiso de gestión, y queda en la auditoría con su nombre. `autonomousSpend` no se puede
+   * encender por aquí: el gasto autónomo no es una casilla de una pantalla.
+   */
+  app.patch('/negocios/:org/gobierno', async (req, reply) => {
+    const { org } = req.params as { org: string };
+    const ctx = contextoDe(req);
+    exigirOrganizacion(req, org);
+    if (!permisosDe(req).has('business.manage')) return reply.code(403).send({ error: 'NO_AUTORIZADO' });
+    const b = (req.body ?? {}) as { externalMutations?: boolean; campaignExecution?: boolean; automaticSafetyPause?: boolean };
+    const cambios = {
+      ...(typeof b.externalMutations === 'boolean' ? { externalMutations: b.externalMutations } : {}),
+      ...(typeof b.campaignExecution === 'boolean' ? { campaignExecution: b.campaignExecution } : {}),
+      ...(typeof b.automaticSafetyPause === 'boolean' ? { automaticSafetyPause: b.automaticSafetyPause } : {}),
+    };
+    if (Object.keys(cambios).length === 0) return reply.code(400).send({ error: 'ENTRADA_INVALIDA', message: 'no hay nada que cambiar' });
+    try {
+      return reply.send(await svc.actualizarGobierno(org, String(ctx.actor), cambios));
+    } catch (e) {
+      return manejarError(e, reply);
+    }
+  });
+
   // ── EDITAR: exige permiso de gestión del negocio, además del contexto correcto ──
   app.patch('/negocios/:org', async (req, reply) => {
     const { org } = req.params as { org: string };

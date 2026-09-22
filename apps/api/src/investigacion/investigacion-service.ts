@@ -193,6 +193,24 @@ export class InvestigacionService {
   // ── LECTURA ───────────────────────────────────────────────────────────────────────────────────
 
   /**
+   * Comprueba la FRESCURA de la última corrida y la marca `STALE` si sus datos de entrada cambiaron. Es la
+   * misma comprobación que hace `estado()`, aislada para que otros módulos (p. ej. la EJECUCIÓN) no dependan de
+   * que alguien abra la pantalla de investigación para enterarse de que el plan quedó viejo.
+   */
+  async refrescarFrescura(org: string): Promise<CorridaInvestigacion | null> {
+    const ctx = await this.contexto(org);
+    const corrida = await this.repo.ultimaCorrida(org);
+    if (corrida === null) return null;
+    if (corrida.estado !== 'COMPLETE' && corrida.estado !== 'PARTIAL') return corrida;
+    const previa = (corrida.alcance.firma ?? {}) as Partial<FirmaDeEntradas>;
+    const cambiadas = this.cambios(previa, this.firma(ctx));
+    if (cambiadas.length === 0) return corrida;
+    const motivo = `cambió ${cambiadas.join(', ')} desde esta investigación`;
+    await this.repo.marcarStale(this.pool, org, motivo);
+    return { ...corrida, estado: 'STALE', motivoStale: motivo };
+  }
+
+  /**
    * Estado de la investigación. Antes de devolverla comprueba la FIRMA: una corrida cuyos datos de entrada
    * cambiaron se marca `STALE` aquí mismo, sin esperar a que alguien se acuerde de invalidarla.
    */

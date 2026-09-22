@@ -56,11 +56,17 @@ export type CapacidadNegocio =
   | 'PILOTO_DECISION'
   | 'INGESTA_GROWTH'
   | 'MONITOR_SEGURIDAD'
-  | 'CICLO_DIRECTOR';
+  | 'CICLO_DIRECTOR'
+  /**
+   * CREAR campañas, presupuestos, palabras y anuncios en la cuenta del negocio (`GOOGLE_ADS_WRITE`).
+   * Nace APAGADA para todos, incluidas las empresas históricas: conectar una cuenta no es autorizar a escribir
+   * en ella, y leer no es crear. Encenderla es un acto explícito del dueño desde Conexiones.
+   */
+  | 'ESCRITURA_ADS';
 
 export const CAPACIDADES: readonly CapacidadNegocio[] = [
   'MEDICION_REAL', 'DIRECTOR_REAL', 'AUTONOMIA_ADS', 'PILOTO_DECISION',
-  'INGESTA_GROWTH', 'MONITOR_SEGURIDAD', 'CICLO_DIRECTOR',
+  'INGESTA_GROWTH', 'MONITOR_SEGURIDAD', 'CICLO_DIRECTOR', 'ESCRITURA_ADS',
 ];
 
 /** Traducción exacta entre las experiencias REALES históricas y las capacidades persistidas. */
@@ -91,6 +97,7 @@ export const CONEXION_REQUERIDA: Readonly<Record<CapacidadNegocio, ProveedorCone
   INGESTA_GROWTH: 'GROWTH_M2M',
   MONITOR_SEGURIDAD: 'GOOGLE_ADS',
   CICLO_DIRECTOR: null,
+  ESCRITURA_ADS: 'GOOGLE_ADS',
 };
 
 /** Familia de fuente de cada proveedor: es lo que el resto de la plataforma ya entiende (`TipoFuente`). */

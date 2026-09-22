@@ -266,6 +266,28 @@ export class RepositorioNegocios {
     );
   }
 
+  /**
+   * Cambia la POSTURA DE GOBIERNO del negocio. Sólo tres interruptores, y `autonomous_spend` NO está entre
+   * ellos: que SOEC gaste por su cuenta no se enciende desde una pantalla de marketing — vive en el mandato
+   * financiero y en una fase que todavía no existe.
+   */
+  async actualizarGobierno(
+    q: Queryable,
+    org: string,
+    cambios: { readonly externalMutations?: boolean; readonly campaignExecution?: boolean; readonly automaticSafetyPause?: boolean },
+  ): Promise<void> {
+    await q.query(
+      `insert into business_governance (organization_id, external_mutations, autonomous_spend, automatic_safety_pause, campaign_execution)
+       values ($1, coalesce($2, false), false, coalesce($3, false), coalesce($4, false))
+       on conflict (organization_id) do update set
+         external_mutations = coalesce($2, business_governance.external_mutations),
+         automatic_safety_pause = coalesce($3, business_governance.automatic_safety_pause),
+         campaign_execution = coalesce($4, business_governance.campaign_execution),
+         updated_at = now()`,
+      [org, cambios.externalMutations ?? null, cambios.automaticSafetyPause ?? null, cambios.campaignExecution ?? null],
+    );
+  }
+
   async registrarAuditoria(q: Queryable, e: { organizationId: string; actor: string; action: string; changedFields?: Record<string, unknown> }): Promise<void> {
     await q.query('insert into business_audit (organization_id, actor, action, changed_fields) values ($1,$2,$3,$4)',
       [e.organizationId, e.actor, e.action, JSON.stringify(e.changedFields ?? {})]);

@@ -390,6 +390,67 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
   }
 
   /**
+   * ConversionActionService.Mutate — CREA una acción de conversión (Autonomy Fase F).
+   *
+   * Es la única escritura de esta clase que no pasa por el grafo atómico, porque la acción de conversión debe
+   * existir ANTES de que la campaña la use como objetivo. No crea campañas, no mueve presupuesto y no activa
+   * nada: define qué cuenta como resultado. Idempotencia: el caller busca primero por nombre estable y sólo
+   * llama aquí si no existe.
+   */
+  async crearAccionDeConversion(
+    customerId: string,
+    spec: {
+      readonly nombre: string;
+      readonly categoria: string;
+      readonly tipo: string;
+      readonly conteo: 'ONE_PER_CLICK' | 'MANY_PER_CLICK';
+      readonly valorPorDefecto?: number | null;
+      readonly moneda?: string | null;
+      readonly ventanaDiasClic?: number;
+    },
+  ): Promise<{ readonly resourceName: string; readonly requestId: string | null }> {
+    const accessToken = await this.deps.resolverAccessToken();
+    if (!accessToken) throw new Error('NO_ACCESS_TOKEN');
+    const url = urlAutorizada(`${this.apiBaseUrl}/${API_VERSION}/customers/${customerId}/conversionActions:mutate`);
+    if (url === null) throw new Error('HOST_NO_AUTORIZADO');
+    const validateOnly = this.deps.validateOnly === true;
+    const create: Record<string, unknown> = {
+      name: spec.nombre,
+      category: spec.categoria,
+      type: spec.tipo,
+      status: 'ENABLED',
+      primaryForGoal: true,
+      countingType: spec.conteo,
+      clickThroughLookbackWindowDays: spec.ventanaDiasClic ?? 30,
+      valueSettings: {
+        defaultValue: spec.valorPorDefecto ?? 0,
+        defaultCurrencyCode: spec.moneda ?? 'CLP',
+        alwaysUseDefaultValue: spec.valorPorDefecto !== null && spec.valorPorDefecto !== undefined,
+      },
+    };
+    const res = await this.fetchFn(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': this.deps.developerToken, 'login-customer-id': this.deps.loginCustomerId, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operations: [{ create }], ...(validateOnly ? { validateOnly: true } : {}) }),
+    });
+    const requestId = res.headers.get('request-id') ?? res.headers.get('x-request-id') ?? null;
+    const logBase = { service: 'conversionActions', endpoint: 'conversionActions:mutate', customerId, loginCustomerId: this.deps.loginCustomerId, httpStatus: res.status, requestId, validateOnly };
+    if (!res.ok) {
+      const cuerpo = await res.text();
+      const f = parseGoogleAdsFailure(cuerpo);
+      const primero = f.googleErrors[0];
+      this.deps.logger?.({ ...logBase, errorStatus: f.status, errorCode: primero?.errorCode ?? null, errorMessage: mensajeSanitizado(primero?.message ?? null), ok: false });
+      throw new GoogleSearchError({ httpStatus: res.status, requestId, status: f.status, code: primero?.errorCode ?? null, message: mensajeSanitizado(primero?.message ?? null), errorPath: primero?.errorPath ?? null, fieldPathElements: primero?.fieldPathElements ?? [], cuerpoResumen: null });
+    }
+    this.deps.logger?.({ ...logBase, errorStatus: null, errorCode: null, errorMessage: null, ok: true });
+    if (validateOnly) return { resourceName: 'VALIDATE_ONLY_OK', requestId };
+    const json = (await res.json()) as { results?: Array<{ resourceName?: string }> };
+    const resourceName = json.results?.[0]?.resourceName;
+    if (!resourceName) throw new Error('SIN_RESOURCE_NAME');
+    return { resourceName, requestId };
+  }
+
+  /**
    * GoogleAdsService.SearchStream (READ ONLY). Ejecuta una consulta GAQL y devuelve las filas APLANADAS (cada fila
    * = objeto con los recursos seleccionados). NO muta NADA (recuperación de identidad). Host allowlist + token por
    * conexión. searchStream responde un array de batches [{results:[…]}]; se tolera también {results:[…]}.
