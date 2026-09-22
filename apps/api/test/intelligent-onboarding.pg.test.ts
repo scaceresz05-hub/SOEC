@@ -242,6 +242,25 @@ describe('Empresa QA Onboarding · de cero a preparada, sólo contestando pregun
     await a.close();
   });
 
+  it('pedir que SOEC opere solo no lo activa: se explica que todavía no está disponible', async () => {
+    const a = app();
+    const cookie = await usuario(a, 'duena-autonomia@soec.cl');
+    const org = await crearEmpresa(a, cookie);
+    const v = await responder(a, cookie, org, 'autonomia', { 'autonomia.preferencia': 'OPERAR_DENTRO_DE_LIMITES' });
+
+    // El modo NO cambia…
+    const me = await a.inject({ method: 'GET', url: `/organizations/${org}`, headers: { cookie } });
+    expect(me.json().operationalMode).toBe('PILOT');
+    // …y se le dice por qué, en lugar de dejarlo suponiendo que sí.
+    const avisos = (v as { avisos: string[] }).avisos;
+    expect(avisos.length).toBe(1);
+    expect(avisos[0]).toContain('no se pudo aplicar');
+    expect(avisos[0]).toContain('NOT_AVAILABLE');
+    const autonomia = (v as { readiness: { niveles: { nivel: string; listo: boolean }[] } }).readiness.niveles.find((n) => n.nivel === 'AUTONOMY_READY')!;
+    expect(autonomia.listo).toBe(false);
+    await a.close();
+  });
+
   it('lo que se lee del sitio web se propone, no se da por dicho por el dueño', async () => {
     const a = app();
     const cookie = await usuario(a, 'duena-sitio@soec.cl');

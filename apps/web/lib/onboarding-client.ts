@@ -75,6 +75,8 @@ export interface VistaOnboarding {
     nivelDeAutonomia: string;
   };
   sitio: { url: string; estado: string; titulo: string | null; paginas: string[] } | null;
+  /** Lo que el asistente intentó y no pudo (por ejemplo, un nivel de autonomía no disponible todavía). */
+  avisos: string[];
 }
 
 /** Nombres en lenguaje de negocio para el resumen de preparación. Nada de vocabulario interno. */

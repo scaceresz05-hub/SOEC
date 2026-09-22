@@ -158,6 +158,9 @@ export default function OnboardingPage() {
 
       {error !== null && <p role="alert" style={{ color: '#b00020', marginBottom: 16 }}>{error}</p>}
       {aviso !== null && <p style={{ color: '#0a7', marginBottom: 16 }}>{aviso}</p>}
+      {(vista?.avisos ?? []).map((a) => (
+        <p key={a} style={{ color: '#b26a00', marginBottom: 16 }}>{a}</p>
+      ))}
 
       {paso !== null && (
         <section>

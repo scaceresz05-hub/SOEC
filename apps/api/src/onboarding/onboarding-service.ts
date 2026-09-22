@@ -84,6 +84,11 @@ export interface VistaOnboarding {
     readonly nivelDeAutonomia: string;
   };
   readonly sitio: { readonly url: string; readonly estado: string; readonly titulo: string | null; readonly paginas: readonly string[] } | null;
+  /**
+   * Cosas que el asistente intentó y no pudo, en lenguaje de negocio. La más importante: cuando alguien pide
+   * que SOEC opere solo y el sistema todavía no lo permite, hay que DECÍRSELO, no dejarlo suponiendo.
+   */
+  readonly avisos: readonly string[];
 }
 
 export interface EntradaRespuestas {
@@ -174,6 +179,7 @@ export class OnboardingService {
     const readiness = await this.readinessDe(org, ctx);
     const siguiente = siguientePaso(pasos);
     return {
+      avisos: this.avisos(ctx),
       organizationId: org,
       estado: estado?.estado ?? 'NOT_STARTED',
       pasoActual: estado?.pasoActual ?? siguiente,
@@ -209,6 +215,14 @@ export class OnboardingService {
       modoOperativo: ctx.modoOperativo,
       restriccionesRevisadas: revisadas,
     });
+  }
+
+  /** Resultados de intentos que no se pudieron aplicar (hoy: el nivel de autonomía pedido). */
+  private avisos(ctx: ContextoOnboarding): readonly string[] {
+    const r = ctx.respuestas.get('autonomia.resultado')?.valor as { ok?: boolean; motivo?: string; modo?: string } | undefined;
+    if (r === undefined || r.ok === true) return [];
+    const pedido = r.modo === 'AUTONOMOUS_REAL' ? 'operar automáticamente' : 'cambiar el nivel de autonomía';
+    return [`Pediste ${pedido} y no se pudo aplicar: ${r.motivo ?? 'motivo no disponible'}. El nivel sigue siendo el anterior.`];
   }
 
   private resumen(ctx: ContextoOnboarding): VistaOnboarding['resumen'] {
