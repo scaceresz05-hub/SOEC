@@ -136,7 +136,11 @@ Tres respuestas en lenguaje humano, mapeadas al modo operativo por la **vía gob
 |---|---|---|
 | solo observar y avisarme | `PILOT` (= OBSERVE) | sí — **valor por defecto** |
 | pedirme aprobación antes de hacer cambios | `SUPERVISED_REAL` | sí |
-| operar automáticamente dentro de mis límites | `AUTONOMOUS_REAL` | **no** en esta versión: el dominio lo rechaza y se explica |
+| operar automáticamente dentro de mis límites | `AUTONOMOUS_REAL` | **no** en esta versión: el dominio lo rechaza |
+
+Cuando el nivel pedido no se puede aplicar, el asistente devuelve un **aviso** con el motivo real y la interfaz
+lo muestra arriba («pediste operar automáticamente y no se pudo aplicar: …; el nivel sigue siendo el anterior»).
+No se deja a nadie suponiendo que quedó activado.
 
 ## 13. Readiness
 
