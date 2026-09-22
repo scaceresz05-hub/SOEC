@@ -424,6 +424,46 @@ describe('no saber la meta todavía no bloquea la preparación', () => {
   });
 });
 
+/**
+ * EL HORIZONTE DE EVALUACIÓN es OPCIONAL, y su sugerencia («si no sabes, deja 30») es sólo un texto de ayuda.
+ * Nadie puede acabar con 30 días declarados por haber pasado por la pantalla sin escribir nada: un plazo que
+ * el negocio no eligió condicionaría después cuándo se juzga el resultado.
+ */
+describe('el horizonte sugerido no se guarda solo', () => {
+  it('pasar por el paso del objetivo sin tocar el plazo lo deja en null', async () => {
+    const a = app();
+    const cookie = await usuario(a, 'duena-horizonte@soec.cl');
+    const org = await crearEmpresa(a, cookie, 'Empresa QA Horizonte');
+    const politica = new RepositorioPolitica(pool);
+
+    await responder(a, cookie, org, 'negocio', RESPUESTAS[0]!.respuestas);
+    // Sólo se elige QUÉ se quiere conseguir. El plazo no se toca.
+    await responder(a, cookie, org, 'objetivo', { 'objetivo.queQuieres': 'nuevos-clientes' });
+    expect((await politica.completa(org)).politica?.evaluationHorizonDays ?? null).toBeNull();
+
+    // Y volver a pasar por el paso, devolviendo lo precargado, tampoco lo inventa.
+    const v = (await a.inject({ method: 'GET', url: '/onboarding', headers: { cookie, 'x-organization-slug': org } })).json();
+    const paso = v.pasos.find((p: { id: string }) => p.id === 'objetivo');
+    const precargadas: Record<string, unknown> = {};
+    for (const q of paso.preguntas as ReadonlyArray<{ id: string; valorActual: unknown }>) {
+      if (q.valorActual !== null && q.valorActual !== '') precargadas[q.id] = q.valorActual;
+    }
+    await responder(a, cookie, org, 'objetivo', precargadas);
+    expect((await politica.completa(org)).politica?.evaluationHorizonDays ?? null).toBeNull();
+    await a.close();
+  });
+
+  it('escribir el plazo a propósito sí lo guarda', async () => {
+    const a = app();
+    const cookie = await usuario(a, 'duena-horizonte-si@soec.cl');
+    const org = await crearEmpresa(a, cookie, 'Empresa QA Horizonte Si');
+    await responder(a, cookie, org, 'negocio', RESPUESTAS[0]!.respuestas);
+    await responder(a, cookie, org, 'objetivo', { 'objetivo.queQuieres': 'nuevos-clientes', 'objetivo.enCuantoTiempo': 45 });
+    expect((await new RepositorioPolitica(pool).completa(org)).politica?.evaluationHorizonDays).toBe(45);
+    await a.close();
+  });
+});
+
 describe('navegar por el asistente no confirma ni reescribe datos', () => {
   beforeEach(async () => {
     await migrarNegociosDelRegistro(pool);
