@@ -569,6 +569,23 @@ const PASOS: readonly DefPaso[] = [
 ];
 
 /** Definiciones de pregunta por id, para validar entradas sin recorrer el catálogo a mano. */
+/** Definición cruda de una pregunta por id: hace falta para saber qué VALOR YA SABÍA SOEC antes de responder. */
+const DEF_POR_ID: ReadonlyMap<string, DefPregunta> = new Map(
+  PASOS.flatMap((p) => p.preguntas.map((q) => [q.id, q] as const)),
+);
+
+/**
+ * Lo que SOEC ya sabía de esta pregunta ANTES de que nadie la respondiera, derivado de los datos del negocio.
+ * `null` si no lo sabía. Es la referencia para distinguir una respuesta de verdad de la devolución de un valor
+ * precargado: si coinciden, nadie confirmó nada — sólo pasó por la pantalla.
+ */
+export function valorSabido(preguntaId: string, ctx: ContextoOnboarding): { readonly valor: unknown; readonly procedencia: ProcedenciaDato } | null {
+  const def = DEF_POR_ID.get(preguntaId);
+  if (def === undefined) return null;
+  if (def.aplica !== undefined && !def.aplica(ctx)) return null;
+  return def.yaSabemos?.(ctx) ?? null;
+}
+
 export const PREGUNTAS_POR_ID: ReadonlyMap<string, { paso: PasoId; tipo: TipoPregunta }> = new Map(
   PASOS.flatMap((p) => p.preguntas.map((q) => [q.id, { paso: p.id, tipo: q.tipo }] as const)),
 );

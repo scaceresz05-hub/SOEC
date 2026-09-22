@@ -22,7 +22,9 @@ import {
   completarOnboarding,
   guardarPaso,
   leerOnboarding,
+  respuestasAEnviar,
   revisarSitio,
+  type Respuestas,
   type PasoVista,
   type PreguntaVista,
   type VistaOnboarding,
@@ -32,7 +34,6 @@ const campo = { width: '100%', padding: 10, fontSize: 16, boxSizing: 'border-box
 const bloque = { display: 'block', marginBottom: 20 };
 const etiquetaEstilo = { display: 'block', fontWeight: 600, marginBottom: 6 };
 
-type Respuestas = Record<string, unknown>;
 
 function valorInicial(p: PreguntaVista): unknown {
   if (p.valorActual !== null && p.valorActual !== undefined) return p.valorActual;
@@ -44,6 +45,8 @@ export default function OnboardingPage() {
   const [vista, setVista] = useState<VistaOnboarding | null>(null);
   const [pasoId, setPasoId] = useState<string | null>(null);
   const [respuestas, setRespuestas] = useState<Respuestas>({});
+  // Qué preguntas tocó la persona en ESTE paso. Se vacía al cambiar de paso: la precarga no cuenta como tocar.
+  const [tocadas, setTocadas] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -83,25 +86,30 @@ export default function OnboardingPage() {
     const inicial: Respuestas = {};
     for (const p of actual.preguntas) inicial[p.id] = valorInicial(p);
     setRespuestas(inicial);
+    setTocadas(new Set());
   }, [idDelPaso]);
+
+  /** Único camino por el que una respuesta cambia: marca la pregunta como tocada por una persona. */
+  const responder = useCallback((id: string, valor: unknown): void => {
+    setRespuestas((previas) => ({ ...previas, [id]: valor }));
+    setTocadas((previas) => new Set([...previas, id]));
+  }, []);
 
   const guardar = useCallback(
     async (avanzar: boolean): Promise<VistaOnboarding | null> => {
       if (org === null || paso === null) return null;
-      const soloConValor = Object.fromEntries(
-        Object.entries(respuestas).filter(([, v]) => v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)),
-      );
+      const soloConValor = respuestasAEnviar(respuestas, tocadas);
       if (Object.keys(soloConValor).length === 0 && !avanzar) return null;
       const v = await guardarPaso(org, paso.id, soloConValor, avanzar);
       setVista(v);
       return v;
     },
-    [org, paso, respuestas],
+    [org, paso, respuestas, tocadas],
   );
 
   // GUARDADO AUTOMÁTICO: lo que escribes no se pierde aunque te vayas sin pulsar nada.
   useEffect(() => {
-    if (org === null || paso === null || Object.keys(respuestas).length === 0) return;
+    if (org === null || paso === null || tocadas.size === 0) return;
     if (guardadoPendiente.current !== null) clearTimeout(guardadoPendiente.current);
     guardadoPendiente.current = setTimeout(() => {
       void guardar(false).catch(() => undefined);
@@ -109,7 +117,7 @@ export default function OnboardingPage() {
     return () => {
       if (guardadoPendiente.current !== null) clearTimeout(guardadoPendiente.current);
     };
-  }, [respuestas, org, paso, guardar]);
+  }, [respuestas, tocadas, org, paso, guardar]);
 
   async function conCarga(fn: () => Promise<void>): Promise<void> {
     setOcupado(true);
@@ -183,16 +191,16 @@ export default function OnboardingPage() {
               )}
 
               {p.tipo === 'TEXTO' && (
-                <input id={p.id} value={String(respuestas[p.id] ?? '')} onChange={(e) => setRespuestas({ ...respuestas, [p.id]: e.target.value })} style={campo} />
+                <input id={p.id} value={String(respuestas[p.id] ?? '')} onChange={(e) => responder(p.id, e.target.value)} style={campo} />
               )}
               {p.tipo === 'TEXTO_LARGO' && (
-                <textarea id={p.id} rows={3} value={String(respuestas[p.id] ?? '')} onChange={(e) => setRespuestas({ ...respuestas, [p.id]: e.target.value })} style={campo} />
+                <textarea id={p.id} rows={3} value={String(respuestas[p.id] ?? '')} onChange={(e) => responder(p.id, e.target.value)} style={campo} />
               )}
               {p.tipo === 'NUMERO' && (
-                <input id={p.id} inputMode="decimal" value={String(respuestas[p.id] ?? '')} onChange={(e) => setRespuestas({ ...respuestas, [p.id]: e.target.value })} style={campo} />
+                <input id={p.id} inputMode="decimal" value={String(respuestas[p.id] ?? '')} onChange={(e) => responder(p.id, e.target.value)} style={campo} />
               )}
               {p.tipo === 'OPCION' && (
-                <select id={p.id} value={String(respuestas[p.id] ?? '')} onChange={(e) => setRespuestas({ ...respuestas, [p.id]: e.target.value })} style={campo}>
+                <select id={p.id} value={String(respuestas[p.id] ?? '')} onChange={(e) => responder(p.id, e.target.value)} style={campo}>
                   <option value="">Elige una…</option>
                   {p.opciones.map((o) => <option key={o.valor} value={o.valor}>{o.etiqueta}</option>)}
                 </select>
@@ -207,10 +215,7 @@ export default function OnboardingPage() {
                         <input
                           type="checkbox"
                           checked={marcada}
-                          onChange={() => setRespuestas({
-                            ...respuestas,
-                            [p.id]: marcada ? actuales.filter((x) => x !== o.valor) : [...actuales, o.valor],
-                          })}
+                          onChange={() => responder(p.id, marcada ? actuales.filter((x) => x !== o.valor) : [...actuales, o.valor])}
                           style={{ width: 20, height: 20 }}
                         />
                         <span>{o.etiqueta}</span>
@@ -225,7 +230,7 @@ export default function OnboardingPage() {
                     <button
                       key={o.t}
                       type="button"
-                      onClick={() => setRespuestas({ ...respuestas, [p.id]: o.v })}
+                      onClick={() => responder(p.id, o.v)}
                       className="btn"
                       style={{
                         padding: '10px 20px',

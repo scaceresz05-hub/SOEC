@@ -164,3 +164,20 @@ export async function reabrirOnboarding(org: string): Promise<VistaOnboarding> {
     }),
   );
 }
+
+export type Respuestas = Record<string, unknown>;
+
+/**
+ * Lo que se envía al guardar un paso: SÓLO las preguntas que la persona TOCÓ, y sólo si tienen valor.
+ *
+ * Pasar por un paso no es responderlo. El formulario se precarga con lo que SOEC ya sabe para que se pueda
+ * corregir de un vistazo; si al guardar devolviéramos todo eso, volver atrás a cambiar UNA cosa convertiría en
+ * «lo confirmó el dueño» cada dato que el sistema había deducido, y lo escribiría en el negocio.
+ */
+export function respuestasAEnviar(respuestas: Respuestas, tocadas: ReadonlySet<string>): Respuestas {
+  return Object.fromEntries(
+    Object.entries(respuestas).filter(
+      ([id, v]) => tocadas.has(id) && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0),
+    ),
+  );
+}

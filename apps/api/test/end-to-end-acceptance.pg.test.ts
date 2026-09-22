@@ -638,10 +638,10 @@ describe('inventario de la verdad para una empresa nueva', () => {
     expect((p.items as Vista[])).toHaveLength(18);
     const pendientes = (p.items as Vista[]).filter((x) => x.estado !== 'READY' && x.estado !== 'OPTIONAL');
     expect(pendientes.map((x) => `${x.item}:${x.estado}:${x.observado}`)).toEqual([]);
-    expect((p.hitos as Vista[]).find((x) => x.hito === 'CREAR_CAMPANA').listo).toBe(true);
-    expect((p.hitos as Vista[]).find((x) => x.hito === 'ENCENDER_CAMPANA').listo).toBe(true);
+    expect((p.hitos as Vista[]).find((x) => x.hito === 'CREAR_CAMPANA')?.listo).toBe(true);
+    expect((p.hitos as Vista[]).find((x) => x.hito === 'ENCENDER_CAMPANA')?.listo).toBe(true);
     // La autonomía nunca se concede por haber llegado hasta aquí.
-    expect((p.hitos as Vista[]).find((x) => x.hito === 'OPERAR_CON_AUTONOMIA').listo).toBe(false);
+    expect((p.hitos as Vista[]).find((x) => x.hito === 'OPERAR_CON_AUTONOMIA')?.listo).toBe(false);
 
     // Una empresa recién creada, sin tocarle nada.
     const cookieVacia = await registrar(a, 'duena-vacia@soec.cl');

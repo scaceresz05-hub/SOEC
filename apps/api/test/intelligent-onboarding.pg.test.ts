@@ -362,6 +362,124 @@ describe('aislamiento entre empresas', () => {
   });
 });
 
+/**
+ * REGRESIÓN DE LA FASE H · «pasar por una pantalla no es responderla».
+ *
+ * El caso real: una empresa histórica abre el asistente, vuelve atrás para corregir SÓLO su sitio web, y de
+ * paso cruza los pasos de oferta y territorio. La interfaz precarga cada pregunta con lo que SOEC ya sabe; si
+ * eso se devuelve tal cual al guardar, el sistema lo tomaba por una decisión del dueño: marcaba todo como
+ * `USER_CONFIRMED` y lo reescribía en el negocio — llegando a pisar la REGIÓN con el nombre de la PROVINCIA y
+ * a cambiar las prioridades de una oferta que nadie tocó.
+ */
+describe('navegar por el asistente no confirma ni reescribe datos', () => {
+  beforeEach(async () => {
+    await migrarNegociosDelRegistro(pool);
+    await migrarConexionesDelRegistro(pool);
+    await migrarPoliticasDelRegistro(pool);
+  });
+
+  const ORG = 'org-cp-odontologia';
+  const estadoOferta = async (): Promise<readonly string[]> =>
+    [...(await new RepositorioNegocios(pool).oferta(ORG))].map((o) => `${o.slug}:${o.priority}:${o.status}`).sort();
+  const territorioDe = async () =>
+    (await new RepositorioNegocios(pool).territorios(ORG)).find((t) => t.ambito === 'BUSINESS');
+  const dominiosDe = async (a: App, cookie: string): Promise<readonly string[]> =>
+    (await a.inject({ method: 'GET', url: '/onboarding', headers: { cookie, 'x-organization-slug': ORG } }))
+      .json().readiness.dominios.map((d: { dominio: string; estado: string }) => `${d.dominio}:${d.estado}`);
+  const preparacionDe = async (a: App, cookie: string): Promise<readonly string[]> =>
+    (await a.inject({ method: 'GET', url: '/aceptacion/preparacion', headers: { cookie, 'x-organization-slug': ORG } }))
+      .json().preparacion.items.map((i: { item: string; estado: string }) => `${i.item}:${i.estado}`);
+
+  /** Lo que hacía la interfaz antigua: devolver TODO lo precargado del paso, sin que nadie tocara nada. */
+  async function devolverLoPrecargado(a: App, cookie: string, paso: string): Promise<void> {
+    const v = (await a.inject({ method: 'GET', url: '/onboarding', headers: { cookie, 'x-organization-slug': ORG } })).json();
+    const preguntas = v.pasos.find((p: { id: string }) => p.id === paso).preguntas as ReadonlyArray<{ id: string; valorActual: unknown }>;
+    const respuestas: Record<string, unknown> = {};
+    for (const q of preguntas) {
+      const vacio = q.valorActual === null || q.valorActual === '' || (Array.isArray(q.valorActual) && q.valorActual.length === 0);
+      if (!vacio) respuestas[q.id] = q.valorActual;
+    }
+    const res = await a.inject({
+      method: 'PATCH', url: '/onboarding', headers: { ...H, cookie, 'x-organization-slug': ORG },
+      payload: { paso, respuestas, avanzar: true },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+  }
+
+  it('cruzar los pasos precargados no cambia ni un dato ni una procedencia', async () => {
+    const a = app();
+    const cookie = await duenaDeEmpresaHistorica(a, 'duena-navega@soec.cl', ORG);
+
+    const territorioAntes = await territorioDe();
+    const ofertaAntes = await estadoOferta();
+    const dominiosAntes = await dominiosDe(a, cookie);
+    // La región migrada es la ADMINISTRATIVA, distinta de la provincia: es justo lo que el fallo pisaba.
+    expect(territorioAntes?.region).toBe('Región del Maule');
+    expect(territorioAntes?.province).toBe('Provincia de Curicó');
+
+    for (const paso of ['negocio', 'oferta', 'territorio']) await devolverLoPrecargado(a, cookie, paso);
+
+    expect(await territorioDe()).toEqual(territorioAntes);
+    expect(await estadoOferta()).toEqual(ofertaAntes);
+
+    // Y ninguna respuesta precargada quedó como decisión de una persona.
+    const respuestas = await new RepositorioOnboarding(pool).respuestas(ORG);
+    const confirmadas = respuestas.filter((r) => r.confirmacion === 'USER_CONFIRMED').map((r) => r.pregunta);
+    expect(confirmadas, `no las confirmó nadie: ${confirmadas.join(', ')}`).toEqual([]);
+    expect(await dominiosDe(a, cookie)).toEqual(dominiosAntes);
+    await a.close();
+  });
+
+  it('corregir SÓLO el sitio web cambia el sitio web, y nada más', async () => {
+    const a = app();
+    const cookie = await duenaDeEmpresaHistorica(a, 'duena-sitio@soec.cl', ORG);
+    const negocios = new RepositorioNegocios(pool);
+
+    const territorioAntes = await territorioDe();
+    const ofertaAntes = await estadoOferta();
+    const perfilAntes = (await negocios.perfil(ORG))!;
+    const prepAntes = await preparacionDe(a, cookie);
+    expect(perfilAntes.website).toBeNull();
+
+    // Va hacia atrás, cruza pasos precargados y escribe ÚNICAMENTE el sitio.
+    for (const paso of ['territorio', 'oferta']) await devolverLoPrecargado(a, cookie, paso);
+    const res = await a.inject({
+      method: 'PATCH', url: '/onboarding', headers: { ...H, cookie, 'x-organization-slug': ORG },
+      payload: { paso: 'negocio', respuestas: { 'negocio.sitio': 'https://www.ejemplo-clinica.cl' }, avanzar: false },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const perfilDespues = (await negocios.perfil(ORG))!;
+    expect(perfilDespues.website).toBe('https://www.ejemplo-clinica.cl/'); // normalizado por `sitioValido`
+    expect({ ...perfilDespues, website: null, updatedAt: perfilAntes.updatedAt }).toEqual({ ...perfilAntes, website: null });
+    expect(await territorioDe()).toEqual(territorioAntes);
+    expect(await estadoOferta()).toEqual(ofertaAntes);
+
+    // Sólo el sitio confirmado por la persona queda como suyo.
+    const respuestas = await new RepositorioOnboarding(pool).respuestas(ORG);
+    expect(respuestas.filter((r) => r.confirmacion === 'USER_CONFIRMED').map((r) => r.pregunta)).toEqual(['negocio.sitio']);
+
+    // La preparación cambia SÓLO donde el sitio es la dependencia.
+    const prepDespues = await preparacionDe(a, cookie);
+    const cambios = prepDespues.filter((x, i) => x !== prepAntes[i]);
+    expect(cambios).toEqual(['SITIO_WEB_OBSERVADO:SYSTEM_ACTION_REQUIRED']);
+    await a.close();
+  });
+
+  it('una corrección de verdad sí manda: escribir otra región la cambia', async () => {
+    const a = app();
+    const cookie = await duenaDeEmpresaHistorica(a, 'duena-region@soec.cl', ORG);
+    await a.inject({
+      method: 'PATCH', url: '/onboarding', headers: { ...H, cookie, 'x-organization-slug': ORG },
+      payload: { paso: 'territorio', respuestas: { 'territorio.region': 'Región de Ñuble' }, avanzar: false },
+    });
+    expect((await territorioDe())?.region).toBe('Región de Ñuble');
+    const respuestas = await new RepositorioOnboarding(pool).respuestas(ORG);
+    expect(respuestas.find((r) => r.pregunta === 'territorio.region')?.confirmacion).toBe('USER_CONFIRMED');
+    await a.close();
+  });
+});
+
 describe('empresas que ya existían', () => {
   beforeEach(async () => {
     await migrarNegociosDelRegistro(pool);

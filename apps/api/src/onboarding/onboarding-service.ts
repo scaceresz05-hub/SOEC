@@ -33,6 +33,7 @@ import {
   construirPasos,
   progreso,
   siguientePaso,
+  valorSabido,
   type ContextoOnboarding,
   type PasoVista,
 } from './onboarding-preguntas';
@@ -131,6 +132,20 @@ const comoNumero = (v: unknown): number | null => {
   const n = Number(String(v).replace(/[^0-9.,-]/g, '').replace(',', '.'));
   return Number.isFinite(n) ? n : null;
 };
+
+/**
+ * ¿Son el mismo valor a efectos de una respuesta? Compara listas sin importar el orden y texto sin espacios
+ * sobrantes. Es lo que permite distinguir «lo escribí yo» de «me lo devolvió la pantalla tal cual».
+ */
+function mismoValor(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    const la = (Array.isArray(a) ? a : [a]).map((x) => String(x ?? '').trim()).filter((x) => x !== '').sort();
+    const lb = (Array.isArray(b) ? b : [b]).map((x) => String(x ?? '').trim()).filter((x) => x !== '').sort();
+    return la.length === lb.length && la.every((x, i) => x === lb[i]);
+  }
+  if (typeof a === 'string' || typeof b === 'string') return String(a ?? '').trim() === String(b ?? '').trim();
+  return a === b;
+}
 
 export class OnboardingService {
   private readonly repo: RepositorioOnboarding;
@@ -290,6 +305,20 @@ export class OnboardingService {
     const primeraVez = await enTransaccion(this.pool, async (c) => {
       const iniciado = await this.repo.iniciarSiFalta(c, org, paso);
       for (const [pregunta, valor] of nuevas) {
+        // PASAR POR UNA PANTALLA NO ES RESPONDERLA. La interfaz precarga lo que SOEC ya sabe para que se
+        // corrija, no para que se confirme sin mirarlo: si lo que llega es EXACTAMENTE ese valor precargado,
+        // nadie ha decidido nada y la procedencia se conserva. Sólo un valor DISTINTO del que ya teníamos es
+        // una respuesta de una persona. Sin esta regla, navegar congelaría como «confirmado por el dueño»
+        // todo lo que el sistema había deducido, y lo escribiría en el negocio.
+        const yaEstaba = antes.respuestas.get(pregunta) ?? null;
+        const sabido = yaEstaba === null ? valorSabido(pregunta, antes) : null;
+        if (yaEstaba !== null && mismoValor(yaEstaba.valor, valor)) continue; // idéntico a lo guardado: no se toca
+        if (sabido !== null && mismoValor(sabido.valor, valor)) {
+          await this.repo.guardarRespuesta(c, {
+            organizationId: org, pregunta, valor, procedencia: sabido.procedencia, confirmacion: 'DISCOVERED',
+          });
+          continue;
+        }
         await this.repo.guardarRespuesta(c, {
           organizationId: org, pregunta, valor, procedencia: 'USER', confirmacion: 'USER_CONFIRMED',
         });
