@@ -135,6 +135,21 @@ Un cambio hecho fuera de SOEC se detecta y se **muestra**; no se sobrescribe. Y 
 * en modo sombra hay decisiones y **cero** escrituras;
 * una empresa no corre el ciclo, no aprueba y no enciende la campaña de otra.
 
-## 16. Lo que esta fase NO hace
+## 16. Validación en sombra sobre una cuenta real
+
+El 2026-09-22 se ejecutó un ciclo en modo `SHADOW` sobre la campaña real de SmileFlow (`24194332264`), con el
+cliente de LECTURA — esa organización no tiene la capacidad de escritura activada:
+
+```
+optimizacion="observacion" org="org-smileflow" campaña="24194332264" palabras=22 terminos=0 datosHasta=null
+ciclo: modo=SHADOW estado=WAITING_FOR_EVIDENCE
+motivo: "no hay datos de impressions en esta ventana"
+```
+
+Resultado correcto y aburrido: la campaña lleva pausada desde principios de septiembre, así que en la ventana
+observada **no hay datos**. El motor lo dijo tal cual — `sin dato`, nunca cero— y terminó sin decidir nada.
+Cero escrituras al proveedor, cero 403, cero 429, y la campaña sigue en pausa.
+
+## 17. Lo que esta fase NO hace
 
 No cambia la estrategia de puja · no crea palabras ni anuncios · no rota creatividades · no negativiza por reglas genéricas de vocabulario comercial · no escribe en Meta · no enciende nada sin permiso explícito · no sube el presupuesto por encima del mandato · no sobrescribe los cambios que haga una persona por fuera.
