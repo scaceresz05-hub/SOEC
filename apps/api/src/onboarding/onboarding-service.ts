@@ -39,6 +39,7 @@ import {
 } from './onboarding-preguntas';
 import { evaluarReadiness, type BusinessReadiness } from './readiness';
 import { PgMandatoRepo } from '../accion/accion-pg';
+import { aUnidadesMayores, aUnidadesMenores, normalizarMoneda } from '../dinero';
 import { inspeccionarSitio, validarUrlDeSitio, type OpcionesInspeccion } from './sitio-web';
 import {
   MODO_DE_PREFERENCIA,
@@ -268,7 +269,7 @@ export class OnboardingService {
         ? 'por ahora no quiere invertir'
         : presupuesto.modalidad === 'LATER'
           ? 'lo decidirá después'
-          : `${presupuesto.montoClp ?? 0} ${presupuesto.moneda} como máximo ${presupuesto.modalidad === 'DAILY' ? 'por día' : 'por mes'}`;
+          : `${aUnidadesMayores(presupuesto.montoMinor, presupuesto.moneda || 'CLP') ?? 0} ${presupuesto.moneda} como máximo ${presupuesto.modalidad === 'DAILY' ? 'por día' : 'por mes'}`;
     const modo = ctx.modoOperativo === 'SUPERVISED_REAL'
       ? 'pide aprobación antes de cambiar algo'
       : ctx.modoOperativo === 'AUTONOMOUS_REAL'
@@ -471,7 +472,7 @@ export class OnboardingService {
     if (paso === 'contacto') await this.traducirContacto(org, actor, ctx, valor);
     if (paso === 'restricciones') await this.traducirRestricciones(org, ctx);
     if (paso === 'medicion') await this.traducirMedicion(org, actor, ctx, valor);
-    if (paso === 'presupuesto') await this.traducirPresupuesto(org, actor, valor);
+    if (paso === 'presupuesto') await this.traducirPresupuesto(org, actor, ctx, valor);
     if (paso === 'autonomia') await this.traducirAutonomia(org, actor, valor);
     // `conexiones` no escribe nada: conectar una cuenta es un acto aparte (OAuth) y la respuesta sólo
     // sirve para saber qué esperar. `resumen` tampoco: es una pantalla de revisión.
@@ -681,21 +682,39 @@ export class OnboardingService {
     if (Object.keys(doc).length > 0) await this.politica.guardar(org, actor, doc);
   }
 
-  private async traducirPresupuesto(org: string, actor: string, valor: (id: string) => unknown): Promise<void> {
+  /**
+   * TECHO DE INVERSIÓN. Tres cosas que aquí se hacen bien a propósito:
+   *
+   *  1. La MONEDA sale del perfil del negocio, no de una constante. Sin moneda declarada no se guarda importe:
+   *     un número sin moneda no significa nada, y suponer pesos sería inventar.
+   *  2. El importe se guarda en unidades MENORES, la misma convención del mandato financiero.
+   *  3. El tope operativo diario se RECALCULA en cada respuesta, incluido a `null`. Si alguien declaró un
+   *     máximo por día y luego cambia a mensual, a «todavía no» o borra la cifra, el tope viejo desaparece:
+   *     un límite residual de una decisión que ya no existe es peor que no tener ninguno.
+   *
+   * Nada de esto autoriza gasto: la autorización financiera es un mandato, y lo firma una persona aparte.
+   */
+  private async traducirPresupuesto(org: string, actor: string, ctx: ContextoOnboarding, valor: (id: string) => unknown): Promise<void> {
     const modalidad = comoTexto(valor('presupuesto.modalidad')) as ModalidadPresupuesto;
     if (modalidad === '' as ModalidadPresupuesto) return;
-    const monto = comoNumero(valor('presupuesto.monto'));
+    const moneda = normalizarMoneda(ctx.perfil.currency);
+    const declaraImporte = modalidad === 'DAILY' || modalidad === 'MONTHLY';
+    const montoMinor = declaraImporte && moneda !== null
+      ? aUnidadesMenores(comoNumero(valor('presupuesto.monto')), moneda)
+      : null;
+
     await enTransaccion(this.pool, async (c) => {
       await this.repo.guardarIntencionPresupuesto(c, {
-        organizationId: org, modalidad, montoClp: modalidad === 'DAILY' || modalidad === 'MONTHLY' ? monto : null,
-        moneda: 'CLP', declaradoPor: actor,
+        organizationId: org, modalidad, montoMinor,
+        // Sin moneda en el perfil se guarda la intención (la modalidad SÍ es una decisión) pero sin importe;
+        // la preparación lo dirá como incompleto en lugar de fingir un techo.
+        moneda: moneda ?? '', declaradoPor: actor,
       });
     });
-    // Un máximo POR DÍA es exactamente el tope operativo que SOEC no puede pasar: va a su tabla canónica.
-    // Guardar un techo NO autoriza gastar: la autorización financiera es un mandato y la crea una persona
-    // en un acto aparte.
-    if (modalidad === 'DAILY' && monto !== null) {
-      await this.politica.guardar(org, actor, { limites: { maxDailyBudgetClp: monto } });
+
+    const topeDiario = modalidad === 'DAILY' ? montoMinor : null;
+    if (topeDiario !== (ctx.politica.limites?.maxDailyBudgetClp ?? null)) {
+      await this.politica.guardar(org, actor, { limites: { maxDailyBudgetClp: topeDiario } });
     }
   }
 

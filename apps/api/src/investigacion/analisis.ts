@@ -38,7 +38,7 @@ export interface ContextoAnalisis {
   /** Eventos de conversión declarados en la política (Fase C). Vacío ⇒ no hay qué medir. */
   readonly eventosConversion: readonly string[];
   /** Techo de inversión declarado (Fase D). `null` ⇒ no hay presupuesto declarado. */
-  readonly techoDeclarado: { readonly modalidad: string; readonly montoClp: number | null } | null;
+  readonly techoDeclarado: { readonly modalidad: string; readonly montoMinor: number | null } | null;
   /** Canales permitidos o prohibidos declarados por el negocio (Fase C). */
   readonly reglasCanal: readonly { readonly canal: string; readonly modo: string }[];
   /** `true` si la fuente de demanda estuvo disponible en esta corrida. */

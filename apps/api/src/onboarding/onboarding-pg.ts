@@ -66,7 +66,12 @@ export interface ObservacionSitio {
 export interface IntencionPresupuesto {
   readonly organizationId: string;
   readonly modalidad: ModalidadPresupuesto;
-  readonly montoClp: number | null;
+  /**
+   * Importe en unidades MENORES de `moneda` (misma convención que `authorizedBudgetMinor` del mandato).
+   * `null` para `NONE`/`LATER`, y también mientras un `DAILY`/`MONTHLY` no tenga cifra: un techo sin número
+   * no es un techo.
+   */
+  readonly montoMinor: number | null;
   readonly moneda: string;
   readonly declaradoPor: string;
   readonly declaradoEn: string;
@@ -119,6 +124,17 @@ export const onboardingMigrations: ReadonlyArray<Migration> = [
         declarado_por   text not null,
         declarado_en    timestamptz not null default now()
       );
+    `,
+  },
+  {
+    id: '0002_techo_en_unidades_menores',
+    sql: `
+      -- El techo de inversión deja de vivir en una columna con la moneda en el nombre. La forma canónica es
+      -- la misma del mandato financiero: entero en unidades MENORES + moneda ISO 4217.
+      alter table business_budget_intent add column if not exists monto_minor bigint;
+      -- Compatibilidad: lo ya declarado era CLP, que no tiene decimales, así que el número no cambia.
+      update business_budget_intent set monto_minor = round(monto_clp)
+       where monto_minor is null and monto_clp is not null;
     `,
   },
 ];
@@ -240,12 +256,15 @@ export class RepositorioOnboarding {
   }
 
   async guardarIntencionPresupuesto(q: Queryable, i: Omit<IntencionPresupuesto, 'declaradoEn'>): Promise<void> {
+    // `monto_clp` se conserva como ESPEJO sólo cuando la moneda es CLP: los lectores antiguos siguen viendo
+    // lo mismo y nadie puede confundir un importe en otra moneda con pesos.
+    const espejoClp = i.moneda === 'CLP' ? i.montoMinor : null;
     await q.query(
-      `insert into business_budget_intent (organization_id, modalidad, monto_clp, moneda, declarado_por, declarado_en)
-       values ($1,$2,$3,$4,$5, now())
-       on conflict (organization_id) do update set modalidad = excluded.modalidad, monto_clp = excluded.monto_clp,
-         moneda = excluded.moneda, declarado_por = excluded.declarado_por, declarado_en = now()`,
-      [i.organizationId, i.modalidad, i.montoClp, i.moneda, i.declaradoPor],
+      `insert into business_budget_intent (organization_id, modalidad, monto_minor, monto_clp, moneda, declarado_por, declarado_en)
+       values ($1,$2,$3,$4,$5,$6, now())
+       on conflict (organization_id) do update set modalidad = excluded.modalidad, monto_minor = excluded.monto_minor,
+         monto_clp = excluded.monto_clp, moneda = excluded.moneda, declarado_por = excluded.declarado_por, declarado_en = now()`,
+      [i.organizationId, i.modalidad, i.montoMinor, espejoClp, i.moneda, i.declaradoPor],
     );
   }
 
@@ -256,7 +275,10 @@ export class RepositorioOnboarding {
     return {
       organizationId: String(r.organization_id),
       modalidad: String(r.modalidad) as ModalidadPresupuesto,
-      montoClp: r.monto_clp === null || r.monto_clp === undefined ? null : Number(r.monto_clp),
+      // Filas anteriores a la migración: su importe estaba en CLP, que no tiene decimales.
+      montoMinor: r.monto_minor !== null && r.monto_minor !== undefined
+        ? Number(r.monto_minor)
+        : (r.monto_clp === null || r.monto_clp === undefined ? null : Math.round(Number(r.monto_clp))),
       moneda: String(r.moneda ?? 'CLP'),
       declaradoPor: String(r.declarado_por),
       declaradoEn: iso(r.declarado_en) ?? '',

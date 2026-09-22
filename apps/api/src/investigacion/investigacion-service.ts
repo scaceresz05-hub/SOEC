@@ -117,7 +117,7 @@ interface ContextoNegocio {
   readonly restricciones: readonly RestriccionNegocio[];
   readonly eventosConversion: readonly string[];
   readonly reglasCanal: readonly { readonly canal: string; readonly modo: string }[];
-  readonly techoDeclarado: { readonly modalidad: string; readonly montoClp: number | null } | null;
+  readonly techoDeclarado: { readonly modalidad: string; readonly montoMinor: number | null } | null;
   readonly conexionAdsConectada: boolean;
   readonly capacidadLectura: boolean;
 }
@@ -161,7 +161,7 @@ export class InvestigacionService {
       restricciones,
       eventosConversion: politica.eventos.map((e) => e.eventKey),
       reglasCanal: politica.canales.map((c) => ({ canal: c.canal, modo: c.modo })),
-      techoDeclarado: presupuesto === null ? null : { modalidad: presupuesto.modalidad, montoClp: presupuesto.montoClp },
+      techoDeclarado: presupuesto === null ? null : { modalidad: presupuesto.modalidad, montoMinor: presupuesto.montoMinor },
       conexionAdsConectada: conexiones.some((c) => c.provider === 'GOOGLE_ADS' && c.estado === 'CONNECTED'),
       capacidadLectura: habilitadas.has('MEDICION_REAL') || habilitadas.has('AUTONOMIA_ADS'),
     };

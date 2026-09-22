@@ -40,7 +40,7 @@ export interface EntradaPlanificador {
   readonly geos: readonly GeoEjecutable[];
   readonly canales: readonly EvaluacionCanal[];
   readonly landings: readonly CompatibilidadLanding[];
-  readonly techoDeclarado: { readonly modalidad: string; readonly montoClp: number | null } | null;
+  readonly techoDeclarado: { readonly modalidad: string; readonly montoMinor: number | null } | null;
   /** `true` sólo si existe una acción de conversión verificada en la plataforma. Hoy nunca: no se crean. */
   readonly conversionExternaVerificada: boolean;
   /** Historial fiable de conversiones observado. Sin él, la puja no puede optimizar a conversiones. */
@@ -165,16 +165,16 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
   const cpcEstimado = mediana(candidatos.map((t) => pujaAltaDe(t) ?? pujaBajaDe(t) ?? 0).filter((v): v is number => v !== null));
   const volumenTotal = candidatos.reduce((a, t) => a + volumenDe(t), 0);
   const oportunidadDiaria = cpcEstimado !== null && volumenTotal > 0 ? Math.round((volumenTotal / 30) * cpcEstimado) : null;
-  const techoDiario = e.techoDeclarado === null || e.techoDeclarado.montoClp === null
+  const techoDiario = e.techoDeclarado === null || e.techoDeclarado.montoMinor === null
     ? null
     : e.techoDeclarado.modalidad === 'DAILY'
-      ? e.techoDeclarado.montoClp
+      ? e.techoDeclarado.montoMinor
       : e.techoDeclarado.modalidad === 'MONTHLY'
-        ? Math.round(e.techoDeclarado.montoClp / 30)
+        ? Math.round(e.techoDeclarado.montoMinor / 30)
         : null;
 
   const presupuesto: PropuestaPresupuesto = {
-    techoDeclaradoClp: e.techoDeclarado?.montoClp ?? null,
+    techoDeclaradoClp: e.techoDeclarado?.montoMinor ?? null,
     modalidadTecho: e.techoDeclarado?.modalidad ?? null,
     propuestoDiarioClp: techoDiario,
     oportunidadDiariaClp: oportunidadDiaria,

@@ -21,6 +21,7 @@ import type { OfertaNegocio, PerfilNegocio, RestriccionNegocio, TerritorioNegoci
 import type { CapacidadPersistida, Conexion } from '../conexion/conexion-pg';
 import type { PoliticaCompleta } from '../politica/politica-pg';
 import { DEFAULTS_EVIDENCIA_V1, VERSION_DEFAULTS_EVIDENCIA } from '../politica/politica-tipos';
+import { aUnidadesMayores, normalizarMoneda } from '../dinero';
 import type { IntencionPresupuesto, ObservacionSitio, RespuestaOnboarding } from './onboarding-pg';
 import {
   PASOS_EN_ORDEN,
@@ -541,8 +542,15 @@ const PASOS: readonly DefPaso[] = [
         etiqueta: '¿De cuánto sería ese máximo?',
         ayuda: 'En pesos. Es un techo que SOEC no puede pasar.',
         tipo: 'NUMERO',
+        // Sólo se pregunta si se eligió un máximo, y entonces es OBLIGATORIA: «un máximo por día» sin número
+        // no es un techo, y el paso no puede darse por hecho.
+        requerida: true,
         aplica: (ctx) => ['DAILY', 'MONTHLY'].includes(textoDe(ctx, 'presupuesto.modalidad')),
-        yaSabemos: (ctx) => (ctx.presupuesto?.montoClp != null ? { valor: ctx.presupuesto.montoClp, procedencia: 'USER' } : null),
+        yaSabemos: (ctx) => {
+          const moneda = normalizarMoneda(ctx.presupuesto?.moneda ?? ctx.perfil.currency);
+          const mayor = moneda === null ? null : aUnidadesMayores(ctx.presupuesto?.montoMinor ?? null, moneda);
+          return mayor !== null ? { valor: mayor, procedencia: 'USER' } : null;
+        },
       },
     ],
   },

@@ -17,6 +17,7 @@ import { evaluarReadiness, type DatosDeReadiness } from '../src/onboarding/readi
 import type { PerfilNegocio, OfertaNegocio, TerritorioNegocio } from '../src/negocio/negocio-pg';
 import type { Conexion, CapacidadPersistida } from '../src/conexion/conexion-pg';
 import type { PoliticaCompleta } from '../src/politica/politica-pg';
+import type { IntencionPresupuesto } from '../src/onboarding/onboarding-pg';
 import type { CompletitudPerfil } from '../src/politica/politica-tipos';
 
 const ORG = 'empresa-qa-d1d2d3';
@@ -293,7 +294,7 @@ describe('5 · preparación por dominios y por niveles', () => {
       completitudPolitica: completitud('EVALUATION_PROFILE_COMPLETE'),
       conexiones: [conexion('GROWTH_M2M'), conexion('GOOGLE_ADS')],
       capacidades: [{ organizationId: ORG, capacidad: 'MEDICION_REAL', habilitada: true, origen: 'SISTEMA', nota: null, actor: 'onboarding', updatedAt: '' }],
-      presupuesto: { organizationId: ORG, modalidad: 'DAILY', montoClp: 5000, moneda: 'CLP', declaradoPor: 'dueño', declaradoEn: '' },
+      presupuesto: { organizationId: ORG, modalidad: 'DAILY', montoMinor: 5000, moneda: 'CLP', declaradoPor: 'dueño', declaradoEn: '' },
       restriccionesRevisadas: true,
       modoOperativo: 'SUPERVISED_REAL',
     }));
@@ -307,7 +308,7 @@ describe('5 · preparación por dominios y por niveles', () => {
 
   it('responder «no quiero invertir todavía» resuelve el dominio sin fingir que hay presupuesto', () => {
     const r = evaluarReadiness(negocioCompleto({
-      presupuesto: { organizationId: ORG, modalidad: 'NONE', montoClp: null, moneda: 'CLP', declaradoPor: 'dueño', declaradoEn: '' },
+      presupuesto: { organizationId: ORG, modalidad: 'NONE', montoMinor: null, moneda: 'CLP', declaradoPor: 'dueño', declaradoEn: '' },
     }));
     const dominio = r.dominios.find((d) => d.dominio === 'FINANCIAL_MANDATE')!;
     expect(dominio.estado).toBe('COMPLETE');
@@ -326,4 +327,36 @@ describe('5 · preparación por dominios y por niveles', () => {
     const evaluacion = r.dominios.find((d) => d.dominio === 'EVALUATION')!;
     expect(evaluacion.motivos[0]!.motivo).toContain('se aprenderá observando');
   });
+
+/**
+ * TECHO DE INVERSIÓN. «Un máximo por día» sin cifra no es un techo: es un formulario a medias. Y un número sin
+ * moneda no es dinero. Ninguno de los dos puede contar como preparación financiera.
+ */
+describe('el techo declarado exige cifra y moneda', () => {
+  const conTecho = (over: Partial<IntencionPresupuesto>): DatosDeReadiness => negocioCompleto({
+    presupuesto: { organizationId: ORG, modalidad: 'DAILY', montoMinor: 5000, moneda: 'CLP', declaradoPor: 'dueño', declaradoEn: '', ...over },
+  });
+  const estado = (d: DatosDeReadiness): string => evaluarReadiness(d).dominios.find((x) => x.dominio === 'FINANCIAL_MANDATE')!.estado;
+
+  it.each([
+    ['NONE sin cifra', { modalidad: 'NONE' as const, montoMinor: null }, 'COMPLETE'],
+    ['LATER sin cifra', { modalidad: 'LATER' as const, montoMinor: null }, 'COMPLETE'],
+    ['DAILY sin cifra', { modalidad: 'DAILY' as const, montoMinor: null }, 'INCOMPLETE'],
+    ['MONTHLY sin cifra', { modalidad: 'MONTHLY' as const, montoMinor: null }, 'INCOMPLETE'],
+    ['DAILY con cero', { modalidad: 'DAILY' as const, montoMinor: 0 }, 'INCOMPLETE'],
+    ['MONTHLY con cero', { modalidad: 'MONTHLY' as const, montoMinor: 0 }, 'INCOMPLETE'],
+    ['DAILY con cifra', { modalidad: 'DAILY' as const, montoMinor: 5000 }, 'COMPLETE'],
+    ['MONTHLY con cifra', { modalidad: 'MONTHLY' as const, montoMinor: 300_000 }, 'COMPLETE'],
+    ['DAILY sin moneda', { modalidad: 'DAILY' as const, montoMinor: 5000, moneda: '' }, 'INCOMPLETE'],
+  ])('%s ⇒ %s', (_caso, over, esperado) => {
+    expect(estado(conTecho(over as Partial<IntencionPresupuesto>))).toBe(esperado);
+  });
+
+  it('un máximo sin cifra tampoco cuenta como techo para poder ejecutar campañas', () => {
+    const bloqueos = (d: DatosDeReadiness): readonly string[] =>
+      evaluarReadiness(d).niveles.find((n) => n.nivel === 'CAMPAIGN_EXECUTION_READY')!.bloqueos;
+    expect(bloqueos(conTecho({ montoMinor: null }))).toContain('falta declarar un máximo de inversión');
+    expect(bloqueos(conTecho({ montoMinor: 5000 }))).not.toContain('falta declarar un máximo de inversión');
+  });
+});
 });

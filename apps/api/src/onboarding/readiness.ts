@@ -16,6 +16,7 @@ import type { CapacidadPersistida, Conexion } from '../conexion/conexion-pg';
 import type { PoliticaCompleta } from '../politica/politica-pg';
 import type { CompletitudPerfil } from '../politica/politica-tipos';
 import type { IntencionPresupuesto } from './onboarding-pg';
+import { monedaValida } from '../dinero';
 
 export type DominioReadiness =
   | 'BUSINESS_PROFILE'
@@ -225,10 +226,27 @@ function presupuestoDominio(d: DatosDeReadiness): DominioEvaluado {
     };
   }
   if (d.presupuesto.modalidad === 'NONE' || d.presupuesto.modalidad === 'LATER') {
+    // «Todavía no quiero invertir» es una respuesta COMPLETA: no hay importe ni moneda que declarar.
     return {
       dominio: 'FINANCIAL_MANDATE',
       estado: 'COMPLETE',
       motivos: [motivo('techo', 'por ahora no hay inversión declarada: SOEC observará sin gastar', 'cuando quieras invertir, fija un máximo')],
+    };
+  }
+  // Elegir «un máximo por día/mes» y no poner la cifra deja el formulario a medias, no un techo declarado.
+  if (d.presupuesto.montoMinor === null || d.presupuesto.montoMinor <= 0) {
+    return {
+      dominio: 'FINANCIAL_MANDATE',
+      estado: 'INCOMPLETE',
+      motivos: [motivo('techo', 'elegiste un máximo pero falta la cifra', 'escribir cuánto como máximo estarías dispuesto a invertir')],
+    };
+  }
+  // Y un número sin moneda no es dinero: se dice, no se supone.
+  if (!monedaValida(d.presupuesto.moneda)) {
+    return {
+      dominio: 'FINANCIAL_MANDATE',
+      estado: 'INCOMPLETE',
+      motivos: [motivo('moneda', 'no sabemos en qué moneda está ese máximo', 'confirmar la moneda de tu negocio en los datos de la empresa')],
     };
   }
   return { dominio: 'FINANCIAL_MANDATE', estado: 'COMPLETE', motivos: [] };
@@ -293,7 +311,11 @@ export function evaluarNiveles(d: DatosDeReadiness, dominios: readonly DominioEv
   const planningReady = planificacion.length === 0;
 
   const hayConexionDeAnuncios = d.conexiones.some((c) => (c.provider === 'GOOGLE_ADS' || c.provider === 'META_ADS') && c.estado === 'CONNECTED');
-  const hayTecho = d.presupuesto !== null && (d.presupuesto.modalidad === 'DAILY' || d.presupuesto.modalidad === 'MONTHLY');
+  // TECHO REAL: modalidad de inversión + cifra positiva + moneda. Sin los tres, no hay máximo que respetar.
+  const hayTecho = d.presupuesto !== null
+    && (d.presupuesto.modalidad === 'DAILY' || d.presupuesto.modalidad === 'MONTHLY')
+    && d.presupuesto.montoMinor !== null && d.presupuesto.montoMinor > 0
+    && monedaValida(d.presupuesto.moneda);
   const ejecucion = [
     ...bloq(planningReady, 'primero hay que poder planificar'),
     ...bloq(hayConexionDeAnuncios, 'falta conectar la cuenta de publicidad'),

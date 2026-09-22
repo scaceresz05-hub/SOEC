@@ -84,7 +84,7 @@ const ctxAnalisis = (over: Partial<ContextoAnalisis> = {}): ContextoAnalisis => 
   organizationId: ORG, runId: RUN, oferta: [oferta('implantes', 'Implantes dentales')], restricciones: [],
   auditoria: auditoria([pagina(), pagina({ ruta: '/implantes-dentales', titulo: 'Implantes dentales' })]),
   terminos: [termino('implante dental curico')], geos: [geo('Curicó')], eventosConversion: ['contacto_whatsapp'],
-  techoDeclarado: { modalidad: 'MONTHLY', montoClp: 300_000 }, reglasCanal: [], demandaDisponible: true,
+  techoDeclarado: { modalidad: 'MONTHLY', montoMinor: 300_000 }, reglasCanal: [], demandaDisponible: true,
   competidoresDisponibles: false, ahora: AHORA, ...over,
 });
 
@@ -338,7 +338,7 @@ const entradaPlan = (over: Partial<EntradaPlanificador> = {}): EntradaPlanificad
     politica: politicaCon(['contacto_whatsapp']), runId: RUN,
     terminos: [termino('implante dental curico', { intencion: 'LOCAL' }), termino('precio implante dental')],
     geos: [geo('Curicó')], canales: evaluarCanales(ctx), landings: evaluarLandings(ctx),
-    techoDeclarado: { modalidad: 'MONTHLY', montoClp: 300_000 }, conversionExternaVerificada: false,
+    techoDeclarado: { modalidad: 'MONTHLY', montoMinor: 300_000 }, conversionExternaVerificada: false,
     historialDeConversiones: 0, version: 1, ahora: AHORA, ...over,
   };
 };
@@ -455,7 +455,7 @@ describe('planificador de campañas', () => {
     const ofertas = ['implantes', 'ortodoncia', 'limpieza'].map((s, i) => oferta(s, `Servicio ${s}`, { priority: i + 1 }));
     const terminos = ofertas.map((o) => termino(`${o.slug} curico`, { ofertaSlug: o.slug, intencion: 'LOCAL' }));
     const landings = ofertas.map((o) => ({ organizationId: ORG, runId: RUN, ofertaSlug: o.slug, estado: 'READY' as const, url: `/${o.slug}`, motivos: [] }));
-    const { plan } = planificar(entradaPlan({ oferta: ofertas, terminos, landings, techoDeclarado: { modalidad: 'DAILY', montoClp: 3_000 } }));
+    const { plan } = planificar(entradaPlan({ oferta: ofertas, terminos, landings, techoDeclarado: { modalidad: 'DAILY', montoMinor: 3_000 } }));
     expect(plan.estructura.tipo).toBe('UNA_CAMPANA_VARIOS_GRUPOS');
     expect(plan.estructura.justificacion).toContain('sin datos suficientes');
   });
@@ -464,7 +464,7 @@ describe('planificador de campañas', () => {
     const ofertas = ['implantes', 'ortodoncia', 'limpieza'].map((s, i) => oferta(s, `Servicio ${s}`, { priority: i + 1 }));
     const terminos = ofertas.map((o) => termino(`${o.slug} curico`, { ofertaSlug: o.slug, intencion: 'LOCAL' }));
     const landings = ofertas.map((o) => ({ organizationId: ORG, runId: RUN, ofertaSlug: o.slug, estado: 'READY' as const, url: `/${o.slug}`, motivos: [] }));
-    const { plan, grupos } = planificar(entradaPlan({ oferta: ofertas, terminos, landings, techoDeclarado: { modalidad: 'DAILY', montoClp: 200_000 } }));
+    const { plan, grupos } = planificar(entradaPlan({ oferta: ofertas, terminos, landings, techoDeclarado: { modalidad: 'DAILY', montoMinor: 200_000 } }));
     expect(plan.estructura.tipo).toBe('CAMPANA_POR_OFERTA');
     expect(grupos).toHaveLength(3);
   });

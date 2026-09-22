@@ -136,7 +136,7 @@ export class PlanService {
       geos,
       canales,
       landings,
-      techoDeclarado: techo === null ? null : { modalidad: techo.modalidad, montoClp: techo.montoClp },
+      techoDeclarado: techo === null ? null : { modalidad: techo.modalidad, montoMinor: techo.montoMinor },
       // Esta fase NO crea conversiones externas: mientras sea así, nunca está verificada.
       conversionExternaVerificada: false,
       // Sin lectura de historial de conversiones en esta fase: se declara 0 y la puja lo justifica.

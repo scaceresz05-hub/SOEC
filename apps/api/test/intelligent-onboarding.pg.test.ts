@@ -190,7 +190,7 @@ describe('Empresa QA Onboarding · de cero a preparada, sólo contestando pregun
     // 9) PRESUPUESTO: el techo declarado + el tope operativo en su tabla canónica. Ningún mandato financiero.
     const intencion = await new RepositorioOnboarding(pool).intencionPresupuesto(org);
     expect(intencion?.modalidad).toBe('DAILY');
-    expect(intencion?.montoClp).toBe(5000);
+    expect(intencion?.montoMinor).toBe(5000);
     expect((await politica.limites(org))?.maxDailyBudgetClp).toBe(5000);
     const { rows: mandatos } = await pool.query('select count(*)::int as n from accion_mandato where organization_id = $1', [org]).catch(() => ({ rows: [{ n: 0 }] }));
     expect(mandatos[0].n).toBe(0);
@@ -429,6 +429,98 @@ describe('no saber la meta todavía no bloquea la preparación', () => {
  * Nadie puede acabar con 30 días declarados por haber pasado por la pantalla sin escribir nada: un plazo que
  * el negocio no eligió condicionaría después cuándo se juzga el resultado.
  */
+/**
+ * TECHO DE INVERSIÓN, sobre la base real: qué queda guardado y qué NO queda colgando.
+ *
+ * El defecto que estas pruebas cierran: un «máximo por día» propagaba su cifra al tope operativo de autonomía
+ * y, al cambiar de opinión —a mensual, a «todavía no», o borrando la cifra—, ese tope viejo se quedaba ahí,
+ * gobernando cambios automáticos en nombre de una decisión que el negocio ya había deshecho.
+ */
+describe('el techo de inversión y su tope operativo', () => {
+  const politicaRepo = (): RepositorioPolitica => new RepositorioPolitica(pool);
+  const topeDiario = async (org: string): Promise<number | null> => (await politicaRepo().limites(org))?.maxDailyBudgetClp ?? null;
+  const intencion = async (org: string) => new RepositorioOnboarding(pool).intencionPresupuesto(org);
+
+  async function empresa(a: App, email: string, nombre: string): Promise<{ cookie: string; org: string }> {
+    const cookie = await usuario(a, email);
+    const org = await crearEmpresa(a, cookie, nombre);
+    await responder(a, cookie, org, 'negocio', RESPUESTAS[0]!.respuestas);
+    return { cookie, org };
+  }
+
+  it('un máximo por día con cifra guarda el importe en unidades menores y su tope operativo', async () => {
+    const a = app();
+    const { cookie, org } = await empresa(a, 'duena-techo@soec.cl', 'Empresa QA Techo');
+    await responder(a, cookie, org, 'presupuesto', { 'presupuesto.modalidad': 'DAILY', 'presupuesto.monto': 5000 });
+
+    const i = await intencion(org);
+    expect(i?.modalidad).toBe('DAILY');
+    expect(i?.montoMinor).toBe(5000); // CLP no tiene decimales: la unidad menor es el peso
+    expect(i?.moneda).toBe('CLP');    // sale del perfil de la empresa, no de una constante
+    expect(await topeDiario(org)).toBe(5000);
+    await a.close();
+  });
+
+  it('elegir un máximo y NO poner la cifra no crea tope operativo ni completa la preparación', async () => {
+    const a = app();
+    const { cookie, org } = await empresa(a, 'duena-techo-sincifra@soec.cl', 'Empresa QA Techo Sin Cifra');
+    await responder(a, cookie, org, 'presupuesto', { 'presupuesto.modalidad': 'MONTHLY' });
+
+    expect((await intencion(org))?.montoMinor ?? null).toBeNull();
+    expect(await topeDiario(org)).toBeNull();
+    const v = (await a.inject({ method: 'GET', url: '/onboarding', headers: { cookie, 'x-organization-slug': org } })).json();
+    const dominio = v.readiness.dominios.find((d: { dominio: string }) => d.dominio === 'FINANCIAL_MANDATE');
+    expect(dominio.estado).toBe('INCOMPLETE');
+    expect(String(dominio.motivos[0].motivo)).toContain('falta la cifra');
+    await a.close();
+  });
+
+  it.each([
+    ['a un máximo por mes', { 'presupuesto.modalidad': 'MONTHLY', 'presupuesto.monto': 300_000 }],
+    ['a «todavía no quiero invertir»', { 'presupuesto.modalidad': 'NONE' }],
+    ['a «lo decido después»', { 'presupuesto.modalidad': 'LATER' }],
+    ['a un máximo por día con cifra cero', { 'presupuesto.modalidad': 'DAILY', 'presupuesto.monto': 0 }],
+  ])('cambiar de un máximo por día %s retira el tope diario anterior', async (_caso, despues) => {
+    const a = app();
+    const { cookie, org } = await empresa(a, `duena-techo-${Object.values(despues).join('-')}@soec.cl`, 'Empresa QA Techo Cambio');
+    await responder(a, cookie, org, 'presupuesto', { 'presupuesto.modalidad': 'DAILY', 'presupuesto.monto': 5000 });
+    expect(await topeDiario(org)).toBe(5000);
+
+    await responder(a, cookie, org, 'presupuesto', despues);
+    expect(await topeDiario(org), 'el tope de la decisión anterior no puede sobrevivir').toBeNull();
+    await a.close();
+  });
+
+  it('declarar un techo no crea mandato, no autoriza gasto y no cambia el modo operativo', async () => {
+    const a = app();
+    const { cookie, org } = await empresa(a, 'duena-techo-mandato@soec.cl', 'Empresa QA Techo Mandato');
+    await responder(a, cookie, org, 'presupuesto', { 'presupuesto.modalidad': 'DAILY', 'presupuesto.monto': 5000 });
+
+    const { rows } = await pool.query('select count(*)::int as n from accion_mandato where organization_id = $1', [org])
+      .catch(() => ({ rows: [{ n: 0 }] }));
+    expect(rows[0].n).toBe(0);
+    const gobierno = await new RepositorioNegocios(pool).gobierno(org);
+    expect(gobierno?.autonomousSpend ?? false).toBe(false);
+    expect(gobierno?.campaignExecution ?? false).toBe(false);
+    const me = await a.inject({ method: 'GET', url: `/organizations/${org}`, headers: { cookie } });
+    expect(me.json().operationalMode).toBe('PILOT');
+    await a.close();
+  });
+
+  it('sin moneda en el perfil no se inventa un importe: la preparación financiera queda incompleta', async () => {
+    const a = app();
+    const { cookie, org } = await empresa(a, 'duena-techo-sinmoneda@soec.cl', 'Empresa QA Techo Sin Moneda');
+    await pool.query('update business_profile set currency = $1 where organization_id = $2', ['', org]);
+
+    await responder(a, cookie, org, 'presupuesto', { 'presupuesto.modalidad': 'DAILY', 'presupuesto.monto': 5000 });
+    expect((await intencion(org))?.montoMinor ?? null).toBeNull();
+    expect(await topeDiario(org)).toBeNull();
+    const v = (await a.inject({ method: 'GET', url: '/onboarding', headers: { cookie, 'x-organization-slug': org } })).json();
+    expect(v.readiness.dominios.find((d: { dominio: string }) => d.dominio === 'FINANCIAL_MANDATE').estado).toBe('INCOMPLETE');
+    await a.close();
+  });
+});
+
 describe('el horizonte sugerido no se guarda solo', () => {
   it('pasar por el paso del objetivo sin tocar el plazo lo deja en null', async () => {
     const a = app();
