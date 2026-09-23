@@ -34,7 +34,16 @@ interface Cuenta { customerId: string; descriptiveName: string | null; currencyC
  * La regla que impone: ningún nombre interno sale a la pantalla. Quien lee esto no tiene por qué saber qué es
  * `ACCOUNT_SELECTION_PENDING`, un MCC o un refresh token; tiene que saber qué le falta y qué botón pulsar.
  */
-export type AccionConexion = 'CONECTAR' | 'ELEGIR_CUENTA' | 'RECONECTAR' | 'NINGUNA' | 'ESPERAR_CUENTA';
+export type AccionConexion = 'CONECTAR' | 'ELEGIR_CUENTA' | 'RECONECTAR' | 'NINGUNA' | 'ESPERAR_CUENTA' | 'REINTENTAR_BUSQUEDA';
+
+/**
+ * QUÉ SABEMOS DE LAS CUENTAS DE PUBLICIDAD. Un número cuando lo sabemos; una palabra cuando no.
+ *
+ * Google es la única fuente de esta verdad: aquí no se guarda ningún contador. El tipo existe para que
+ * «no lo he mirado» y «hay cero» no puedan confundirse, que es exactamente lo que ocurría cuando ambos
+ * casos se representaban con `null`: la pantalla decía «Elige qué cuenta» a quien no tiene ninguna.
+ */
+export type Descubrimiento = number | 'NO_MIRADO' | 'BUSCANDO' | 'ERROR';
 
 export interface VistaEstadoGoogle {
   readonly titulo: string;
@@ -44,7 +53,7 @@ export interface VistaEstadoGoogle {
   readonly tono: 'ok' | 'warn' | 'muted';
 }
 
-export function vistaDelEstadoGoogle(estado: string, cuentasDescubiertas: number | null): VistaEstadoGoogle {
+export function vistaDelEstadoGoogle(estado: string, cuentasDescubiertas: Descubrimiento): VistaEstadoGoogle {
   switch (estado) {
     case 'CONNECTED':
       return { titulo: 'Google Ads conectado', explicacion: 'SOEC puede leer lo que ocurre en tu cuenta.', accion: 'NINGUNA', etiquetaAccion: null, tono: 'ok' };
@@ -61,6 +70,31 @@ export function vistaDelEstadoGoogle(estado: string, cuentasDescubiertas: number
         accion: 'CONECTAR', etiquetaAccion: 'Continuar con Google', tono: 'warn',
       };
     case 'ACCOUNT_SELECTION_PENDING':
+      // MIENTRAS NO SEPAMOS CUÁNTAS CUENTAS HAY no se ofrece elegir: pedirle a alguien que elija entre cosas
+      // que quizá no existen es la forma más rápida de hacerle sentir que se equivocó él. Se dice qué estamos
+      // haciendo y se espera. Éste es el sesgo seguro: ninguna rama de «no sé» promete cuentas.
+      if (cuentasDescubiertas === 'BUSCANDO') {
+        return {
+          titulo: 'Comprobando qué cuentas de publicidad hay en tu Google',
+          explicacion: 'Tu cuenta de Google está autorizada. Estamos mirando a qué cuentas de publicidad podemos entrar; tarda unos segundos.',
+          accion: 'NINGUNA', etiquetaAccion: null, tono: 'muted',
+        };
+      }
+      if (cuentasDescubiertas === 'NO_MIRADO') {
+        return {
+          titulo: 'Todavía no sabemos qué cuentas de publicidad hay en tu Google',
+          explicacion: 'Tu cuenta de Google está autorizada. Falta ver a qué cuentas de publicidad podemos entrar.',
+          accion: 'REINTENTAR_BUSQUEDA', etiquetaAccion: 'Volver a buscar', tono: 'muted',
+        };
+      }
+      // LA CONSULTA FALLÓ: no se sabe qué hay, así que no se muestra nada que insinúe que hay algo.
+      if (cuentasDescubiertas === 'ERROR') {
+        return {
+          titulo: 'No pudimos comprobar tus cuentas de publicidad en Google',
+          explicacion: 'La consulta a Google no respondió como esperábamos, así que preferimos no mostrarte una lista que podría estar incompleta. Suele ser momentáneo.',
+          accion: 'REINTENTAR_BUSQUEDA', etiquetaAccion: 'Volver a intentar', tono: 'warn',
+        };
+      }
       // CERO CUENTAS: es el caso de una empresa que autorizó con una cuenta de Google que todavía no tiene
       // ninguna cuenta de publicidad. No se muestra un selector vacío ni se le pide que aprenda Google Ads.
       if (cuentasDescubiertas === 0) {
@@ -107,25 +141,24 @@ export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement 
   const [elegida, setElegida] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
-  /** Cuántas cuentas devolvió el último descubrimiento. `null` ⇒ todavía no se buscó. */
-  const [descubiertas, setDescubiertas] = useState<number | null>(null);
+  /** Qué sabemos de las cuentas de publicidad: un número, o por qué no lo sabemos todavía. */
+  const [descubrimiento, setDescubrimiento] = useState<Descubrimiento>('NO_MIRADO');
   /** Cambiar de cuenta mueve dónde trabaja SOEC: se pide confirmación para que no ocurra de un clic. */
   const [confirmandoCambio, setConfirmandoCambio] = useState(false);
 
   const headers = useCallback(() => ({ 'content-type': 'application/json', ...cabecerasOrg(org) }), [org]);
 
-  const cargar = useCallback(async () => {
+  const cargar = useCallback(async (): Promise<EstadoConexion | null> => {
     try {
       const r = await fetch('/api/google-ads/connection', { cache: 'no-store', headers: cabecerasOrg(org) });
-      setEstado(r.ok ? ((await r.json()).datos as EstadoConexion) : null);
+      const e = r.ok ? ((await r.json()).datos as EstadoConexion) : null;
+      setEstado(e);
+      return e;
     } catch {
       setEstado(null);
+      return null;
     }
   }, [org]);
-
-  useEffect(() => {
-    void cargar();
-  }, [cargar]);
 
   const conectar = useCallback(async () => {
     setOcupado('conectar');
@@ -142,8 +175,14 @@ export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement 
     }
   }, [headers]);
 
-  const listarCuentas = useCallback(async () => {
+  /**
+   * Pregunta a Google qué cuentas hay. Google es la ÚNICA fuente de esta verdad: no se guarda un contador en
+   * ninguna parte, se vuelve a preguntar. `silencioso` es para la consulta automática al abrir la pantalla,
+   * donde un aviso amarillo sobraría: el propio mensaje de estado ya lo cuenta.
+   */
+  const listarCuentas = useCallback(async (silencioso = false) => {
     setOcupado('cuentas');
+    setDescubrimiento('BUSCANDO');
     setAviso(null);
     try {
       // Discovery READ ONLY ⇒ GET (no muta conexión ni campañas). Mismo patrón que /connection.
@@ -151,20 +190,44 @@ export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement 
       const j = await r.json();
       if (r.ok && j?.datos?.cuentas) {
         const lista = j.datos.cuentas as Cuenta[];
-        setDescubiertas(lista.length);
+        setDescubrimiento(lista.length);
         // Sin cuentas no se abre un selector vacío: se explica el estado y se ofrece volver a buscar.
         setCuentas(lista.length > 0 ? lista : null);
         setElegida(lista[0]?.customerId ?? null);
       } else if (j?.error === 'NEEDS_REAUTH') {
+        // No falló la consulta: caducó la autorización. Lo cuenta el estado de la conexión, no un recuento.
+        setDescubrimiento('NO_MIRADO');
         setAviso('Google Ads necesita reconexión.');
         void cargar();
-      } else setAviso('No pudimos leer tus cuentas de Google Ads.');
+      } else {
+        setDescubrimiento('ERROR');
+        if (!silencioso) setAviso('No pudimos leer tus cuentas de Google Ads.');
+      }
     } catch {
-      setAviso('No se pudieron cargar las cuentas.');
+      setDescubrimiento('ERROR');
+      if (!silencioso) setAviso('No se pudieron cargar las cuentas.');
     } finally {
       setOcupado(null);
     }
-  }, [headers, cargar]);
+  }, [org, cargar]);
+
+  /**
+   * PRIMER PINTADO. Si falta elegir cuenta, se pregunta por las cuentas ANTES de decidir qué mensaje se
+   * muestra. Antes no: la pantalla afirmaba «Elige qué cuenta administrará SOEC» y sólo al pulsar el botón
+   * descubría que no había ninguna. El orden correcto es mirar primero y hablar después.
+   */
+  useEffect(() => {
+    let vivo = true;
+    void (async () => {
+      const e = await cargar();
+      if (!vivo || e === null) return;
+      if (e.conexion.estado === 'ACCOUNT_SELECTION_PENDING') {
+        setDescubrimiento('BUSCANDO'); // se fija ya, para que ningún render intermedio ofrezca elegir
+        await listarCuentas(true);
+      }
+    })();
+    return () => { vivo = false; };
+  }, [cargar, listarCuentas]);
 
   const seleccionar = useCallback(async () => {
     if (!elegida) return;
@@ -174,6 +237,7 @@ export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement 
       const r = await fetch('/api/google-ads/select-account', { method: 'POST', headers: headers(), body: JSON.stringify({ customerId: elegida }) });
       if (r.ok) {
         setCuentas(null);
+        setDescubrimiento('NO_MIRADO'); // ya hay cuenta elegida: el recuento anterior no describe nada
         await cargar();
       } else {
         const j = await r.json();
@@ -206,25 +270,26 @@ export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement 
     try {
       await fetch('/api/google-ads/disconnect', { method: 'POST', headers: headers(), body: '{}' });
       setCuentas(null);
+      setDescubrimiento('NO_MIRADO'); // sin autorización, un recuento viejo sería una afirmación sin respaldo
       await cargar();
     } finally {
       setOcupado(null);
     }
   }, [headers, cargar]);
 
-  // Al volver del consentimiento de Google (?ga=…) abrimos la selección de cuenta o mostramos el aviso.
+  // Al volver del consentimiento de Google (?ga=…) sólo queda contar qué pasó: la búsqueda de cuentas la
+  // dispara el efecto de arriba en cuanto ve el estado, y no hace falta pedirla dos veces.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const ga = new URLSearchParams(window.location.search).get('ga');
-    if (ga === 'seleccionar_cuenta') void listarCuentas();
-    else if (ga === 'oauth_fallido') setAviso('No pudimos completar la conexión con Google. Intentá de nuevo.');
+    if (ga === 'oauth_fallido') setAviso('No pudimos completar la conexión con Google. Intentá de nuevo.');
     else if (ga === 'cancelado') setAviso('Cancelaste la conexión con Google.');
-  }, [listarCuentas]);
+  }, []);
 
   if (estado === null) return <div className="ga-card">Google Ads · cargando…</div>;
 
   const c = estado.conexion;
-  const v = vistaDelEstadoGoogle(c.estado, descubiertas);
+  const v = vistaDelEstadoGoogle(c.estado, descubrimiento);
   const etq = ETIQUETA_DATOS[estado.datos.estado] ?? ETIQUETA_DATOS.NO_CONECTADO!;
 
   /** El botón que corresponde al estado. Uno solo: la persona no tiene que elegir entre caminos. */
@@ -232,7 +297,7 @@ export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement 
     if (v.accion === 'CONECTAR' || v.accion === 'RECONECTAR') {
       return <button className="btn" disabled={ocupado !== null} onClick={() => void conectar()}>{ocupado === 'conectar' ? 'Abriendo…' : v.etiquetaAccion}</button>;
     }
-    if (v.accion === 'ELEGIR_CUENTA' || v.accion === 'ESPERAR_CUENTA') {
+    if (v.accion === 'ELEGIR_CUENTA' || v.accion === 'ESPERAR_CUENTA' || v.accion === 'REINTENTAR_BUSQUEDA') {
       return <button className="btn" disabled={ocupado !== null} onClick={() => void listarCuentas()}>{ocupado === 'cuentas' ? 'Buscando…' : v.etiquetaAccion}</button>;
     }
     return null;

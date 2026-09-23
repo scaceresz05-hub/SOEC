@@ -69,7 +69,11 @@ describe('Conexiones y permisos', () => {
     servidor();
     render(h(ConexionesPage));
     await waitFor(() => { expect(screen.getByText(/Conexión a Google Ads/i)).toBeTruthy(); });
-    expect(screen.getByRole('button', { name: /Elegir cuenta/i })).toBeTruthy();
+    // El caso de CP tal como llega: autorizado y sin ninguna cuenta de publicidad. Lo que se ve desde el
+    // primer pintado es qué falta, no un «elige cuenta» que se desmiente al pulsarlo.
+    await waitFor(() => { expect(document.body.textContent).toMatch(/todavía no hay una cuenta de anuncios disponible/i); });
+    expect(screen.queryByRole('button', { name: /Elegir cuenta/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /Volver a buscar/i })).toBeTruthy();
     // Y ya no se manda a nadie a otra sección a buscar la acción.
     expect(document.body.textContent).not.toMatch(/desde\s+Adquisición/i);
   });

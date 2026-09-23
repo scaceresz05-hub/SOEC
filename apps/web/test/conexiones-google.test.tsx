@@ -14,7 +14,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement as h } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { GoogleAdsConexion, vistaDelEstadoGoogle } from '../components/google-ads-conexion';
+import { GoogleAdsConexion, vistaDelEstadoGoogle, type Descubrimiento } from '../components/google-ads-conexion';
 
 const ENUMS_INTERNOS = [
   'ACCOUNT_SELECTION_PENDING', 'NOT_CONNECTED', 'OAUTH_PENDING', 'NEEDS_REAUTH', 'CONNECTED', 'DISCONNECTED',
@@ -32,17 +32,32 @@ const estadoDe = (conn: Record<string, unknown>): Record<string, unknown> => ({
   configurado: true,
 });
 
-/** Doble del BFF: responde el estado de la conexión y, si se piden, las cuentas descubiertas. */
-function servidor(conn: Record<string, unknown>, cuentas: unknown[] = []): { llamadas: string[] } {
+/**
+ * Doble del BFF: responde el estado de la conexión y, si se piden, las cuentas descubiertas.
+ * `falla` simula que Google no contesta; `retener` deja la consulta de cuentas en el aire para poder mirar
+ * qué se pinta MIENTRAS no se sabe nada.
+ */
+function servidor(
+  conn: Record<string, unknown>,
+  cuentas: unknown[] = [],
+  opciones: { falla?: boolean; retener?: Promise<void> } = {},
+): { llamadas: string[] } {
   const llamadas: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { method?: string }) => {
     const u = String(url);
     llamadas.push(`${init?.method ?? 'GET'} ${u}`);
-    const cuerpo = u.includes('/accounts') ? { datos: { cuentas } } : { datos: estadoDe(conn) };
-    return new Response(JSON.stringify(cuerpo), { status: 200, headers: { 'content-type': 'application/json' } });
+    if (u.includes('/accounts')) {
+      if (opciones.retener) await opciones.retener;
+      if (opciones.falla) return new Response(JSON.stringify({ error: 'GOOGLE_NO_RESPONDE' }), { status: 502, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ datos: { cuentas } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ datos: estadoDe(conn) }), { status: 200, headers: { 'content-type': 'application/json' } });
   }));
   return { llamadas };
 }
+
+const CUENTA_QA = { customerId: '1111111111', descriptiveName: 'Clínica QA', currencyCode: 'CLP', timeZone: 'America/Santiago', manager: false, testAccount: false };
+const CUENTA_QA_2 = { customerId: '2222222222', descriptiveName: 'Clínica QA Sur', currencyCode: 'CLP', timeZone: 'America/Santiago', manager: false, testAccount: false };
 
 const textoVisible = (): string => document.body.textContent ?? '';
 const sinEnumsInternos = (): void => {
@@ -55,13 +70,17 @@ describe('traducción de estados (función pura)', () => {
   it.each([
     ['NOT_CONNECTED', null, 'no está conectado', 'CONECTAR'],
     ['OAUTH_PENDING', null, 'Falta autorizar', 'CONECTAR'],
-    ['ACCOUNT_SELECTION_PENDING', null, 'Elige qué cuenta', 'ELEGIR_CUENTA'],
+    ['ACCOUNT_SELECTION_PENDING', 1, 'Elige qué cuenta', 'ELEGIR_CUENTA'],
     ['ACCOUNT_SELECTION_PENDING', 2, 'Elige qué cuenta', 'ELEGIR_CUENTA'],
     ['ACCOUNT_SELECTION_PENDING', 0, 'todavía no hay una cuenta de anuncios disponible', 'ESPERAR_CUENTA'],
-    ['CONNECTED', null, 'conectado', 'NINGUNA'],
-    ['NEEDS_REAUTH', null, 'vuelvas a autorizar', 'RECONECTAR'],
+    // Las tres formas de «no lo sé». Ninguna puede terminar diciendo «elige»: ése era el defecto.
+    ['ACCOUNT_SELECTION_PENDING', 'BUSCANDO', 'Comprobando qué cuentas de publicidad', 'NINGUNA'],
+    ['ACCOUNT_SELECTION_PENDING', 'NO_MIRADO', 'Todavía no sabemos qué cuentas', 'REINTENTAR_BUSQUEDA'],
+    ['ACCOUNT_SELECTION_PENDING', 'ERROR', 'No pudimos comprobar tus cuentas', 'REINTENTAR_BUSQUEDA'],
+    ['CONNECTED', 'NO_MIRADO', 'conectado', 'NINGUNA'],
+    ['NEEDS_REAUTH', 'NO_MIRADO', 'vuelvas a autorizar', 'RECONECTAR'],
   ])('%s (cuentas: %s) se dice en lenguaje de negocio', (estado, cuentas, fragmento, accion) => {
-    const v = vistaDelEstadoGoogle(estado, cuentas as number | null);
+    const v = vistaDelEstadoGoogle(estado, cuentas as Descubrimiento);
     expect(`${v.titulo} ${v.explicacion}`).toContain(fragmento);
     expect(v.accion).toBe(accion);
     for (const e of ENUMS_INTERNOS) expect(`${v.titulo} ${v.explicacion} ${v.etiquetaAccion ?? ''}`).not.toContain(e);
@@ -86,26 +105,69 @@ describe('la pantalla, estado por estado', () => {
     sinEnumsInternos();
   });
 
-  it('autorizado y sin cuenta elegida: ofrece elegir cuenta', async () => {
-    servidor(conexion({ estado: 'ACCOUNT_SELECTION_PENDING' }), [
-      { customerId: '1111111111', descriptiveName: 'Clínica QA', currencyCode: 'CLP', timeZone: 'America/Santiago', manager: false, testAccount: false },
-    ]);
+  it('autorizado con UNA cuenta: el selector ya está en el primer pintado, sin pulsar nada', async () => {
+    const s = servidor(conexion({ estado: 'ACCOUNT_SELECTION_PENDING' }), [CUENTA_QA]);
     render(h(GoogleAdsConexion, { org: 'org-qa' }));
-    const boton = await screen.findByRole('button', { name: /Elegir cuenta/i });
-    expect(textoVisible()).toContain('Elige qué cuenta administrará SOEC');
-    fireEvent.click(boton);
+
     await waitFor(() => { expect(screen.getByText(/Clínica QA/)).toBeTruthy(); });
+    expect(screen.getByRole('button', { name: /Usar esta cuenta/i })).toBeTruthy();
+    // Las cuentas se preguntaron al cargar, no al pulsar: eso es lo que arregla el primer pintado.
+    expect(s.llamadas.filter((l) => l.includes('/accounts'))).toHaveLength(1);
+    sinEnumsInternos();
+  });
+
+  it('autorizado con VARIAS cuentas: se listan todas y no hay ninguna preseleccionada por sorpresa', async () => {
+    servidor(conexion({ estado: 'ACCOUNT_SELECTION_PENDING' }), [CUENTA_QA, CUENTA_QA_2]);
+    render(h(GoogleAdsConexion, { org: 'org-qa' }));
+
+    await waitFor(() => { expect(document.querySelectorAll('input[type="radio"]')).toHaveLength(2); });
+    expect(textoVisible()).toContain('Clínica QA Sur');
+    // Elegir sigue siendo un acto explícito: hay que confirmar con «Usar esta cuenta».
     expect(screen.getByRole('button', { name: /Usar esta cuenta/i })).toBeTruthy();
     sinEnumsInternos();
   });
 
-  /** El caso de CP: autorizó con Google y su cuenta no tiene ninguna cuenta de publicidad. */
-  it('autorizado y SIN cuentas: ni selector vacío ni jerga, un mensaje y una sola acción', async () => {
-    servidor(conexion({ estado: 'ACCOUNT_SELECTION_PENDING' }), []);
+  /** El defecto de producción: mientras no se sabe cuántas cuentas hay, no se promete ninguna. */
+  it('mientras se comprueba: dice que está comprobando y NO ofrece elegir cuenta', async () => {
+    let soltar = (): void => {};
+    const retener = new Promise<void>((r) => { soltar = r; });
+    servidor(conexion({ estado: 'ACCOUNT_SELECTION_PENDING' }), [CUENTA_QA], { retener });
     render(h(GoogleAdsConexion, { org: 'org-qa' }));
-    fireEvent.click(await screen.findByRole('button', { name: /Elegir cuenta/i }));
+
+    await waitFor(() => { expect(textoVisible()).toMatch(/Comprobando qué cuentas de publicidad/i); });
+    expect(screen.queryByRole('button', { name: /Elegir cuenta/i })).toBeNull();
+    expect(textoVisible()).not.toContain('Elige qué cuenta administrará SOEC');
+    expect(document.querySelectorAll('input[type="radio"]')).toHaveLength(0);
+    sinEnumsInternos();
+
+    soltar();
+    await waitFor(() => { expect(screen.getByText(/Clínica QA/)).toBeTruthy(); });
+  });
+
+  it('si Google no contesta: se dice en humano, sin selector y sin inventar cuentas', async () => {
+    servidor(conexion({ estado: 'ACCOUNT_SELECTION_PENDING' }), [], { falla: true });
+    render(h(GoogleAdsConexion, { org: 'org-qa' }));
+
+    await waitFor(() => { expect(textoVisible()).toMatch(/No pudimos comprobar tus cuentas de publicidad/i); });
+    // Fail closed: ni lista, ni «elige», ni la afirmación de que no hay ninguna (que no sabemos).
+    expect(document.querySelectorAll('input[type="radio"]')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: /Elegir cuenta/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Usar esta cuenta/i })).toBeNull();
+    expect(textoVisible()).not.toContain('todavía no hay una cuenta de anuncios disponible');
+    expect(screen.getByRole('button', { name: /Volver a intentar/i })).toBeTruthy();
+    sinEnumsInternos();
+  });
+
+  /** El caso de CP: autorizó con Google y su cuenta no tiene ninguna cuenta de publicidad. */
+  it('autorizado y SIN cuentas: el mensaje correcto es el primero que se ve, sin pulsar nada', async () => {
+    const s = servidor(conexion({ estado: 'ACCOUNT_SELECTION_PENDING' }), []);
+    render(h(GoogleAdsConexion, { org: 'org-qa' }));
 
     await waitFor(() => { expect(textoVisible()).toContain('todavía no hay una cuenta de anuncios disponible'); });
+    // Nunca se ofreció elegir: no hubo un primer pintado mintiendo y un segundo corrigiéndose.
+    expect(screen.queryByRole('button', { name: /Elegir cuenta/i })).toBeNull();
+    expect(textoVisible()).not.toContain('Elige qué cuenta administrará SOEC');
+    expect(s.llamadas.filter((l) => l.includes('/accounts'))).toHaveLength(1);
     expect(textoVisible()).toMatch(/configurar una con Google/i);
     // No hay selector: ni radios, ni un botón de confirmar una elección que no existe.
     expect(document.querySelectorAll('input[type="radio"]')).toHaveLength(0);
@@ -150,13 +212,9 @@ describe('la pantalla, estado por estado', () => {
 
 describe('conectar no autoriza nada más', () => {
   it('ni conectar ni elegir cuenta tocan permisos, mandato, gasto ni activación', async () => {
-    const s = servidor(conexion({ estado: 'ACCOUNT_SELECTION_PENDING' }), [
-      { customerId: '1111111111', descriptiveName: 'Clínica QA', currencyCode: 'CLP', timeZone: 'America/Santiago', manager: false, testAccount: false },
-    ]);
+    const s = servidor(conexion({ estado: 'ACCOUNT_SELECTION_PENDING' }), [CUENTA_QA]);
     render(h(GoogleAdsConexion, { org: 'org-qa' }));
-    fireEvent.click(await screen.findByRole('button', { name: /Elegir cuenta/i }));
-    await waitFor(() => { expect(screen.getByRole('button', { name: /Usar esta cuenta/i })).toBeTruthy(); });
-    fireEvent.click(screen.getByRole('button', { name: /Usar esta cuenta/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Usar esta cuenta/i }));
 
     await waitFor(() => { expect(s.llamadas.some((l) => l.includes('select-account'))).toBe(true); });
     // Ninguna llamada a capacidades, mandato, gobierno, modo operativo ni activación.
