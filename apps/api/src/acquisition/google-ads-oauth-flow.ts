@@ -59,7 +59,19 @@ export interface ComponentesFlujoGoogleAds {
   readonly clientId: string;
   readonly redirectUri: string;
   readonly ahora: () => string;
+  /**
+   * PUENTE AL SSOT OPERATIVO. Elegir cuenta no termina en las tablas del proveedor: el resto del sistema
+   * —prerrequisitos de ejecución, cliente de escritura, proyección del runtime— lee `business_connection`.
+   * Se inyecta como puerto para que este módulo siga siendo probable sin base de datos. Si el puente rechaza
+   * la cuenta (administradora, de prueba, sin moneda o sin zona horaria), la selección NO se persiste.
+   */
+  readonly puenteSsot?: (org: string, cuenta: CuentaGoogleAds & { readonly loginCustomerId: string }) => Promise<ResultadoPuenteSsot>;
 }
+
+/** Lo que responde el puente: sirve para operar, o el motivo en lenguaje de negocio por el que no. */
+export type ResultadoPuenteSsot =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly motivo: string; readonly explicacion: string };
 
 /** Contexto de sistema para resolver el secretRef (org autoritativa del state/conexión). */
 function ctxSistema(org: string): RequestContext {
@@ -203,7 +215,12 @@ async function enumerarCuentas(accounts: GoogleAdsAccountsPort, accessToken: str
 
 export type ResultadoSeleccion =
   | { readonly ok: true; readonly conexion: ConexionGoogleAds }
-  | { readonly ok: false; readonly motivo: 'NOT_CONNECTED' | 'NO_CREDENTIAL' | 'NEEDS_REAUTH' | 'ACCESO_DENEGADO' | 'ESTADO_INVALIDO' | 'ERROR' };
+  | {
+      readonly ok: false;
+      readonly motivo: 'NOT_CONNECTED' | 'NO_CREDENTIAL' | 'NEEDS_REAUTH' | 'ACCESO_DENEGADO' | 'ESTADO_INVALIDO' | 'ERROR' | 'CUENTA_NO_OPERABLE';
+      /** Sólo en `CUENTA_NO_OPERABLE`: por qué esa cuenta no sirve, dicho para quien tiene que elegir otra. */
+      readonly explicacion?: string;
+    };
 
 /**
  * Selecciona una cuenta: RE-DESCUBRE (no confía en un ID arbitrario del frontend), valida que el token
@@ -226,6 +243,13 @@ export async function seleccionarCuenta(comp: ComponentesFlujoGoogleAds, org: st
   const loginCustomerId = elegida.managerCustomerId ?? elegida.customerId;
   const ahora = comp.ahora();
   if (!transicionConexionValida(conexion.estado, 'CONNECTED')) return { ok: false, motivo: 'ESTADO_INVALIDO' };
+
+  // PUENTE PRIMERO. Se proyecta al SSOT operativo ANTES de marcar CONNECTED aquí: si esa cuenta no sirve para
+  // operar, el proveedor tampoco debe quedarse diciendo que todo está listo. Fail-closed a ambos lados.
+  if (comp.puenteSsot !== undefined) {
+    const puente = await comp.puenteSsot(org, { ...elegida, loginCustomerId });
+    if (!puente.ok) return { ok: false, motivo: 'CUENTA_NO_OPERABLE', explicacion: puente.explicacion };
+  }
   const actualizada: ConexionGoogleAds = {
     ...conexion,
     estado: 'CONNECTED',

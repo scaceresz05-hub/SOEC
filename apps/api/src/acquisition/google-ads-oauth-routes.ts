@@ -153,7 +153,9 @@ export function registerGoogleAdsOAuthAutenticadas(app: FastifyInstance, deps: D
     const customerId = (req.body as { customerId?: unknown } | undefined)?.customerId;
     if (typeof customerId !== 'string' || !/^\d{6,12}$/.test(customerId)) return reply.code(400).send({ ok: false, error: 'CUSTOMER_ID_INVALIDO' });
     const r = await seleccionarCuenta({ ...comp, ahora }, a.org, customerId);
-    if (!r.ok) return reply.code(409).send({ ok: false, error: r.motivo });
+    // Una cuenta que no sirve para operar se explica, no se traduce a un código seco: quien lo lee tiene que
+    // saber qué elegir la próxima vez.
+    if (!r.ok) return reply.code(409).send({ ok: false, error: r.motivo, ...(r.explicacion ? { mensaje: r.explicacion } : {}) });
     return reply.send({ ok: true, datos: aConexionDTO(r.conexion) });
   });
 

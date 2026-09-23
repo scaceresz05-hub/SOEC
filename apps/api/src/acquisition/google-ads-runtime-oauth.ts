@@ -16,6 +16,7 @@ import { EnvelopeSecretBackend } from './meta-secret-backend';
 import { crearRepositoriosGoogleAdsPg } from './google-ads-oauth-pg';
 import { GoogleOAuthHttpAdapter, GoogleAdsAccountsHttpAdapter } from './google-ads-api-http';
 import type { ComponentesFlujoGoogleAds } from './google-ads-oauth-flow';
+import { proyectarCuentaGoogleAds } from '../conexion/puente-google-ads';
 
 type Env = Record<string, string | undefined>;
 
@@ -61,6 +62,20 @@ export function crearComposicionGoogleAdsOAuth(pool: Pool, env: Env): Componente
     clientId: cfgApp.clientId,
     redirectUri: cfgApp.redirectUri,
     ahora: () => new Date().toISOString(),
+    // PUENTE AL SSOT: elegir cuenta escribe también `business_connection`, que es lo que lee el motor de
+    // campañas. Sin esto, una empresa nueva completaba su OAuth y seguía sin poder ejecutar nada.
+    puenteSsot: async (org, cuenta) => {
+      const r = await proyectarCuentaGoogleAds(org, {
+        customerId: cuenta.customerId,
+        loginCustomerId: cuenta.loginCustomerId,
+        descriptiveName: cuenta.descriptiveName,
+        currencyCode: cuenta.currencyCode,
+        timeZone: cuenta.timeZone,
+        manager: cuenta.manager,
+        testAccount: cuenta.testAccount,
+      }, { pool, ahora: () => new Date().toISOString(), log: (i) => console.log(JSON.stringify(i)) });
+      return r.ok ? { ok: true } : { ok: false, motivo: r.motivo, explicacion: r.explicacion };
+    },
   };
 }
 

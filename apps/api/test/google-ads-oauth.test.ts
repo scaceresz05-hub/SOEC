@@ -216,6 +216,42 @@ describe('google-ads: descubrimiento y selección de cuentas (con validación de
     expect(conexion?.estado).toBe('ACCOUNT_SELECTION_PENDING'); // sigue sin conectar
   });
 
+  /**
+   * PUENTE AL SSOT. Elegir cuenta no puede terminar en las tablas del proveedor: el motor de campañas lee
+   * `business_connection`. El flujo lo llama por un puerto —aquí, un doble— y respeta su veredicto.
+   */
+  it('la selección proyecta la cuenta al SSOT operativo, con su moneda y su zona horaria', async () => {
+    const proyectadas: Array<{ org: string; customerId: string; moneda: string | null; loginCustomerId: string }> = [];
+    const c = {
+      ...comp(new GoogleOAuthFake(), new GoogleAdsAccountsFake(['9999999999'])),
+      puenteSsot: async (org: string, cuenta: { customerId: string; currencyCode: string | null; loginCustomerId: string }) => {
+        proyectadas.push({ org, customerId: cuenta.customerId, moneda: cuenta.currencyCode, loginCustomerId: cuenta.loginCustomerId });
+        return { ok: true as const };
+      },
+    };
+    await conectar(c, 'org-a');
+    const r = await seleccionarCuenta(c, 'org-a', '9999999999');
+    expect(r.ok).toBe(true);
+    expect(proyectadas).toHaveLength(1);
+    expect(proyectadas[0]).toMatchObject({ org: 'org-a', customerId: '9999999999', loginCustomerId: '9999999999' });
+  });
+
+  it('si la cuenta no sirve para operar, NI el SSOT ni el proveedor quedan diciendo que todo está listo', async () => {
+    const c = {
+      ...comp(new GoogleOAuthFake(), new GoogleAdsAccountsFake(['9999999999'])),
+      puenteSsot: async () => ({ ok: false as const, motivo: 'CUENTA_MANAGER', explicacion: 'esa es una cuenta administradora: no aloja campañas.' }),
+    };
+    await conectar(c, 'org-a');
+    const r = await seleccionarCuenta(c, 'org-a', '9999999999');
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.motivo).toBe('CUENTA_NO_OPERABLE');
+    expect(r.explicacion).toContain('administradora');
+    const conexion = await c.connRepo.obtener('org-a', connectionIdDe('org-a'));
+    expect(conexion?.estado).toBe('ACCOUNT_SELECTION_PENDING'); // fail-closed a ambos lados
+    expect(conexion?.customerId ?? null).toBeNull();
+  });
+
   it('dynamic_tenant_onboarding: una org SIN entrada en el registro estático TS conecta y selecciona sin editar código', async () => {
     const orgNueva = 'org-cliente-nuevo-jamas-registrado';
     const c = comp(new GoogleOAuthFake(), new GoogleAdsAccountsFake(['5555555555']));
