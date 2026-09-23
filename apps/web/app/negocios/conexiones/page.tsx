@@ -13,6 +13,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { GoogleAdsConexion } from '../../../components/google-ads-conexion';
+import { TareaPendiente } from '../../../components/tarea-pendiente';
 import Link from 'next/link';
 import { orgActiva } from '../../../lib/org-activa';
 import {
@@ -193,7 +194,10 @@ export default function ConexionesPage() {
         </div>
       </section>
 
-      <section style={{ marginBottom: 32 }}>
+      {/* Lo primero de la pantalla: la ÚNICA cosa que hace falta ahora, si la hay. */}
+      <TareaPendiente org={org} alActuarDentro={() => document.getElementById('conexion-google')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} />
+
+      <section id="conexion-google" style={{ marginBottom: 32 }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Publicidad</h2>
         {/*
           Conectar la cuenta se hace AQUÍ, no en otra pantalla: los mensajes de error de toda la aplicación

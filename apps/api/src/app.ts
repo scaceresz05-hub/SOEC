@@ -156,6 +156,8 @@ import { registerEjecucionRoutes } from './ejecucion/ejecucion-routes';
 import { clienteDeEscrituraGoogle, clienteDeLecturaGoogle, crearObservadorDeEventos } from './ejecucion/composicion';
 import { registerOptimizacionRoutes } from './optimizacion/optimizacion-routes';
 import { registerAceptacionRoutes } from './aceptacion/aceptacion-routes';
+import { registerHandoffRoutes } from './handoff/handoff-routes';
+import { estadoGoogleParaHandoff } from './handoff/composicion';
 import type { GoogleAdsMutateHttpClient } from './campana/google-ads-mutate-http';
 import type { DepsInvestigacion } from './investigacion/investigacion-service';
 import { crearDepositoSecretosConexion } from './conexion/secreto-conexion';
@@ -514,6 +516,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // PREPARACIÓN COMERCIAL (Autonomy Fase H): un informe de SOLO LECTURA que reúne lo persistido por las
       // fases A–G y dice qué falta, quién lo resuelve y qué puede hacer SOEC solo. No escribe nada.
       registerAceptacionRoutes(target, pool);
+      // HANDOFF EXTERNO (Autonomy Fase I.3): «SOEC llegó hasta aquí; ahora Google necesita que hagas una
+      // cosa». Una tarea persistente por causa, y UNA sola a la vez en pantalla.
+      registerHandoffRoutes(target, pool, {
+        estadoGoogle: (org) => estadoGoogleParaHandoff(org, composicionGoogleAds),
+        log: (i) => console.log(JSON.stringify(i)),
+      });
     }
     registerAcquisitionRoutes(target, deps.store); // Acquisition Engine (sólo lectura / shadow)
     // OAuth READ-ONLY de Meta — rutas AUTENTICADAS (start/connection/assets/binding). El CALLBACK va aparte,
