@@ -13,7 +13,12 @@
 # hace el deploy reproducible.
 [build]
 builder = "RAILPACK"
-buildCommand = "corepack pnpm@9.15.4 install --frozen-lockfile && corepack pnpm@9.15.4 -C apps/web build"
+# El `rm -rf .next/cache` del final NO es cosmética: es la diferencia entre una imagen de ~6 MB de
+# aplicación y una de ~143 MB. `.next/cache` es la caché de compilación de webpack —137 MB en este
+# proyecto— y Next documenta que no debe viajar en la imagen de ejecución: no se usa para servir, sólo
+# para acelerar la SIGUIENTE compilación. Cuando el despliegue murió en «exporting to docker image
+# format · DeadlineExceeded», eso era casi todo lo que se estaba exportando.
+buildCommand = "corepack pnpm@9.15.4 install --frozen-lockfile && corepack pnpm@9.15.4 -C apps/web build && rm -rf apps/web/.next/cache"
 
 [deploy]
 # next start respeta process.env.PORT (Railway lo inyecta). Sin puerto fijo, sin healthcheck path
