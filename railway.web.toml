@@ -13,12 +13,13 @@
 # hace el deploy reproducible.
 [build]
 builder = "RAILPACK"
-# El `rm -rf .next/cache` del final NO es cosmética: es la diferencia entre una imagen de ~6 MB de
-# aplicación y una de ~143 MB. `.next/cache` es la caché de compilación de webpack —137 MB en este
-# proyecto— y Next documenta que no debe viajar en la imagen de ejecución: no se usa para servir, sólo
-# para acelerar la SIGUIENTE compilación. Cuando el despliegue murió en «exporting to docker image
-# format · DeadlineExceeded», eso era casi todo lo que se estaba exportando.
-buildCommand = "corepack pnpm@9.15.4 install --frozen-lockfile && corepack pnpm@9.15.4 -C apps/web build && rm -rf apps/web/.next/cache"
+# NO añadir aquí un `rm -rf apps/web/.next/cache`. Se intentó y rompió el despliegue 466ea551 con
+# «rm: cannot remove 'apps/web/.next/cache': Device or resource busy» después de compilar bien: Railpack
+# declara `.next/cache` como cache mount de BuildKit para cada app Next del workspace, y un punto de
+# montaje no se puede desenlazar desde dentro del build. Corolario que invalida el motivo por el que se
+# añadió: una carpeta montada como caché NO viaja en la imagen exportada, así que esos 137 MB nunca
+# estuvieron en la imagen.
+buildCommand = "corepack pnpm@9.15.4 install --frozen-lockfile && corepack pnpm@9.15.4 -C apps/web build"
 
 [deploy]
 # next start respeta process.env.PORT (Railway lo inyecta). Sin puerto fijo, sin healthcheck path
