@@ -11,7 +11,7 @@ export type ProveedorConexion = 'GOOGLE_ADS' | 'META_ADS' | 'GROWTH_M2M' | 'GA4'
 export type EstadoConexion = 'NOT_CONNECTED' | 'PENDING' | 'CONNECTED' | 'ERROR' | 'DISABLED';
 export type CapacidadNegocio =
   | 'MEDICION_REAL' | 'DIRECTOR_REAL' | 'AUTONOMIA_ADS' | 'PILOTO_DECISION'
-  | 'INGESTA_GROWTH' | 'MONITOR_SEGURIDAD' | 'CICLO_DIRECTOR';
+  | 'INGESTA_GROWTH' | 'MONITOR_SEGURIDAD' | 'CICLO_DIRECTOR' | 'ESCRITURA_ADS';
 
 export interface VistaConexion {
   provider: ProveedorConexion;
@@ -70,6 +70,10 @@ export const ETIQUETA_CAPACIDAD: Record<CapacidadNegocio, { titulo: string; expl
   AUTONOMIA_ADS: { titulo: 'Autonomía en publicidad', explica: 'Preparar y evaluar cambios de publicidad. Ejecutar sigue exigiendo tu autorización.' },
   MONITOR_SEGURIDAD: { titulo: 'Vigilancia de seguridad', explica: 'Vigila el gasto de la campaña y avisa. Pausar requiere, además, permiso de gobierno.' },
   PILOTO_DECISION: { titulo: 'Decisión del piloto', explica: 'Experiencia histórica del primer piloto.' },
+  ESCRITURA_ADS: {
+    titulo: 'Permiso para que SOEC haga cambios en tu cuenta',
+    explica: 'Crear y modificar campañas, presupuestos y anuncios en tu cuenta de publicidad. Sin esto, SOEC sólo mira. Aun con esto encendido, gastar y encender campañas siguen siendo decisiones tuyas, aparte.',
+  },
 };
 
 async function j<T>(res: Response): Promise<T> {

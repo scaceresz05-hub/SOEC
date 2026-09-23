@@ -12,6 +12,7 @@
  *  · una capacidad encendida sin su conexión lo dice («falta conectar»), en lugar de fingir que funciona.
  */
 import { useCallback, useEffect, useState } from 'react';
+import { GoogleAdsConexion } from '../../../components/google-ads-conexion';
 import Link from 'next/link';
 import { orgActiva } from '../../../lib/org-activa';
 import {
@@ -27,8 +28,14 @@ import {
   type EstadoConexiones,
 } from '../../../lib/conexiones-client';
 
+/**
+ * Orden deliberado: primero lo que SOEC MIRA, después lo que puede CAMBIAR. `ESCRITURA_ADS` va al final y es
+ * la única que abre la puerta a tocar la cuenta del negocio; faltaba aquí, y los mensajes de error de media
+ * aplicación mandaban a esta pantalla a encender un permiso que no se mostraba.
+ */
 const CAPACIDADES_VISIBLES: CapacidadNegocio[] = [
   'INGESTA_GROWTH', 'MEDICION_REAL', 'DIRECTOR_REAL', 'CICLO_DIRECTOR', 'AUTONOMIA_ADS', 'MONITOR_SEGURIDAD',
+  'ESCRITURA_ADS',
 ];
 
 export default function ConexionesPage() {
@@ -188,26 +195,39 @@ export default function ConexionesPage() {
 
       <section style={{ marginBottom: 32 }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Publicidad</h2>
-        {estado?.oauthGoogleAds !== null && estado?.oauthGoogleAds !== undefined ? (
-          <p>
-            Google Ads: <strong>{estado.oauthGoogleAds.estado}</strong>
-            {estado.oauthGoogleAds.customerId !== null ? ` · cuenta ${estado.oauthGoogleAds.customerId}` : ''}
-          </p>
-        ) : (
-          <p style={{ color: 'var(--muted, #666)' }}>
-            Google Ads no está conectado. La conexión se hace con tu cuenta de Google desde{' '}
-            <Link href="/adquisicion">Adquisición</Link>; aquí sólo se ve su estado.
-          </p>
-        )}
+        {/*
+          Conectar la cuenta se hace AQUÍ, no en otra pantalla: los mensajes de error de toda la aplicación
+          mandan a «Conexiones y permisos», y mandar a alguien a un sitio donde no está la acción es una forma
+          educada de dejarlo tirado.
+        */}
+        <GoogleAdsConexion org={org} />
         {estado?.oauthMeta !== null && estado?.oauthMeta !== undefined && (
-          <p>Meta (Facebook e Instagram): <strong>{estado.oauthMeta.estado}</strong> · sólo lectura</p>
+          <p style={{ color: 'var(--muted, #666)' }}>
+            Meta (Facebook e Instagram): conectada para leer. SOEC no puede crear ni cambiar nada ahí.
+          </p>
         )}
-        {estado?.conexiones.filter((c) => c.provider !== 'GROWTH_M2M').map((c) => (
+        {estado?.conexiones.filter((c) => c.provider !== 'GROWTH_M2M' && c.provider !== 'GOOGLE_ADS').map((c) => (
           <p key={c.provider}>
             {ETIQUETA_PROVEEDOR[c.provider] ?? c.provider}: <strong>{ETIQUETA_ESTADO_CONEXION[c.estado].texto}</strong>
-            {c.cuenta.id !== null ? ` · cuenta ${c.cuenta.id}` : ''}
           </p>
         ))}
+      </section>
+
+      {/*
+        LAS CUATRO PUERTAS. Están separadas en el sistema y tienen que verse separadas: confundirlas es
+        exactamente cómo alguien termina gastando dinero que creía no haber autorizado.
+      */}
+      <section style={{ marginBottom: 32 }}>
+        <h2 style={{ fontSize: 18, marginBottom: 8 }}>Cuatro decisiones distintas</h2>
+        <ol style={{ margin: 0, paddingLeft: 18, color: 'var(--muted, #666)' }}>
+          <li><strong>Conexión</strong> — SOEC puede MIRAR tu cuenta de publicidad. Es lo de arriba.</li>
+          <li><strong>Permiso para hacer cambios</strong> — crear o modificar campañas. Se enciende abajo, y no se enciende solo.</li>
+          <li><strong>Autorización financiera</strong> — cuánto puede comprometer como máximo. La firmas tú, aparte.</li>
+          <li><strong>Operación autónoma</strong> — si SOEC puede actuar sin preguntarte cada vez. Se decide en tu nivel de autonomía.</li>
+        </ol>
+        <p style={{ color: 'var(--muted, #666)', marginTop: 8 }}>
+          Ninguna implica la siguiente. Conectar no autoriza cambios; permitir cambios no autoriza gasto.
+        </p>
       </section>
 
       <section>
@@ -218,6 +238,8 @@ export default function ConexionesPage() {
         </p>
         {estado?.capacidades
           .filter((c) => CAPACIDADES_VISIBLES.includes(c.capacidad))
+          .slice()
+          .sort((a, b) => CAPACIDADES_VISIBLES.indexOf(a.capacidad) - CAPACIDADES_VISIBLES.indexOf(b.capacidad))
           .map((c) => {
             const et = ETIQUETA_CAPACIDAD[c.capacidad];
             return (

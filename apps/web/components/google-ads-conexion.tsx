@@ -27,6 +27,63 @@ interface EstadoConexion {
 }
 interface Cuenta { customerId: string; descriptiveName: string | null; currencyCode: string | null; timeZone: string | null; manager: boolean; testAccount: boolean }
 
+/**
+ * ESTADO EN LENGUAJE DE NEGOCIO. Función pura: recibe el estado interno y cuántas cuentas se descubrieron,
+ * y devuelve qué se le dice a la persona y cuál es su ÚNICA próxima acción.
+ *
+ * La regla que impone: ningún nombre interno sale a la pantalla. Quien lee esto no tiene por qué saber qué es
+ * `ACCOUNT_SELECTION_PENDING`, un MCC o un refresh token; tiene que saber qué le falta y qué botón pulsar.
+ */
+export type AccionConexion = 'CONECTAR' | 'ELEGIR_CUENTA' | 'RECONECTAR' | 'NINGUNA' | 'ESPERAR_CUENTA';
+
+export interface VistaEstadoGoogle {
+  readonly titulo: string;
+  readonly explicacion: string;
+  readonly accion: AccionConexion;
+  readonly etiquetaAccion: string | null;
+  readonly tono: 'ok' | 'warn' | 'muted';
+}
+
+export function vistaDelEstadoGoogle(estado: string, cuentasDescubiertas: number | null): VistaEstadoGoogle {
+  switch (estado) {
+    case 'CONNECTED':
+      return { titulo: 'Google Ads conectado', explicacion: 'SOEC puede leer lo que ocurre en tu cuenta.', accion: 'NINGUNA', etiquetaAccion: null, tono: 'ok' };
+    case 'NEEDS_REAUTH':
+      return {
+        titulo: 'Google necesita que vuelvas a autorizar el acceso',
+        explicacion: 'Tus datos históricos están conservados; sólo hay que renovar el permiso.',
+        accion: 'RECONECTAR', etiquetaAccion: 'Volver a autorizar con Google', tono: 'warn',
+      };
+    case 'OAUTH_PENDING':
+      return {
+        titulo: 'Falta autorizar el acceso con Google',
+        explicacion: 'Empezaste la conexión y quedó a medias. Puedes retomarla cuando quieras.',
+        accion: 'CONECTAR', etiquetaAccion: 'Continuar con Google', tono: 'warn',
+      };
+    case 'ACCOUNT_SELECTION_PENDING':
+      // CERO CUENTAS: es el caso de una empresa que autorizó con una cuenta de Google que todavía no tiene
+      // ninguna cuenta de publicidad. No se muestra un selector vacío ni se le pide que aprenda Google Ads.
+      if (cuentasDescubiertas === 0) {
+        return {
+          titulo: 'Google está autorizado, pero todavía no hay una cuenta de anuncios disponible',
+          explicacion: 'Tu cuenta de Google está conectada y no encontramos ninguna cuenta de publicidad a la que SOEC pueda entrar. Hace falta configurar una con Google antes de seguir; te avisaremos en cuanto esté disponible.',
+          accion: 'ESPERAR_CUENTA', etiquetaAccion: 'Volver a buscar', tono: 'warn',
+        };
+      }
+      return {
+        titulo: 'Elige qué cuenta administrará SOEC',
+        explicacion: 'Tu cuenta de Google ya está autorizada. Falta decir en cuál de tus cuentas de publicidad debe trabajar.',
+        accion: 'ELEGIR_CUENTA', etiquetaAccion: 'Elegir cuenta', tono: 'warn',
+      };
+    default:
+      return {
+        titulo: 'Google Ads no está conectado',
+        explicacion: 'Conéctalo para que SOEC pueda ver tus campañas. Conectar no le permite cambiar nada ni gastar.',
+        accion: 'CONECTAR', etiquetaAccion: 'Conectar Google Ads', tono: 'muted',
+      };
+  }
+}
+
 const ETIQUETA_DATOS: Record<string, { texto: string; cls: string }> = {
   ACTUALIZADO: { texto: 'Actualizado', cls: 'ok' },
   DESACTUALIZADO: { texto: 'Desactualizado', cls: 'warn' },
@@ -50,6 +107,10 @@ export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement 
   const [elegida, setElegida] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
+  /** Cuántas cuentas devolvió el último descubrimiento. `null` ⇒ todavía no se buscó. */
+  const [descubiertas, setDescubiertas] = useState<number | null>(null);
+  /** Cambiar de cuenta mueve dónde trabaja SOEC: se pide confirmación para que no ocurra de un clic. */
+  const [confirmandoCambio, setConfirmandoCambio] = useState(false);
 
   const headers = useCallback(() => ({ 'content-type': 'application/json', ...cabecerasOrg(org) }), [org]);
 
@@ -89,8 +150,11 @@ export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement 
       const r = await fetch('/api/google-ads/accounts', { method: 'GET', cache: 'no-store', headers: cabecerasOrg(org) });
       const j = await r.json();
       if (r.ok && j?.datos?.cuentas) {
-        setCuentas(j.datos.cuentas as Cuenta[]);
-        setElegida((j.datos.cuentas[0] as Cuenta | undefined)?.customerId ?? null);
+        const lista = j.datos.cuentas as Cuenta[];
+        setDescubiertas(lista.length);
+        // Sin cuentas no se abre un selector vacío: se explica el estado y se ofrece volver a buscar.
+        setCuentas(lista.length > 0 ? lista : null);
+        setElegida(lista[0]?.customerId ?? null);
       } else if (j?.error === 'NEEDS_REAUTH') {
         setAviso('Google Ads necesita reconexión.');
         void cargar();
@@ -113,7 +177,11 @@ export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement 
         await cargar();
       } else {
         const j = await r.json();
-        setAviso(j?.error === 'ACCESO_DENEGADO' ? 'No tenés acceso a esa cuenta con esta autorización.' : 'No se pudo conectar la cuenta.');
+        setAviso(
+          typeof j?.mensaje === 'string' ? j.mensaje // el servidor ya lo explica en lenguaje de negocio
+            : j?.error === 'ACCESO_DENEGADO' ? 'No tienes acceso a esa cuenta con esta autorización.'
+              : 'No se pudo conectar la cuenta.',
+        );
       }
     } finally {
       setOcupado(null);
@@ -156,71 +224,86 @@ export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement 
   if (estado === null) return <div className="ga-card">Google Ads · cargando…</div>;
 
   const c = estado.conexion;
+  const v = vistaDelEstadoGoogle(c.estado, descubiertas);
   const etq = ETIQUETA_DATOS[estado.datos.estado] ?? ETIQUETA_DATOS.NO_CONECTADO!;
+
+  /** El botón que corresponde al estado. Uno solo: la persona no tiene que elegir entre caminos. */
+  const accionPrincipal = (): React.ReactElement | null => {
+    if (v.accion === 'CONECTAR' || v.accion === 'RECONECTAR') {
+      return <button className="btn" disabled={ocupado !== null} onClick={() => void conectar()}>{ocupado === 'conectar' ? 'Abriendo…' : v.etiquetaAccion}</button>;
+    }
+    if (v.accion === 'ELEGIR_CUENTA' || v.accion === 'ESPERAR_CUENTA') {
+      return <button className="btn" disabled={ocupado !== null} onClick={() => void listarCuentas()}>{ocupado === 'cuentas' ? 'Buscando…' : v.etiquetaAccion}</button>;
+    }
+    return null;
+  };
 
   return (
     <div className="ga-card">
       <div className="ga-head">
-        <b>Google Ads</b>
+        <b>Conexión a Google Ads</b>
         <span className={`ga-badge ${etq.cls}`}>{etq.texto}</span>
       </div>
 
       {aviso && <p className="ga-aviso">{aviso}</p>}
 
-      {/* Selección de cuenta (tras volver del consentimiento o al "Cambiar cuenta") */}
       {cuentas !== null ? (
         <div className="ga-body">
-          <p>Elegí la cuenta de Google Ads que querés conectar:</p>
-          {cuentas.length === 0 && <p className="ga-muted">No encontramos cuentas accesibles con esta autorización.</p>}
+          <p>Elige la cuenta de publicidad en la que quieres que SOEC trabaje:</p>
           <ul className="ga-cuentas">
             {cuentas.map((cu) => (
               <li key={cu.customerId}>
                 <label>
                   <input type="radio" name="ga-cuenta" checked={elegida === cu.customerId} onChange={() => setElegida(cu.customerId)} />
-                  <span>{cu.descriptiveName ?? 'Cuenta'} · {fmtCuenta(cu.customerId)}{cu.manager ? ' · administradora' : ''}{cu.testAccount ? ' · prueba' : ''}</span>
+                  <span>
+                    {cu.descriptiveName ?? 'Cuenta de publicidad'}
+                    {cu.currencyCode ? ` · ${cu.currencyCode}` : ''}
+                    {cu.manager ? ' · administradora (no aloja campañas)' : ''}
+                    {cu.testAccount ? ' · de prueba' : ''}
+                  </span>
                 </label>
               </li>
             ))}
           </ul>
           <div className="ga-acciones">
-            <button className="btn" disabled={!elegida || ocupado !== null} onClick={() => void seleccionar()}>{ocupado === 'seleccionar' ? 'Conectando…' : 'Conectar'}</button>
-            <button className="btn ga-sec" disabled={ocupado !== null} onClick={() => setCuentas(null)}>Cancelar</button>
+            <button className="btn" disabled={!elegida || ocupado !== null} onClick={() => void seleccionar()}>{ocupado === 'seleccionar' ? 'Conectando…' : 'Usar esta cuenta'}</button>
+            <button className="btn ga-sec" disabled={ocupado !== null} onClick={() => { setCuentas(null); setConfirmandoCambio(false); }}>Cancelar</button>
           </div>
         </div>
       ) : c.estado === 'CONNECTED' ? (
         <div className="ga-body">
+          <p><b>{v.titulo}.</b> {v.explicacion}</p>
           <div className="ga-cuenta-actual">
-            <div><span className="ga-muted">Cuenta</span><br />{c.descriptiveName ?? 'Cuenta'} · {c.customerId ? fmtCuenta(c.customerId) : '—'}</div>
-            <div><span className="ga-muted">Datos hasta</span><br />{estado.datos.dataThrough ?? '—'}</div>
+            <div><span className="ga-muted">Cuenta</span><br />{c.descriptiveName ?? 'Cuenta de publicidad'}</div>
+            <div><span className="ga-muted">Moneda</span><br />{c.currencyCode ?? '—'}</div>
+            <div><span className="ga-muted">Zona horaria</span><br />{c.timeZone ?? '—'}</div>
             <div><span className="ga-muted">Última actualización</span><br />{fecha(estado.datos.ultimaActualizacion)}</div>
           </div>
+          <p className="ga-muted">Conectar sirve para mirar. Cambiar campañas, gastar y encender se autorizan aparte, más abajo.</p>
           <div className="ga-acciones">
             <button className="btn" disabled={ocupado !== null} onClick={() => void actualizar()}>{ocupado === 'actualizar' ? 'Actualizando…' : 'Actualizar ahora'}</button>
-            <button className="btn ga-sec" disabled={ocupado !== null} onClick={() => void listarCuentas()}>Cambiar cuenta</button>
-            <button className="btn ga-sec" disabled={ocupado !== null} onClick={() => void conectar()}>Reconectar</button>
+            {confirmandoCambio ? (
+              <>
+                <span className="ga-muted">Cambiar de cuenta mueve dónde trabaja SOEC. ¿Seguimos?</span>
+                <button className="btn" disabled={ocupado !== null} onClick={() => { setConfirmandoCambio(false); void listarCuentas(); }}>Sí, elegir otra cuenta</button>
+                <button className="btn ga-sec" disabled={ocupado !== null} onClick={() => setConfirmandoCambio(false)}>No, dejarla como está</button>
+              </>
+            ) : (
+              <button className="btn ga-sec" disabled={ocupado !== null} onClick={() => setConfirmandoCambio(true)}>Cambiar de cuenta</button>
+            )}
             <button className="btn ga-sec" disabled={ocupado !== null} onClick={() => void desconectar()}>Desconectar</button>
           </div>
-        </div>
-      ) : c.estado === 'NEEDS_REAUTH' ? (
-        <div className="ga-body">
-          <p>Google Ads necesita reconexión. <b>Tus datos históricos están conservados.</b></p>
-          <div className="ga-acciones">
-            <button className="btn" disabled={ocupado !== null} onClick={() => void conectar()}>{ocupado === 'conectar' ? 'Abriendo…' : 'Reconectar Google Ads'}</button>
-          </div>
-        </div>
-      ) : c.estado === 'ACCOUNT_SELECTION_PENDING' ? (
-        <div className="ga-body">
-          <p>Autorización lista. Elegí la cuenta que querés conectar.</p>
-          <div className="ga-acciones">
-            <button className="btn" disabled={ocupado !== null} onClick={() => void listarCuentas()}>{ocupado === 'cuentas' ? 'Cargando…' : 'Elegir cuenta'}</button>
-          </div>
+          <details className="ga-detalle">
+            <summary>Detalles técnicos</summary>
+            <p className="ga-muted">
+              Identificador de la cuenta: {c.customerId ? fmtCuenta(c.customerId) : '—'} · datos hasta {estado.datos.dataThrough ?? '—'}
+            </p>
+          </details>
         </div>
       ) : (
         <div className="ga-body">
-          <p className="ga-muted">Conectá tu cuenta de Google Ads para ver tus campañas dentro de SOEC (solo lectura).</p>
-          <div className="ga-acciones">
-            <button className="btn" disabled={ocupado !== null} onClick={() => void conectar()}>{ocupado === 'conectar' ? 'Abriendo…' : 'Conectar Google Ads'}</button>
-          </div>
+          <p><b>{v.titulo}.</b> {v.explicacion}</p>
+          <div className="ga-acciones">{accionPrincipal()}</div>
         </div>
       )}
 
@@ -240,6 +323,7 @@ export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement 
         .ga-cuenta-actual { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
         .ga-acciones { display: flex; flex-wrap: wrap; gap: 8px; }
         .ga-sec { background: transparent; border: 1px solid var(--borde, #cbd5e1); color: inherit; }
+        .ga-detalle { color: #64748b; font-size: 14px; }
       `}</style>
     </div>
   );
