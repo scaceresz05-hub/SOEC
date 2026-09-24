@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { RepositorioNegocios } from '../negocio/negocio-pg';
 import { RepositorioHandoff } from './handoff-pg';
-import { handoffDeGoogle, TIPOS_DE_GOOGLE, type EstadoGoogleParaHandoff, type IntencionHandoff } from './handoff-google';
+import { decidirHandoffGoogle, TIPOS_DE_GOOGLE, type EstadoGoogleParaHandoff, type IntencionHandoff } from './handoff-google';
 import {
   aTareaVisible, metadataSegura, proveedorDeCanal, tareaPrincipal, urlDeProveedorValida,
   type CanalHandoff, type Handoff, type TareaVisible, type TipoHandoff, type VerificadorHandoff, type VeredictoHandoff,
@@ -186,7 +186,10 @@ export class HandoffService {
    * aplican. Se llama al leer la vista, así que la pantalla nunca muestra una tarea que el mundo ya resolvió.
    */
   async sincronizarGoogle(org: string, estado: EstadoGoogleParaHandoff, actor = 'soec'): Promise<ResultadoSincronizacion> {
-    const intencion = handoffDeGoogle(estado);
+    const decision = decidirHandoffGoogle(estado);
+    // No saber no es una conclusión: si el proveedor no contestó, la tarea que hubiera se queda donde está.
+    if (decision.accion === 'ESPERAR') return { tarea: null, creada: false };
+    const intencion = decision.accion === 'ABRIR' ? decision.intencion : null;
     // Lo que ya no aplica se cancela. Si no hace falta nada, se cancelan TODOS los tipos del canal.
     const sobran: TipoHandoff[] = intencion === null
       ? [...TIPOS_DE_GOOGLE]
