@@ -168,10 +168,16 @@ export class RepositorioHandoff {
     return rows.map((r: Record<string, unknown>) => aHandoff(r));
   }
 
+  /**
+   * Las tareas vigentes. Una caducada NO se devuelve, y tampoco se marca aquí: cambiar su estado sería
+   * escribir durante una lectura, y de eso va toda esta corrección. El sello `EXPIRED` lo pone la
+   * sincronización, que es una operación declaradamente mutadora; mientras tanto, leer no la muestra.
+   */
   async abiertas(org: string): Promise<readonly Handoff[]> {
     const { rows } = await this.pool.query(
       `select * from external_handoff
         where organization_id = $1 and estado in ('OPEN','WAITING_EXTERNAL','BLOCKED_EXTERNAL')
+          and (expira_en is null or expira_en > now())
         order by creado_en`,
       [org],
     );

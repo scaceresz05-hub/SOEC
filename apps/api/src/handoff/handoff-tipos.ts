@@ -174,6 +174,11 @@ export function metadataSegura(metadata: Record<string, unknown> | undefined): R
 /** Lo que la interfaz necesita para pintar UNA tarea. Sin ids internos ni nombres de estado. */
 export interface TareaVisible {
   readonly id: string;
+  /**
+   * Canal al que pertenece la tarea. NO se pinta: sirve para que la pantalla sepa qué otra tarjeta debe
+   * callarse mientras esta tarea es la próxima acción. Un dato para decidir, no para mostrar.
+   */
+  readonly canal: CanalHandoff;
   readonly titulo: string;
   readonly motivo: string;
   readonly etiquetaAccion: string;
@@ -187,6 +192,7 @@ export interface TareaVisible {
 export function aTareaVisible(h: Handoff): TareaVisible {
   return {
     id: h.id,
+    canal: h.canal,
     titulo: h.instruccion,
     motivo: h.motivo,
     etiquetaAccion: h.etiquetaAccion,

@@ -8,6 +8,8 @@ import { cabecerasOrg } from './org-activa';
 
 export interface TareaPendiente {
   id: string;
+  /** A qué canal pertenece. No se pinta: sirve para que la tarjeta de ese canal ceda la acción. */
+  canal: string;
   titulo: string;
   motivo: string;
   etiquetaAccion: string;

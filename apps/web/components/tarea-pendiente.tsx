@@ -10,20 +10,36 @@
  * Lo que esta tarjeta NUNCA hace: dar por hecha una tarea porque la persona diga que la hizo. El botón de
  * «Ya lo hice» pregunta al proveedor; si el mundo no cambió, la tarea sigue ahí, y eso es lo correcto.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { leerTarea, marcarAbierta, revisarTareas, type VistaTareas } from '../lib/handoff-client';
 
-export function TareaPendiente({ org, alActuarDentro }: { org: string; alActuarDentro?: () => void }): React.ReactElement | null {
+export function TareaPendiente({ org, alActuarDentro, alCambiarTarea }: {
+  org: string;
+  alActuarDentro?: () => void;
+  /**
+   * Qué canal tiene la próxima acción, o `null` si no hay ninguna. La pantalla lo usa para que la tarjeta de
+   * ese canal se calle mientras tanto: dos botones que piden lo mismo con palabras distintas no son dos
+   * oportunidades, son una duda.
+   */
+  alCambiarTarea?: (canal: string | null) => void;
+}): React.ReactElement | null {
   const [vista, setVista] = useState<VistaTareas | null>(null);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Se guarda en una referencia para no re-suscribir el efecto en cada render del padre.
+  const avisar = useRef(alCambiarTarea);
+  avisar.current = alCambiarTarea;
+
   const cargar = useCallback(async () => {
     try {
-      setVista(await leerTarea(org));
+      const v = await leerTarea(org);
+      setVista(v);
       setError(null);
+      avisar.current?.(v.tarea?.canal ?? null);
     } catch {
       setVista(null); // sin tareas legibles no se inventa ninguna: la tarjeta simplemente no aparece
+      avisar.current?.(null);
     }
   }, [org]);
 
@@ -39,7 +55,9 @@ export function TareaPendiente({ org, alActuarDentro }: { org: string; alActuarD
       if (tarea.urlProveedor !== null) {
         // Se abre en otra pestaña: la persona vuelve aquí y la tarjeta sigue donde estaba.
         window.open(tarea.urlProveedor, '_blank', 'noopener,noreferrer');
-        setVista(await marcarAbierta(org, tarea.id));
+        const v = await marcarAbierta(org, tarea.id);
+        setVista(v);
+        avisar.current?.(v.tarea?.canal ?? null);
       } else {
         alActuarDentro?.(); // la acción ocurre dentro de SOEC (conectar, elegir cuenta…)
       }
@@ -54,7 +72,9 @@ export function TareaPendiente({ org, alActuarDentro }: { org: string; alActuarD
     setOcupado('comprobar');
     setError(null);
     try {
-      setVista(await revisarTareas(org));
+      const v = await revisarTareas(org);
+      setVista(v);
+      avisar.current?.(v.tarea?.canal ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'no se pudo comprobar');
     } finally {

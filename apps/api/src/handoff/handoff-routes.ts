@@ -1,17 +1,19 @@
 /**
  * apps/api · HANDOFF EXTERNO · superficie HTTP.
  *
- * `GET /handoff` responde UNA cosa: la que la empresa tiene que hacer ahora fuera de SOEC. Antes de
- * responder, mira el estado real de los canales y sincroniza las tareas, de modo que nunca se pide algo que
- * el mundo ya resolvió.
+ * UNA REGLA POR ENCIMA DE TODO: **los `GET` no escriben**. `GET /handoff` devuelve la tarea que ya está
+ * abierta y `GET /handoff/historial` devuelve lo que pasó; ninguno abre tareas, ninguno las vence y ninguno
+ * audita. Antes no era así —leer la pantalla creaba la tarea—, y eso tenía dos costes que no se ven hasta que
+ * duelen: mirar cambiaba lo mirado, así que ninguna verificación era de fiar; y la auditoría se llenaba de
+ * filas que nadie decidió crear, con lo que dejaba de poder responder «¿quién hizo esto y cuándo?».
  *
- * `POST /handoff/:id/abierta` registra que la persona salió al proveedor (la tarea pasa a esperar al mundo);
- * `POST /handoff/revisar` REANUDA: verifica contra el mundo, cierra lo que ya está hecho, recalcula qué falta
- * ahora y abre la tarea siguiente si corresponde. Ninguna de las dos concede permisos: marcar o cerrar una
- * tarea no autoriza gasto, ni escritura, ni activación. Eso vive en otras puertas, a propósito.
+ * La sincronización vive donde se la puede ver: `POST /handoff/sync`. Mira el estado real del canal, cierra lo
+ * que el mundo ya resolvió, recalcula qué falta y abre la tarea siguiente. Es idempotente y va por
+ * organización, así que puede llamarla una persona («ya lo hice, compruébalo») o, cuando llegue la Fase I.4,
+ * un scheduler. `POST /handoff/revisar` es el mismo trabajo con el nombre que usa la pantalla.
  *
- * Un solo lector del estado del proveedor alimenta las dos mitades —la que abre tareas y la que las cierra—.
- * Si fueran dos, acabarían discrepando, y la persona lo notaría antes que nosotros.
+ * Ninguna de estas rutas concede permisos: abrir, cerrar o marcar una tarea no autoriza gasto, ni escritura,
+ * ni activación. Eso vive en otras puertas, a propósito.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
@@ -49,66 +51,32 @@ export function registerHandoffRoutes(app: FastifyInstance, pool: Pool, opciones
     };
   };
 
-  const servicio = new HandoffService(pool, {
+  const deps = (extra: Partial<DepsHandoff> = {}): DepsHandoff => ({
     ...opciones,
     leerEstadoGoogle: opciones.leerEstadoGoogle ?? leerEstadoGoogle,
     // Los verificadores de Google se construyen sobre el mismo lector; los tipos que todavía no sabemos
     // observar quedan con su adaptador pendiente explícito, que nunca cierra nada.
     verificadores: opciones.verificadores ?? [...verificadoresDeGoogle(leerEstadoGoogle), ...VERIFICADORES_PENDIENTES],
+    ...extra,
   });
+
+  /**
+   * Servicio para las rutas de lectura. Se construye SIN verificadores y sin lector del proveedor: aunque
+   * alguien añadiera mañana una llamada a sincronizar en un `GET`, no tendría con qué escribir. La invariante
+   * no depende de que nadie se equivoque.
+   */
+  const soloLectura = new HandoffService(pool, { ahora: opciones.ahora, verificadores: [] });
 
   const manejarError = (e: unknown, reply: FastifyReply): FastifyReply => {
     if (e instanceof HandoffInvalidoError) return reply.code(400).send({ error: 'HANDOFF_INVALIDO', message: e.message });
     throw e;
   };
 
-  /** Sincroniza los canales con el mundo antes de contestar. Hoy: Google. */
-  const sincronizar = async (org: string): Promise<void> => {
-    const estado = await leerEstadoGoogle(org);
-    if (estado === null) return;
-    await servicio.sincronizarGoogle(org, estado);
-  };
-
+  /** Lo que la empresa tiene pendiente AHORA. Lectura pura: lo que hay, no lo que habría que abrir. */
   app.get('/handoff', async (req: FastifyRequest, reply) => {
     const org = String(contextoDe(req).organizationId);
     try {
-      await sincronizar(org);
-      return reply.send(await servicio.vista(org));
-    } catch (e) {
-      return manejarError(e, reply);
-    }
-  });
-
-  /** La persona pulsó el botón y salió al proveedor: la tarea queda esperando al mundo. */
-  app.post('/handoff/:id/abierta', async (req: FastifyRequest, reply) => {
-    const org = String(contextoDe(req).organizationId);
-    const { id } = req.params as { id: string };
-    const h = await servicio.marcarEsperandoFuera(org, id);
-    if (h === null) return reply.code(404).send({ error: 'TAREA_NO_ENCONTRADA' });
-    return reply.send(await servicio.vista(org));
-  });
-
-  /**
-   * Vuelve a comprobar contra el mundo y reanuda: cierra lo que ya se cumplió, recalcula qué falta y deja
-   * abierta la tarea siguiente. Nadie «marca como hecho» a mano.
-   */
-  app.post('/handoff/revisar', async (req: FastifyRequest, reply) => {
-    const org = String(contextoDe(req).organizationId);
-    // La preparación se recalcula con el modo que dice el gateway; sin cabecera, el más conservador.
-    const modoOperativo = modoOperativoDe(req) ?? 'PILOT';
-    const conRecalculo = new HandoffService(pool, {
-      ...opciones,
-      leerEstadoGoogle: opciones.leerEstadoGoogle ?? leerEstadoGoogle,
-      verificadores: opciones.verificadores ?? [...verificadoresDeGoogle(leerEstadoGoogle), ...VERIFICADORES_PENDIENTES],
-      recalcularPreparacion: opciones.recalcularPreparacion
-        ?? (async (o: string) => new OnboardingService(pool, { leerModo: async () => modoOperativo }).readiness(o)),
-    });
-    try {
-      const r = await conRecalculo.reanudar(org);
-      return reply.send({
-        organizationId: org, tarea: r.siguiente, pendientes: r.pendientes,
-        revisadas: r.revisadas, completadas: r.completadas.length, preparacionRecalculada: r.preparacionRecalculada,
-      });
+      return reply.send(await soloLectura.vista(org));
     } catch (e) {
       return manejarError(e, reply);
     }
@@ -116,6 +84,48 @@ export function registerHandoffRoutes(app: FastifyInstance, pool: Pool, opciones
 
   app.get('/handoff/historial', async (req: FastifyRequest, reply) => {
     const org = String(contextoDe(req).organizationId);
-    return reply.send({ organizationId: org, tareas: await servicio.historial(org) });
+    return reply.send({ organizationId: org, tareas: await soloLectura.historial(org) });
   });
+
+  /** La persona pulsó el botón y salió al proveedor: la tarea queda esperando al mundo. */
+  app.post('/handoff/:id/abierta', async (req: FastifyRequest, reply) => {
+    const org = String(contextoDe(req).organizationId);
+    const { id } = req.params as { id: string };
+    const h = await new HandoffService(pool, deps()).marcarEsperandoFuera(org, id);
+    if (h === null) return reply.code(404).send({ error: 'TAREA_NO_ENCONTRADA' });
+    return reply.send(await soloLectura.vista(org));
+  });
+
+  /**
+   * SINCRONIZAR: mira el mundo, cierra lo cumplido, recalcula qué falta y abre la tarea siguiente. Es la única
+   * superficie que escribe tareas, y por eso es un POST: quien la llama sabe que está cambiando algo.
+   * Idempotente y por organización; repetirla no duplica filas ni auditoría.
+   */
+  const sincronizar = async (req: FastifyRequest, reply: FastifyReply): Promise<FastifyReply> => {
+    const org = String(contextoDe(req).organizationId);
+    // La preparación se recalcula con el modo que dice el gateway; sin cabecera, el más conservador.
+    const modoOperativo = modoOperativoDe(req) ?? 'PILOT';
+    const servicio = new HandoffService(pool, deps({
+      recalcularPreparacion: opciones.recalcularPreparacion
+        ?? (async (o: string) => new OnboardingService(pool, { leerModo: async () => modoOperativo }).readiness(o)),
+    }));
+    try {
+      const r = await servicio.reanudar(org);
+      return reply.send({
+        organizationId: org, tarea: r.siguiente, pendientes: r.pendientes,
+        revisadas: r.revisadas, completadas: r.completadas.length,
+        vencidas: r.vencidas, preparacionRecalculada: r.preparacionRecalculada,
+      });
+    } catch (e) {
+      return manejarError(e, reply);
+    }
+  };
+
+  app.post('/handoff/sync', sincronizar);
+  /**
+   * El mismo trabajo con el nombre que usa la pantalla: «ya lo hice, compruébalo». Existen los dos porque
+   * nombran dos intenciones distintas —una persona comprobando lo suyo, y el sistema poniéndose al día— y
+   * porque quitar este alias rompería al cliente ya desplegado sin ganar nada.
+   */
+  app.post('/handoff/revisar', sincronizar);
 }

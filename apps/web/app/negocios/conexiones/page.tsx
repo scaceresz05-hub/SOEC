@@ -45,6 +45,8 @@ export default function ConexionesPage() {
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
+  /** Canal cuya próxima acción ya está pedida arriba (o `null`). Decide si la tarjeta del canal calla. */
+  const [canalConTarea, setCanalConTarea] = useState<string | null>(null);
 
   // Formulario del puente de medición.
   const [endpoint, setEndpoint] = useState('');
@@ -195,7 +197,11 @@ export default function ConexionesPage() {
       </section>
 
       {/* Lo primero de la pantalla: la ÚNICA cosa que hace falta ahora, si la hay. */}
-      <TareaPendiente org={org} alActuarDentro={() => document.getElementById('conexion-google')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} />
+      <TareaPendiente
+        org={org}
+        alActuarDentro={() => document.getElementById('conexion-google')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+        alCambiarTarea={setCanalConTarea}
+      />
 
       <section id="conexion-google" style={{ marginBottom: 32 }}>
         <h2 style={{ fontSize: 18, marginBottom: 8 }}>Publicidad</h2>
@@ -204,7 +210,8 @@ export default function ConexionesPage() {
           mandan a «Conexiones y permisos», y mandar a alguien a un sitio donde no está la acción es una forma
           educada de dejarlo tirado.
         */}
-        <GoogleAdsConexion org={org} />
+        {/* Si la próxima acción de Google ya se pide arriba, esta tarjeta informa pero no compite. */}
+        <GoogleAdsConexion org={org} accionSuprimida={canalConTarea === 'GOOGLE_ADS'} />
         {estado?.oauthMeta !== null && estado?.oauthMeta !== undefined && (
           <p style={{ color: 'var(--muted, #666)' }}>
             Meta (Facebook e Instagram): conectada para leer. SOEC no puede crear ni cambiar nada ahí.

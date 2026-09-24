@@ -135,7 +135,15 @@ function fmtCuenta(id: string): string {
   return id.length === 10 ? `${id.slice(0, 3)}-${id.slice(3, 6)}-${id.slice(6)}` : id;
 }
 
-export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement {
+export function GoogleAdsConexion({ org, accionSuprimida = false }: {
+  org: string;
+  /**
+   * `true` cuando lo que falta en este canal ya se está pidiendo arriba, en «SOEC necesita que hagas una
+   * cosa». Entonces esta tarjeta cuenta el estado pero NO ofrece su propio botón: la persona debe percibir
+   * una sola próxima acción, y dos botones distintos para el mismo problema sólo la hacen dudar de cuál es.
+   */
+  accionSuprimida?: boolean;
+}): React.ReactElement {
   const [estado, setEstado] = useState<EstadoConexion | null>(null);
   const [cuentas, setCuentas] = useState<Cuenta[] | null>(null);
   const [elegida, setElegida] = useState<string | null>(null);
@@ -294,6 +302,10 @@ export function GoogleAdsConexion({ org }: { org: string }): React.ReactElement 
 
   /** El botón que corresponde al estado. Uno solo: la persona no tiene que elegir entre caminos. */
   const accionPrincipal = (): React.ReactElement | null => {
+    // La acción ya la pide la tarjeta de «una sola cosa»: aquí sólo se señala dónde está.
+    if (accionSuprimida && v.accion !== 'NINGUNA') {
+      return <span className="ga-muted">Es lo que SOEC te está pidiendo arriba.</span>;
+    }
     if (v.accion === 'CONECTAR' || v.accion === 'RECONECTAR') {
       return <button className="btn" disabled={ocupado !== null} onClick={() => void conectar()}>{ocupado === 'conectar' ? 'Abriendo…' : v.etiquetaAccion}</button>;
     }

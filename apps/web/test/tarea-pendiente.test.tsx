@@ -12,6 +12,7 @@ import { TareaPendiente } from '../components/tarea-pendiente';
 
 const TAREA_CP = {
   id: 'hand-abc123',
+  canal: 'GOOGLE_ADS',
   titulo: 'Crea tu cuenta de anuncios en Google',
   motivo: 'Google ya está autorizado, pero todavía no encontramos una cuenta de anuncios donde SOEC pueda trabajar.',
   etiquetaAccion: 'Continuar con Google',
@@ -49,6 +50,23 @@ describe('la tarjeta de una sola cosa', () => {
     }
     // Un solo botón: no hay menú de opciones ni lista de pendientes.
     expect(screen.getAllByRole('button')).toHaveLength(1);
+  });
+
+  it('avisa de qué canal tiene la próxima acción, sin enseñarlo', async () => {
+    const avisos: (string | null)[] = [];
+    servidor({ organizationId: 'org-qa', tarea: TAREA_CP, pendientes: 0 });
+    render(h(TareaPendiente, { org: 'org-qa', alCambiarTarea: (c: string | null) => avisos.push(c) }));
+
+    await screen.findByText('Crea tu cuenta de anuncios en Google');
+    expect(avisos).toEqual(['GOOGLE_ADS']);
+    expect(document.body.textContent ?? '').not.toContain('GOOGLE_ADS');
+  });
+
+  it('sin tarea, avisa de que no hay ninguna: la otra tarjeta puede volver a hablar', async () => {
+    const avisos: (string | null)[] = [];
+    servidor({ organizationId: 'org-qa', tarea: null, pendientes: 0 });
+    render(h(TareaPendiente, { org: 'org-qa', alCambiarTarea: (c: string | null) => avisos.push(c) }));
+    await waitFor(() => { expect(avisos).toEqual([null]); });
   });
 
   it('sin tareas pendientes no se pinta nada', async () => {

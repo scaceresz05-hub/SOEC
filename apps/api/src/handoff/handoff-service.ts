@@ -184,9 +184,15 @@ export class HandoffService {
     return vencidas.length;
   }
 
-  /** Qué se le pide a esta empresa ahora mismo, y cuántas cosas quedan detrás. */
+  /**
+   * Qué se le pide a esta empresa ahora mismo, y cuántas cosas quedan detrás.
+   *
+   * LECTURA PURA. No abre tareas, no las vence y no audita. Antes sí: mirar la pantalla creaba la tarea, de
+   * modo que el propio acto de comprobar cambiaba lo comprobado — y una auditoría en la que aparecen filas
+   * que nadie decidió crear deja de servir para responder «¿quién hizo esto?». Quien sincroniza es
+   * `reanudar`, tras una llamada explícitamente mutadora.
+   */
   async vista(org: string): Promise<VistaHandoff> {
-    await enTransaccion(this.pool, async (tx) => { await this.vencerYAuditar(tx, org, 'soec'); });
     const abiertas = await this.repo.abiertas(org);
     const principal = tareaPrincipal(abiertas);
     return {

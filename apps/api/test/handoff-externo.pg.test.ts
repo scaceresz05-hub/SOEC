@@ -144,14 +144,113 @@ describe('qué se le pide a la empresa AHORA', () => {
     expect(v.tarea?.esperando).toBe(true);
   });
 
-  it('una tarea vencida deja de pedirse', async () => {
+  it('una tarea vencida deja de pedirse, y mirarla no la marca: eso lo hace sincronizar', async () => {
     const s = servicio();
     const h = await s.abrir(ORG_A, intencionAlta, { expiraEn: '2026-09-22T00:00:00.000Z' });
     expect(h.expiraEn).not.toBeNull();
+
+    // LEER no la muestra… y no la toca.
+    expect((await s.vista(ORG_A)).tarea).toBeNull();
+    const leida = await pool.query('select estado from external_handoff where id = $1', [h.id]);
+    expect(leida.rows[0].estado).toBe('OPEN');
+
+    // SINCRONIZAR sí la sella, y lo deja dicho en la auditoría.
+    await s.reanudar(ORG_A);
+    const sincronizada = await pool.query('select estado from external_handoff where id = $1', [h.id]);
+    expect(sincronizada.rows[0].estado).toBe('EXPIRED');
+    const audit = await pool.query("select count(*)::int as n from business_audit where organization_id = $1 and action = 'HANDOFF_EXPIRED'", [ORG_A]);
+    expect(audit.rows[0].n).toBe(1);
+  });
+});
+
+describe('leer no cambia nada: los GET son lectura pura', () => {
+  /** Retrato de todo lo que una lectura podría ensuciar. */
+  const retrato = async (org: string): Promise<Record<string, unknown>> => {
+    const q = async (sql: string, p: unknown[] = [org]): Promise<number> => (await pool.query(sql, p)).rows[0].n as number;
+    return {
+      tareas: await q('select count(*)::int as n from external_handoff where organization_id = $1'),
+      auditoria: await q('select count(*)::int as n from business_audit where organization_id = $1'),
+      estados: (await pool.query('select id, estado, actualizado_en from external_handoff where organization_id = $1 order by id', [org])).rows,
+    };
+  };
+
+  it('sin nada pendiente, mirar no crea ninguna tarea', async () => {
+    const s = servicio();
+    const antes = await retrato(ORG_A);
     const v = await s.vista(ORG_A);
     expect(v.tarea).toBeNull();
-    const { rows } = await pool.query('select estado from external_handoff where id = $1', [h.id]);
-    expect(rows[0].estado).toBe('EXPIRED');
+    await s.historial(ORG_A);
+    expect(await retrato(ORG_A)).toEqual(antes);
+    expect(antes.tareas).toBe(0); // y seguía sin haber ninguna: leer no la inventó
+  });
+
+  it('con una tarea abierta, mirarla no la duplica, no la cambia y no la audita', async () => {
+    const s = servicio();
+    await s.abrir(ORG_A, intencionAlta);
+    const antes = await retrato(ORG_A);
+
+    for (let i = 0; i < 3; i += 1) {
+      expect((await s.vista(ORG_A)).tarea?.titulo).toContain('Crea tu cuenta de anuncios');
+      await s.historial(ORG_A);
+    }
+    expect(await retrato(ORG_A)).toEqual(antes);
+  });
+
+  it('la tarea visible lleva su canal, pero el canal no es texto para nadie', async () => {
+    const s = servicio();
+    await s.abrir(ORG_A, intencionAlta);
+    const t = (await s.vista(ORG_A)).tarea!;
+    expect(t.canal).toBe('GOOGLE_ADS');
+    expect(`${t.titulo} ${t.motivo} ${t.etiquetaAccion}`).not.toContain('GOOGLE_ADS');
+  });
+});
+
+describe('sincronizar es la única puerta que escribe', () => {
+  const mundo = (e: EstadoGoogleParaHandoff): HandoffService => new HandoffService(pool, {
+    ahora: () => AHORA,
+    leerEstadoGoogle: async () => e,
+    verificadores: [...verificadoresDeGoogle(async () => e), ...VERIFICADORES_PENDIENTES],
+  });
+  const SIN_CUENTAS: EstadoGoogleParaHandoff = { estadoProveedor: 'ACCOUNT_SELECTION_PENDING', cuentasAccesibles: 0, cuentaEnElSsot: false };
+
+  it('una condición nueva crea UNA tarea, y repetir la sincronización la deja en una', async () => {
+    const s = mundo(SIN_CUENTAS);
+    // Antes de sincronizar, leer no ve nada: la condición existe en el mundo, la tarea todavía no.
+    expect((await s.vista(ORG_A)).tarea).toBeNull();
+
+    const primera = await s.reanudar(ORG_A);
+    expect(primera.siguiente?.titulo).toContain('Crea tu cuenta de anuncios');
+    const trasUna = await pool.query('select count(*)::int as n from external_handoff where organization_id = $1', [ORG_A]);
+    expect(trasUna.rows[0].n).toBe(1);
+
+    for (let i = 0; i < 3; i += 1) await s.reanudar(ORG_A);
+    const trasVarias = await pool.query('select count(*)::int as n from external_handoff where organization_id = $1', [ORG_A]);
+    expect(trasVarias.rows[0].n).toBe(1);
+    const creadas = await pool.query("select count(*)::int as n from business_audit where organization_id = $1 and action = 'HANDOFF_CREATED'", [ORG_A]);
+    expect(creadas.rows[0].n).toBe(1); // idempotente también en lo que cuenta la historia
+  });
+
+  it('cuando la condición se resuelve, sincronizar la cierra y recalcula qué sigue', async () => {
+    await mundo(SIN_CUENTAS).reanudar(ORG_A);
+    const conCuentas = mundo({ estadoProveedor: 'ACCOUNT_SELECTION_PENDING', cuentasAccesibles: 2, cuentaEnElSsot: false });
+    const r = await conCuentas.reanudar(ORG_A);
+
+    expect(r.completadas).toHaveLength(1);
+    expect(r.siguiente?.titulo).toContain('Elige en qué cuenta');
+    expect(r.pendientes).toBe(0);
+  });
+
+  it('sincronizar no concede ningún permiso', async () => {
+    await mundo(SIN_CUENTAS).reanudar(ORG_A);
+    await mundo({ estadoProveedor: 'CONNECTED', cuentasAccesibles: 2, cuentaEnElSsot: true }).reanudar(ORG_A);
+
+    const caps = (await new RepositorioConexiones(pool).capacidades(ORG_A)).filter((c) => c.habilitada).map((c) => c.capacidad);
+    expect(caps).not.toContain('ESCRITURA_ADS');
+    expect(caps).not.toContain('AUTONOMIA_ADS');
+    expect(await new PgMandatoRepo(pool).actual(ORG_A)).toBeNull();
+    const g = await new RepositorioNegocios(pool).gobierno(ORG_A);
+    expect(g?.autonomousSpend ?? false).toBe(false);
+    expect(g?.campaignExecution ?? false).toBe(false);
   });
 });
 
@@ -388,7 +487,7 @@ describe('la entidad guarda quién lo exige y cuándo dejó de hacer falta', () 
     const h = await s.abrir(ORG_A, intencionAlta);
     await s.marcarEsperandoFuera(ORG_A, h.id);
     const caducada = await s.abrir(ORG_A, { ...intencionAlta, causa: 'otra-cosa', urlProveedor: null }, { expiraEn: '2026-09-22T00:00:00.000Z' });
-    await s.vista(ORG_A); // al mirar, lo caducado vence
+    await s.reanudar(ORG_A); // vencer es escribir: ocurre al sincronizar, no al mirar
 
     expect((await new RepositorioHandoff(pool).porId(ORG_A, caducada.id))?.estado).toBe('EXPIRED');
     const { rows } = await pool.query('select action, count(*)::int as n from business_audit where organization_id = $1 group by 1', [ORG_A]);
