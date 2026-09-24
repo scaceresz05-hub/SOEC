@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement as h } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TareaPendiente } from '../components/tarea-pendiente';
 
 const TAREA_CP = {
@@ -144,6 +144,80 @@ describe('la tarjeta de una sola cosa', () => {
     const texto = document.body.textContent ?? '';
     for (const interno of ['ACCOUNT_SELECTION_REQUIRED', 'COMPLETED', 'preparacion', 'handoff']) {
       expect(texto, `«${interno}» no puede salir a la pantalla`).not.toContain(interno);
+    }
+  });
+
+  /**
+   * FASE I.4 · la pantalla se entera sola. Quien sale a Google y vuelve a esta pestaña espera que aquí ya se
+   * sepa; pedirle además que pulse «compruébalo» es pedirle que nos avise de algo que el servidor ya verificó.
+   */
+  it('vuelve a preguntar sola y se actualiza, sin escribir nada', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const SIGUIENTE = { ...TAREA_CP, id: 'hand-sig', titulo: 'Elige en qué cuenta debe trabajar SOEC', etiquetaAccion: 'Elegir cuenta', urlProveedor: null };
+      const respuestas = [
+        { organizationId: 'org-qa', tarea: TAREA_CP, pendientes: 0 },
+        { organizationId: 'org-qa', tarea: SIGUIENTE, pendientes: 0 },
+      ];
+      const llamadas: string[] = [];
+      vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { method?: string }) => {
+        llamadas.push(`${init?.method ?? 'GET'} ${String(url)}`);
+        const cuerpo = respuestas[Math.min(llamadas.length - 1, respuestas.length - 1)];
+        return new Response(JSON.stringify(cuerpo), { status: 200, headers: { 'content-type': 'application/json' } });
+      }));
+
+      render(h(TareaPendiente, { org: 'org-qa' }));
+      await screen.findByText('Crea tu cuenta de anuncios en Google');
+
+      // El mundo cambió mientras la persona miraba: nadie pulsa nada.
+      await act(async () => { await vi.advanceTimersByTimeAsync(26_000); });
+      await screen.findByText('Elige en qué cuenta debe trabajar SOEC');
+
+      // Y el navegador sólo LEE: no dispara la comprobación ni habla con el proveedor.
+      expect(llamadas.every((l) => l.startsWith('GET'))).toBe(true);
+      expect(llamadas.some((l) => l.includes('google') || l.includes('accounts'))).toBe(false);
+      expect(llamadas.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('al desmontar deja de preguntar: nada sigue consultando de fondo', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const s = servidor({ organizationId: 'org-qa', tarea: TAREA_CP, pendientes: 0 });
+      const { unmount } = render(h(TareaPendiente, { org: 'org-qa' }));
+      await screen.findByText('Crea tu cuenta de anuncios en Google');
+
+      unmount();
+      const tras = s.llamadas.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+      expect(s.llamadas.length).toBe(tras);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('con la pestaña oculta no se pregunta: nadie está mirando', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const visibilidad = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
+    try {
+      const s = servidor({ organizationId: 'org-qa', tarea: TAREA_CP, pendientes: 0 });
+      render(h(TareaPendiente, { org: 'org-qa' }));
+      await screen.findByText('Crea tu cuenta de anuncios en Google');
+
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      const ocultas = s.llamadas.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(90_000); });
+      expect(s.llamadas.length).toBe(ocultas);
+
+      // Al volver a la pestaña, se pone al día enseguida.
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+      await waitFor(() => { expect(s.llamadas.length).toBeGreaterThan(ocultas); });
+    } finally {
+      if (visibilidad) Object.defineProperty(Document.prototype, 'visibilityState', visibilidad);
+      vi.useRealTimers();
     }
   });
 

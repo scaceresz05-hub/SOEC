@@ -112,17 +112,30 @@ export class RepositorioHandoff {
     );
     if (rows.length > 0) return aHandoff(rows[0] as Record<string, unknown>);
 
-    // Ya había una abierta con esta causa: se refresca su redacción (el motivo puede haber mejorado) y se
-    // devuelve. Nunca se duplica ni se reinicia su historia.
+    // Ya había una abierta con esta causa: se refresca su redacción SÓLO si de verdad cambió. Tocar
+    // `actualizado_en` en cada pasada del scheduler convertiría «no pasó nada» en un cambio cada cinco
+    // minutos, y quien mire la fila después no podría distinguir un hecho de un latido.
     const { rows: previas } = await q.query(
       `update external_handoff
           set instruccion = $5, motivo = $6, url_proveedor = $7, etiqueta_accion = $8, actualizado_en = now()
         where organization_id = $1 and canal = $2 and tipo = $3 and causa = $4
           and estado in ('OPEN','WAITING_EXTERNAL','BLOCKED_EXTERNAL')
+          and (instruccion is distinct from $5 or motivo is distinct from $6
+               or url_proveedor is distinct from $7 or etiqueta_accion is distinct from $8)
         returning *`,
       [h.organizationId, h.canal, h.tipo, h.causa, h.instruccion, h.motivo, h.urlProveedor, h.etiquetaAccion],
     );
-    return aHandoff(previas[0] as Record<string, unknown>);
+    if (previas.length > 0) return aHandoff(previas[0] as Record<string, unknown>);
+
+    // Nada que refrescar: se devuelve la que ya estaba, intacta.
+    const { rows: iguales } = await q.query(
+      `select * from external_handoff
+        where organization_id = $1 and canal = $2 and tipo = $3 and causa = $4
+          and estado in ('OPEN','WAITING_EXTERNAL','BLOCKED_EXTERNAL')
+        limit 1`,
+      [h.organizationId, h.canal, h.tipo, h.causa],
+    );
+    return aHandoff(iguales[0] as Record<string, unknown>);
   }
 
   async cambiarEstado(q: Queryable, org: string, id: string, estado: EstadoHandoff, detalle?: { readonly referenciaProveedor?: string | null }): Promise<Handoff | null> {

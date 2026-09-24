@@ -48,12 +48,45 @@ export interface Reanudacion {
   readonly revisadas: number;
   /** Ids de las que el mundo confirmó como hechas. */
   readonly completadas: readonly string[];
+  /** Tareas nuevas abiertas al recalcular qué falta. */
+  readonly creadas: number;
+  /** Veces que no se pudo comprobar («no pude preguntar», que no es «no está hecho»). */
+  readonly retryLater: number;
+  /** Tareas que el proveedor no deja avanzar hoy. */
+  readonly bloqueadas: number;
+  /** Pasos de la cadena verificar→completar→recalcular que llegó a dar. */
+  readonly pasos: number;
+  /** `true` cuando otro tick (u otra réplica) ya estaba sincronizando esta empresa y se cedió el turno. */
+  readonly omitidaPorConcurrencia: boolean;
   /** `true` cuando se volvió a calcular la preparación porque algo se cerró. */
   readonly preparacionRecalculada: boolean;
   /** La única cosa que se le pide a la persona DESPUÉS de reanudar. */
   readonly siguiente: TareaVisible | null;
   readonly pendientes: number;
 }
+
+/** Desglose de una pasada de verificación: qué se miró y en qué terminó cada cosa. */
+export interface ResumenVerificacion {
+  readonly revisadas: number;
+  readonly completadas: readonly string[];
+  readonly retryLater: number;
+  readonly bloqueadas: number;
+}
+
+/** Lo que dejó una sincronización de canal: qué tarea queda vigente y si hubo que abrirla. */
+export interface ResultadoSincronizacion {
+  readonly tarea: Handoff | null;
+  readonly creada: boolean;
+}
+
+/**
+ * Tope de pasos de la cadena de reanudación. Cinco alcanza de sobra para la secuencia real más larga
+ * (autorizar → crear cuenta → elegir cuenta) y garantiza que un proveedor que oscile no nos deje girando.
+ */
+const MAX_PASOS_POR_REANUDACION = 5;
+
+/** Espacio de nombres del advisory lock, para no chocar con otros cerrojos del sistema. */
+const ESPACIO_CERROJO = 'soec:handoff';
 
 export interface VistaHandoff {
   readonly organizationId: string;
@@ -152,7 +185,7 @@ export class HandoffService {
    * Sincroniza el canal GOOGLE_ADS: abre la tarea que corresponde al estado real y cancela las que ya no
    * aplican. Se llama al leer la vista, así que la pantalla nunca muestra una tarea que el mundo ya resolvió.
    */
-  async sincronizarGoogle(org: string, estado: EstadoGoogleParaHandoff, actor = 'soec'): Promise<Handoff | null> {
+  async sincronizarGoogle(org: string, estado: EstadoGoogleParaHandoff, actor = 'soec'): Promise<ResultadoSincronizacion> {
     const intencion = handoffDeGoogle(estado);
     // Lo que ya no aplica se cancela. Si no hace falta nada, se cancelan TODOS los tipos del canal.
     const sobran: TipoHandoff[] = intencion === null
@@ -168,8 +201,10 @@ export class HandoffService {
         });
       }
     });
-    if (intencion === null) return null;
-    return this.abrir(org, intencion, { actor });
+    if (intencion === null) return { tarea: null, creada: false };
+    const antes = await this.repo.abiertas(org);
+    const tarea = await this.abrir(org, intencion, { actor });
+    return { tarea, creada: !antes.some((h) => h.id === tarea.id) };
   }
 
   /** Vence lo caducado dejando constancia de cada una. Un vencimiento silencioso no se puede explicar después. */
@@ -207,10 +242,12 @@ export class HandoffService {
    * tarea como hecha diciéndolo: se comprueba. Sin verificador para un tipo, la tarea sigue abierta — que es
    * exactamente lo que debe pasar mientras ese verificador no exista.
    */
-  async verificarPendientes(org: string, actor = 'soec'): Promise<{ readonly revisadas: number; readonly completadas: readonly string[] }> {
+  async verificarPendientes(org: string, actor = 'soec'): Promise<ResumenVerificacion> {
     const verificadores = this.deps.verificadores ?? [];
     const abiertas = await this.repo.abiertas(org);
     const completadas: string[] = [];
+    let retryLater = 0;
+    let bloqueadas = 0;
 
     for (const h of abiertas) {
       const v = verificadores.find((x) => x.soporta(h));
@@ -220,14 +257,19 @@ export class HandoffService {
         veredicto = await v.verificar(h);
       } catch {
         // Un verificador que falla no cierra nada ni cambia nada: el silencio no es una confirmación.
+        retryLater += 1;
         continue;
       }
 
       // Ni `STILL_REQUIRED` ni `RETRY_LATER` tocan la fila. La primera porque la tarea sigue siendo cierta; la
       // segunda porque no sabemos nada nuevo, y escribir «no sé» como si fuera un hecho es el error a evitar.
-      if (veredicto.resultado === 'STILL_REQUIRED' || veredicto.resultado === 'RETRY_LATER') continue;
+      if (veredicto.resultado === 'STILL_REQUIRED' || veredicto.resultado === 'RETRY_LATER') {
+        if (veredicto.resultado === 'RETRY_LATER') retryLater += 1;
+        continue;
+      }
 
       if (veredicto.resultado === 'BLOCKED_EXTERNAL') {
+        bloqueadas += 1;
         if (h.estado === 'BLOCKED_EXTERNAL') continue; // ya estaba dicho: no se repite la auditoría
         await enTransaccion(this.pool, async (tx) => {
           await this.repo.cambiarEstado(tx, org, h.id, 'BLOCKED_EXTERNAL');
@@ -248,7 +290,7 @@ export class HandoffService {
       });
       completadas.push(h.id);
     }
-    return { revisadas: abiertas.length, completadas };
+    return { revisadas: abiertas.length, completadas, retryLater, bloqueadas };
   }
 
   /**
@@ -261,34 +303,95 @@ export class HandoffService {
    * mismo. Lo que NO hace, y es deliberado: no crea mandato, no autoriza gasto, no enciende escritura y no
    * activa campañas. Desbloquea el paso; no se concede a sí misma el permiso del paso siguiente.
    */
-  async reanudar(org: string, actor = 'soec'): Promise<Reanudacion> {
-    const vencidas = await enTransaccion(this.pool, async (tx) => this.vencerYAuditar(tx, org, actor));
-    const r = await this.verificarPendientes(org, actor);
-
-    // Recalcular QUÉ FALTA AHORA contra el mundo: puede que al cerrar una tarea aparezca la siguiente (se creó
-    // la cuenta ⇒ ahora falta elegirla) o que ya no falte nada por este canal.
-    if (this.deps.leerEstadoGoogle !== undefined) {
-      const estado = await this.deps.leerEstadoGoogle(org).catch(() => null);
-      if (estado !== null) await this.sincronizarGoogle(org, estado, actor);
+  async reanudar(org: string, actor = 'soec', opciones: { readonly maxPasos?: number } = {}): Promise<Reanudacion> {
+    const cerrojo = await this.tomarCerrojo(org);
+    if (cerrojo === null) {
+      // Otro tick, otra réplica o un POST simultáneo ya está sincronizando esta empresa. Ceder es lo correcto:
+      // el trabajo se está haciendo, y hacerlo dos veces sólo puede producir historia duplicada.
+      const v = await this.vista(org);
+      this.deps.log?.({ handoff: 'reanudacion-omitida', org, motivo: 'otra en curso' });
+      return {
+        organizationId: org, vencidas: 0, revisadas: 0, completadas: [], creadas: 0, retryLater: 0,
+        bloqueadas: 0, pasos: 0, omitidaPorConcurrencia: true, preparacionRecalculada: false,
+        siguiente: v.tarea, pendientes: v.pendientes,
+      };
     }
 
-    let preparacionRecalculada = false;
-    if (r.completadas.length > 0 && this.deps.recalcularPreparacion !== undefined) {
-      // Si el recálculo falla, la tarea sigue cerrada: lo que se comprobó del mundo no se deshace por esto.
-      await this.deps.recalcularPreparacion(org).then(() => { preparacionRecalculada = true; }).catch(() => undefined);
-    }
+    try {
+      const maxPasos = Math.max(1, opciones.maxPasos ?? MAX_PASOS_POR_REANUDACION);
+      const vencidas = await enTransaccion(this.pool, async (tx) => this.vencerYAuditar(tx, org, actor));
+      const completadas: string[] = [];
+      let revisadas = 0;
+      let creadas = 0;
+      let retryLater = 0;
+      let bloqueadas = 0;
+      let pasos = 0;
 
-    const v = await this.vista(org);
-    this.deps.log?.({ handoff: 'reanudado', org, vencidas, completadas: r.completadas.length, siguiente: v.tarea?.id ?? null });
-    return {
-      organizationId: org,
-      vencidas,
-      revisadas: r.revisadas,
-      completadas: r.completadas,
-      preparacionRecalculada,
-      siguiente: v.tarea,
-      pendientes: v.pendientes,
-    };
+      // CADENA: cerrar una tarea puede destapar la siguiente (se creó la cuenta ⇒ ahora falta elegirla). Se
+      // sigue tirando del hilo mientras el mundo confirme cosas, y se para en cuanto aparece algo que sólo
+      // puede hacer una persona, algo que no se pudo comprobar, o nada. El tope existe porque un bucle que
+      // depende de un proveedor externo no puede ser ilimitado: si algo oscila, para en seco y se verá.
+      for (; pasos < maxPasos; pasos += 1) {
+        const r = await this.verificarPendientes(org, actor);
+        revisadas += r.revisadas;
+        retryLater += r.retryLater;
+        bloqueadas += r.bloqueadas;
+        completadas.push(...r.completadas);
+
+        // Recalcular QUÉ FALTA AHORA contra el mundo.
+        if (this.deps.leerEstadoGoogle !== undefined) {
+          const estado = await this.deps.leerEstadoGoogle(org).catch(() => null);
+          if (estado !== null) {
+            const sync = await this.sincronizarGoogle(org, estado, actor);
+            if (sync.creada) creadas += 1;
+          }
+        }
+        if (r.completadas.length === 0) { pasos += 1; break; } // nada cambió: no hay hilo del que seguir tirando
+      }
+
+      let preparacionRecalculada = false;
+      if (completadas.length > 0 && this.deps.recalcularPreparacion !== undefined) {
+        // Si el recálculo falla, la tarea sigue cerrada: lo que se comprobó del mundo no se deshace por esto.
+        await this.deps.recalcularPreparacion(org).then(() => { preparacionRecalculada = true; }).catch(() => undefined);
+      }
+
+      const v = await this.vista(org);
+      if (completadas.length > 0 || creadas > 0 || vencidas > 0) {
+        // Sólo se registra cuando algo cambió: un tick que no hace nada no merece una línea cada cinco minutos.
+        this.deps.log?.({ handoff: 'reanudado', org, vencidas, completadas: completadas.length, creadas, pasos, siguiente: v.tarea?.id ?? null });
+      }
+      return {
+        organizationId: org, vencidas, revisadas, completadas, creadas, retryLater, bloqueadas, pasos,
+        omitidaPorConcurrencia: false, preparacionRecalculada, siguiente: v.tarea, pendientes: v.pendientes,
+      };
+    } finally {
+      await this.soltarCerrojo(cerrojo, org);
+    }
+  }
+
+  /**
+   * CERROJO POR EMPRESA. Dos ticks, dos réplicas del API o un tick y un «ya lo hice» simultáneos no pueden
+   * sincronizar a la vez la misma empresa: el índice único ya impide dos tareas abiertas iguales, pero no
+   * impide dos auditorías de creación ni dos verificaciones contra el proveedor. Se usa un advisory lock de
+   * PostgreSQL —sin tabla, sin limpieza pendiente y liberado solo si el proceso muere— sobre la conexión que
+   * lo toma. `null` ⇒ no se consiguió: alguien ya está en ello.
+   */
+  private async tomarCerrojo(org: string): Promise<PoolClient | null> {
+    const c = await this.pool.connect();
+    try {
+      const { rows } = await c.query('select pg_try_advisory_lock(hashtext($1), hashtext($2)) as tomado', [ESPACIO_CERROJO, org]);
+      if (rows[0]?.tomado === true) return c;
+      c.release();
+      return null;
+    } catch {
+      c.release();
+      return null; // sin cerrojo no se sincroniza: el sesgo seguro es no hacer nada
+    }
+  }
+
+  private async soltarCerrojo(c: PoolClient, org: string): Promise<void> {
+    await c.query('select pg_advisory_unlock(hashtext($1), hashtext($2))', [ESPACIO_CERROJO, org]).catch(() => undefined);
+    c.release();
   }
 
   /** Historial completo, para auditoría y para entender por qué una empresa tardó lo que tardó. */

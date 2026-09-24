@@ -12,6 +12,10 @@ import { randomUUID } from 'node:crypto';
 import { runGoogleAdsMigrationsSeguro, PgGoogleAdsSyncLease } from './acquisition/google-ads-oauth-pg';
 import { budgetAuthorizationMigrations } from './autonomia-ads/budget-authorization-pg';
 import { crearComposicionGoogleAdsOAuth } from './acquisition/google-ads-runtime-oauth';
+import { ExternalHandoffScheduler, organizacionesConCanalIniciado } from './handoff/handoff-scheduler';
+import { HandoffService } from './handoff/handoff-service';
+import { OnboardingService } from './onboarding/onboarding-service';
+import { depsDeHandoff, estadoGoogleParaHandoff } from './handoff/composicion';
 import { GoogleAdsScheduler } from './ingesta/google-ads-scheduler';
 import { StopMonitorService, iniciarStopMonitor } from './campana/stop-monitor';
 import { crearDepsStopMonitor, construirLectorMetricasCampania } from './campana/stop-monitor-composition';
@@ -102,6 +106,8 @@ if (legacyDemoAccess) {
  */
 const jitter = (ms: number): number => Math.floor(ms * (0.8 + Math.random() * 0.4));
 const RETRASO_SCHEDULER_ADS_MS = jitter(20_000);
+/** Escalonado del scheduler de tareas externas: 45 s tras el arranque, lejos de la ráfaga de lecturas. */
+const RETRASO_SCHEDULER_HANDOFF_MS = 45_000;
 const RETRASO_SONDA_FECHAS_MS = jitter(45_000);
 const RETRASO_DIRECTOR_MS = jitter(75_000);
 
@@ -233,6 +239,33 @@ async function main(): Promise<void> {
   } else {
     console.log(JSON.stringify({ googleAdsScheduler: 'idle_no_google_ads_config' }));
     void salud.marcarDeshabilitado('googleAdsScheduler', '', 'GOOGLE_ADS_NOT_CONFIGURED').catch(() => undefined);
+  }
+
+  // REANUDACIÓN AUTÓNOMA de TAREAS EXTERNAS (Autonomy Fase I.4). Cada 5 minutos mira el estado real del canal
+  // de las empresas que YA empezaron su autorización y reanuda lo que el mundo haya resuelto: cierra la tarea
+  // cumplida, recalcula qué falta y abre la siguiente. Existe para que nadie tenga que avisarnos por un botón
+  // de algo que podemos mirar nosotros. Encendido por defecto (apagable con SOEC_HANDOFF_SCHEDULER_ENABLED=false):
+  // apagarlo devuelve el producto a depender de un clic. NO escribe en Google: sólo lee cuentas accesibles.
+  if (compGoogleAds !== null) {
+    const estadoGoogle = (org: string): Promise<{ estadoProveedor: string | null; cuentasAccesibles: number | null } | null> =>
+      estadoGoogleParaHandoff(org, compGoogleAds);
+    const servicioHandoff = new HandoffService(pool, depsDeHandoff(pool, {
+      estadoGoogle,
+      recalcularPreparacion: async (org) => new OnboardingService(pool, { leerModo: async () => 'PILOT' }).readiness(org),
+      log: (i) => console.log(JSON.stringify({ handoff: i })),
+    }));
+    const handoffScheduler = new ExternalHandoffScheduler({
+      reanudador: servicioHandoff,
+      elegibles: organizacionesConCanalIniciado(pool),
+      habilitado: process.env.SOEC_HANDOFF_SCHEDULER_ENABLED !== 'false',
+      retrasoInicialMs: RETRASO_SCHEDULER_HANDOFF_MS, // escalonado: no comparte segundo con las otras lecturas
+      ahora: () => new Date().toISOString(),
+      log: (evento) => console.log(JSON.stringify({ handoffScheduler: evento })),
+    });
+    const r = handoffScheduler.iniciar();
+    console.log(JSON.stringify({ handoffScheduler: r.agendado ? 'started' : 'dormant_disabled', intervaloMs: r.intervaloMs, retrasoInicialMs: RETRASO_SCHEDULER_HANDOFF_MS }));
+  } else {
+    console.log(JSON.stringify({ handoffScheduler: 'idle_no_google_ads_config' }));
   }
 
   // MONITOR AUTOMÁTICO de STOPS: conecta las reglas EXISTENTES (evaluarStopVigente) a un loop in-proceso. Activo por

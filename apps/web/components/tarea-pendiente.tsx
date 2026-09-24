@@ -13,6 +13,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { leerTarea, marcarAbierta, revisarTareas, type VistaTareas } from '../lib/handoff-client';
 
+/** Cada cuánto se vuelve a preguntar por la tarea. 25 s: se nota inmediato sin ser un martilleo. */
+const MS_ENTRE_LECTURAS = 25_000;
+
 export function TareaPendiente({ org, alActuarDentro, alCambiarTarea }: {
   org: string;
   alActuarDentro?: () => void;
@@ -43,7 +46,25 @@ export function TareaPendiente({ org, alActuarDentro, alCambiarTarea }: {
     }
   }, [org]);
 
-  useEffect(() => { void cargar(); }, [cargar]);
+  /**
+   * LA PANTALLA SE ENTERA SOLA. Quien sale a Google a crear su cuenta vuelve a esta pestaña y espera que aquí
+   * ya se sepa; pedirle que además pulse «compruébalo» es pedirle que nos avise de algo que el servidor ya
+   * verificó. Esto es SÓLO LECTURA: pregunta por el estado que el backend confirmó, nunca dispara la
+   * comprobación ni habla con el proveedor. Y se calla cuando la pestaña no se ve: nadie necesita que
+   * consultemos en bucle una pantalla que nadie está mirando.
+   */
+  useEffect(() => {
+    void cargar();
+    if (typeof window === 'undefined') return undefined;
+    const oculta = (): boolean => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    const t = setInterval(() => { if (!oculta()) void cargar(); }, MS_ENTRE_LECTURAS);
+    const alVolver = (): void => { if (!oculta()) void cargar(); };
+    document.addEventListener('visibilitychange', alVolver);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', alVolver);
+    };
+  }, [cargar]);
 
   const tarea = vista?.tarea ?? null;
   if (tarea === null) return null;

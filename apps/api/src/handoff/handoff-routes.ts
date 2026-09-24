@@ -18,12 +18,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import { contextoDe, modoOperativoDe } from '../superficie-auth';
-import { RepositorioConexiones } from '../conexion/conexion-pg';
 import { OnboardingService } from '../onboarding/onboarding-service';
 import { HandoffInvalidoError } from './handoff-tipos';
 import { HandoffService, type DepsHandoff } from './handoff-service';
-import { verificadoresDeGoogle, VERIFICADORES_PENDIENTES } from './handoff-verificadores';
-import type { EstadoGoogleParaHandoff } from './handoff-google';
+import { depsDeHandoff } from './composicion';
 
 export interface OpcionesHandoffRoutes extends DepsHandoff {
   /**
@@ -34,31 +32,9 @@ export interface OpcionesHandoffRoutes extends DepsHandoff {
 }
 
 export function registerHandoffRoutes(app: FastifyInstance, pool: Pool, opciones: OpcionesHandoffRoutes = {}): void {
-  /**
-   * Estado real del canal de Google, completado con lo que dice el SSOT operativo. Es el único lector: lo usan
-   * la sincronización y los verificadores.
-   */
-  const leerEstadoGoogle = async (org: string): Promise<EstadoGoogleParaHandoff | null> => {
-    if (opciones.estadoGoogle === undefined) return null;
-    const estado = await opciones.estadoGoogle(org).catch(() => null);
-    if (estado === null) return null;
-    const conexion = await new RepositorioConexiones(pool).buscar(org, 'GOOGLE_ADS');
-    return {
-      estadoProveedor: estado.estadoProveedor,
-      cuentasAccesibles: estado.cuentasAccesibles,
-      cuentaEnElSsot: conexion !== null && conexion.estado === 'CONNECTED'
-        && String((conexion.configuracion as { customerId?: string }).customerId ?? conexion.externalAccountId ?? '') !== '',
-    };
-  };
-
-  const deps = (extra: Partial<DepsHandoff> = {}): DepsHandoff => ({
-    ...opciones,
-    leerEstadoGoogle: opciones.leerEstadoGoogle ?? leerEstadoGoogle,
-    // Los verificadores de Google se construyen sobre el mismo lector; los tipos que todavía no sabemos
-    // observar quedan con su adaptador pendiente explícito, que nunca cierra nada.
-    verificadores: opciones.verificadores ?? [...verificadoresDeGoogle(leerEstadoGoogle), ...VERIFICADORES_PENDIENTES],
-    ...extra,
-  });
+  // La misma fábrica que usa el scheduler de la Fase I.4: reanudar por un clic y reanudar por un tick
+  // comparten lector, verificadores y derivación. Un solo camino que mantener honesto.
+  const deps = (extra: Partial<DepsHandoff> = {}): DepsHandoff => depsDeHandoff(pool, { ...opciones, ...extra });
 
   /**
    * Servicio para las rutas de lectura. Se construye SIN verificadores y sin lector del proveedor: aunque
