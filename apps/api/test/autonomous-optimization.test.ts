@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { evaluarEvidencia, minimoDeEvidencia } from '../src/optimizacion/evidencia';
+import { ventanaDe } from '../src/optimizacion/observacion';
 import { decidir, juzgarEfecto, proponerAjusteDeCpc, proponerAjusteDePresupuesto, proponerNegativas, proponerPausaDePalabras, proponerPausaDeSeguridad, type ContextoDecision, type Propuesta } from '../src/optimizacion/reglas';
 import { gobernar, puedeActivarse, acotarPorMandato, type ContextoGobierno } from '../src/optimizacion/gobierno';
 import { claveIdempotencia, numeroDe } from '../src/optimizacion/ejecutor-acciones';
@@ -132,6 +133,41 @@ describe('portero de evidencia', () => {
     metricas: metricas(), saludMedicion: 'HEALTHY' as const, datosHasta: '2026-09-21T23:59:59.000Z',
     ahora: AHORA, horasDesdeUltimoCambio: null,
   };
+
+  /**
+   * LA REGLA QUE USAN LOS FIXTURES DE LAS PRUEBAS PG, probada a cualquier hora del día.
+   *
+   * Aquellos fixtures escribían la fecha de las métricas a mano («2026-09-21») y, al cruzar la medianoche UTC,
+   * sus datos pasaron a tener 49 horas: la evidencia caía a `STALE` y once pruebas empezaron a fallar sin que
+   * nadie hubiera tocado el código. Ahora la derivan del reloj —el día que la ventana de observación toma como
+   * cierre— y esto fija que esa derivación sirve SIEMPRE: a medianoche, a mediodía y en seis meses.
+   *
+   * No se cambia el umbral productivo de 48 h: se comprueba que el fixture vive holgadamente por debajo.
+   */
+  it('un fixture derivado del reloj nunca queda rancio, a ninguna hora ni en ninguna fecha', () => {
+    const DIA = 86_400_000;
+    const instantes: string[] = [];
+    for (const dia of ['2026-09-23', '2026-12-31', '2027-03-01', '2028-02-29']) {
+      for (const hora of [0, 1, 6, 12, 18, 23]) {
+        instantes.push(`${dia}T${String(hora).padStart(2, '0')}:00:30.000Z`);
+      }
+    }
+
+    for (const ahora of instantes) {
+      // Exactamente lo que hace el fixture: la fecha de las métricas es el cierre de la ventana (ayer).
+      const fechaMetricas = new Date(Date.parse(ahora) - DIA).toISOString().slice(0, 10);
+      const ventana = ventanaDe(ahora, 14);
+      expect(fechaMetricas, `la fecha de las métricas debe caer dentro de la ventana en ${ahora}`)
+        .toBe(ventana.hasta);
+      expect(fechaMetricas >= ventana.desde && fechaMetricas <= ventana.hasta).toBe(true);
+
+      const r = evaluarEvidencia({
+        ...base, ventana, datosHasta: `${fechaMetricas}T23:59:59.000Z`, ahora,
+      });
+      expect(r.veredicto, `en ${ahora} la evidencia no puede quedar rancia`).not.toBe('STALE');
+      expect(r.veredicto).toBe('SUFFICIENT');
+    }
+  });
 
   it('con datos suficientes y medición sana, se puede decidir por conversiones', () => {
     const r = evaluarEvidencia(base);

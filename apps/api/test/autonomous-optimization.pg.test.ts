@@ -30,7 +30,33 @@ import { restablecerNegociosDelRuntime } from '../src/plataforma';
 
 const H = { 'content-type': 'application/json' };
 const pool = makeTestPool();
-const AHORA = '2026-09-22T12:00:00.000Z';
+/**
+ * TIEMPO DEL FIXTURE. Ninguna fecha de esta prueba se escribe a mano: todas se derivan del reloj real, de modo
+ * que el mundo simulado guarda siempre la MISMA DISTANCIA con «ahora». Antes no: las métricas decían «hasta el
+ * 21 de septiembre de 2026» y, al cruzar la medianoche UTC, esos datos pasaron a tener 49 horas y la evidencia
+ * cayó a `STALE`. Un test cuyo veredicto depende del día en que se ejecuta no prueba nada.
+ *
+ * No se toca la regla productiva —48 h de antigüedad máxima—: se arregla el fixture, que era el que mentía.
+ * Tampoco se congela el reloj del dominio: se probó, y un «ahora» en el pasado discrepa de las filas que
+ * PostgreSQL sella con `now()`, lo que rompía la detección de cambios recientes. La distancia constante es la
+ * única forma de que ambas mitades del mundo cuenten la misma historia.
+ */
+const DIA_MS = 86_400_000;
+const iso = (ms: number): string => new Date(ms).toISOString();
+const AHORA_MS = Date.now();
+/** «Ahora» del mundo observado (investigación, auditoría de sitio, demanda). */
+const AHORA = iso(AHORA_MS);
+/**
+ * Día de las métricas de la plataforma: el mismo que la ventana de observación toma como cierre (ayer; los
+ * datos de hoy todavía se consolidan). Se calcula en CADA consulta para que cruzar la medianoche a mitad del
+ * suite no cambie el veredicto.
+ */
+const fechaDeMetricas = (): string => iso(Date.now() - DIA_MS).slice(0, 10);
+/** Mandato vigente: empezó la semana pasada y termina en dos meses, siempre relativo a hoy. */
+const MANDATO_DESDE = iso(AHORA_MS - 7 * DIA_MS);
+const MANDATO_HASTA = iso(AHORA_MS + 60 * DIA_MS);
+/** Mandato ya vencido, para probar el rechazo por fuera de ventana. */
+const MANDATO_VENCIDO = iso(AHORA_MS - DIA_MS);
 
 beforeEach(async () => {
   await runMigrations(pool);
@@ -105,7 +131,7 @@ function googleSimulado(over: Partial<MundoGoogle> = {}) {
       if (porNombre !== null && w.campania.nombre !== porNombre[1]) return [];
       if (w.campania.nombre === '' && porNombre === null && !q.includes('metrics.')) return [];
       const base = { campaign: { id: w.campania.id, name: w.campania.nombre, status: w.campania.estado, advertisingChannelType: 'SEARCH' }, campaignBudget: { resourceName: 'customers/1/campaignBudgets/1', amountMicros: String(w.campania.presupuestoMicros) } };
-      return q.includes('metrics.') ? [{ ...base, metrics: met(w.metricas), segments: { date: '2026-09-21' } }] : [base];
+      return q.includes('metrics.') ? [{ ...base, metrics: met(w.metricas), segments: { date: fechaDeMetricas() } }] : [base];
     }
     if (q.includes('from campaign_criterion')) {
       if (q.includes("type = 'location'")) return [{ campaignCriterion: { location: { geoTargetConstant: 'geoTargetConstants/1000341' } } }];
@@ -279,7 +305,7 @@ async function empresaConCampania(a: App, email: string, nombre: string, opcione
   if (opciones.mandato !== false) {
     const m = await a.inject({
       method: 'POST', url: '/acquisition/action/mandate', headers: h,
-      payload: { objective: 'captar', currency: 'CLP', authorizedBudgetMinor: 900_000, periodStart: '2026-09-01T00:00:00.000Z', periodEnd: '2026-12-01T00:00:00.000Z', allowedMetaAssets: [], allowedActionTypes: ['CREATE_CAMPAIGN'] },
+      payload: { objective: 'captar', currency: 'CLP', authorizedBudgetMinor: 900_000, periodStart: MANDATO_DESDE, periodEnd: MANDATO_HASTA, allowedMetaAssets: [], allowedActionTypes: ['CREATE_CAMPAIGN'] },
     });
     expect(m.statusCode, m.body).toBe(201);
   }
@@ -516,7 +542,7 @@ describe('activación de campaña', () => {
     const { cookie, org } = await empresaConCampania(a, 'duena-auto2@soec.cl', 'Empresa QA Optimizer Auto2');
     await fijarPolitica(a, cookie, org, { accionesPermitidas: ['PAUSE_CAMPAIGN'], activacionAutonomaPermitida: true });
     await pool.query("update identity_organizations set operational_mode = 'AUTONOMOUS_REAL' where slug = $1", [org]);
-    await pool.query("update accion_mandato set period_end = '2026-09-02T00:00:00.000Z' where organization_id = $1", [org]);
+    await pool.query('update accion_mandato set period_end = $2 where organization_id = $1', [org, MANDATO_VENCIDO]);
 
     const r = await a.inject({ method: 'POST', url: '/optimizacion/activar', headers: h(cookie, org), payload: {} });
     expect(r.statusCode).toBe(409);
