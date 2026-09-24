@@ -9,7 +9,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement as h } from 'react';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ConexionesPage from '../app/negocios/conexiones/page';
 
 vi.mock('../lib/org-activa', async (orig) => {
@@ -53,18 +53,23 @@ const TAREA_GOOGLE = {
 };
 
 /** Devuelve también las llamadas hechas, para poder exigir que MIRAR no escriba nada. */
-function servidor(tarea: unknown = null): { llamadas: string[] } {
+function servidor(tarea: unknown = null): { llamadas: string[]; cuerpos: string[] } {
   const llamadas: string[] = [];
-  vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { method?: string }) => {
+  const cuerpos: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { method?: string; body?: string }) => {
     const u = String(url);
     llamadas.push(`${init?.method ?? 'GET'} ${u}`);
+    if (init?.body !== undefined) cuerpos.push(init.body);
+    if (u.includes('/facturacion/confirmacion')) {
+      return new Response(JSON.stringify({ confirmadoEn: '2026-09-24T15:00:00.000Z', estado: 'READY' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
     const cuerpo = u.includes('/api/google-ads/connection') ? CONEXION_GOOGLE
       : u.includes('/api/google-ads/accounts') ? { datos: { cuentas: [] } }
         : u.includes('/handoff') ? { organizationId: 'org-qa-conexiones', tarea, pendientes: 0 }
           : VISTA;
     return new Response(JSON.stringify(cuerpo), { status: 200, headers: { 'content-type': 'application/json' } });
   }));
-  return { llamadas };
+  return { llamadas, cuerpos };
 }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -126,6 +131,51 @@ describe('Conexiones y permisos', () => {
     const escrituras = s.llamadas.filter((l) => /^(POST|PATCH|DELETE|PUT)\s/.test(l));
     expect(escrituras, 'mirar una pantalla no puede cambiar el estado de nadie').toEqual([]);
     expect(s.llamadas.some((l) => l.startsWith('GET') && l.includes('/handoff'))).toBe(true);
+  });
+
+  /**
+   * GATE I.6.1 · la tarjeta de pago, EN LA RUTA REAL. Probar el componente aislado no demuestra que alguien
+   * pueda llegar a él: lo que importa es que la página que la persona abre lo monte y lo pinte. El texto NO
+   * vive en el navegador —lo redacta la API y viaja como dato—, así que esta prueba también fija el contrato
+   * entre ambos: si el backend deja de mandar `confirmacion`, el botón desaparece y esto falla.
+   */
+  it('con la cuenta conectada y el pago sin verificar, la página muestra la tarjeta y el botón de confirmar', async () => {
+    const TAREA_PAGO = {
+      id: 'hand-pago-cp', canal: 'GOOGLE_ADS',
+      titulo: 'Revisa el pago de tus anuncios en Google',
+      motivo: 'Google no permite que SOEC compruebe tu tarjeta o método de pago, así que no podemos saberlo por nuestra cuenta. Ábrelo en Google, revísalo y confírmanos que está listo. SOEC no guarda números de tarjeta ni datos bancarios.',
+      etiquetaAccion: 'Abrir Google', urlProveedor: 'https://ads.google.com/aw/billing/summary',
+      esperando: false, bloqueadaFuera: false,
+      confirmacion: { etiqueta: 'Confirmo que el pago está configurado' },
+    };
+    const s = servidor(TAREA_PAGO);
+    render(h(ConexionesPage));
+
+    // Está en la página real, no en un componente suelto.
+    await screen.findByText('Revisa el pago de tus anuncios en Google');
+    expect(screen.getByRole('button', { name: 'Abrir Google' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Confirmo que el pago está configurado' })).toBeTruthy();
+    expect(document.body.textContent).toMatch(/SOEC no guarda números de tarjeta ni datos bancarios/i);
+
+    // Y confirmar manda exactamente eso: nada.
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmo que el pago está configurado' }));
+    await waitFor(() => {
+      expect(s.llamadas.some((l) => l.startsWith('POST') && l.includes('/facturacion/confirmacion'))).toBe(true);
+    });
+    for (const c of s.cuerpos) expect(c).toBe('{}');
+    const texto = document.body.textContent ?? '';
+    for (const prohibido of ['PAN', 'CVV', 'número de tarjeta', 'customerId']) {
+      expect(texto, `«${prohibido}» no puede aparecer`).not.toContain(prohibido);
+    }
+  });
+
+  /** El caso real de CP: su paso es crear la cuenta, y no se le adelanta nada sobre pagos. */
+  it('con la tarea de crear cuenta, la página NO habla de pagos', async () => {
+    servidor(TAREA_GOOGLE);
+    render(h(ConexionesPage));
+    await screen.findByText('Crea tu cuenta de anuncios en Google');
+    expect(screen.queryByText(/Revisa el pago de tus anuncios/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Confirmo que el pago/i })).toBeNull();
   });
 
   it('ningún nombre interno llega a la pantalla', async () => {
