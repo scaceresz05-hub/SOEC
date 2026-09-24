@@ -40,18 +40,37 @@ export const ESTADOS_ABIERTOS: readonly EstadoHandoff[] = ['OPEN', 'WAITING_EXTE
 export type CanalHandoff = 'GOOGLE_ADS' | 'META_ADS' | 'SOEC';
 
 /**
+ * QUIÉN exige la tarea, frente a DÓNDE se nota. No son lo mismo y la diferencia es útil: entrar en la cuenta
+ * de Google o pasar su verificación de identidad son exigencias de GOOGLE, no de Google Ads, y sirven igual
+ * para cualquier canal suyo. El proveedor se DERIVA del canal —no se recibe— para que no puedan discrepar.
+ */
+export type ProveedorHandoff = 'GOOGLE' | 'META' | 'SOEC';
+
+const PROVEEDOR_DE_CANAL: Readonly<Record<CanalHandoff, ProveedorHandoff>> = {
+  GOOGLE_ADS: 'GOOGLE',
+  META_ADS: 'META',
+  SOEC: 'SOEC',
+};
+
+export function proveedorDeCanal(canal: CanalHandoff): ProveedorHandoff {
+  return PROVEEDOR_DE_CANAL[canal];
+}
+
+/**
  * PRIORIDAD DETERMINISTA. No se ordena por fecha ni por «lo que parezca más urgente»: se ordena por la
  * dependencia real. No sirve de nada pedir el medio de pago a quien todavía no ha entrado en su cuenta.
  */
 const ORDEN: Readonly<Record<TipoHandoff, number>> = {
   LOGIN_REQUIRED: 10,
-  TWO_FACTOR_REQUIRED: 20,
-  IDENTITY_VERIFICATION_REQUIRED: 30,
+  IDENTITY_VERIFICATION_REQUIRED: 20,
+  TWO_FACTOR_REQUIRED: 30,
   OAUTH_CONSENT_REQUIRED: 40,
   ACCOUNT_PROVISIONING_REQUIRED: 50,
-  ACCOUNT_SELECTION_REQUIRED: 60,
-  TERMS_ACCEPTANCE_REQUIRED: 70,
-  PAYMENT_SETUP_REQUIRED: 80,
+  TERMS_ACCEPTANCE_REQUIRED: 60,
+  PAYMENT_SETUP_REQUIRED: 70,
+  // Elegir cuenta va al final a propósito: es lo único de esta lista que se hace DENTRO de SOEC, y sólo
+  // tiene sentido cuando ya existe una cuenta, hay términos aceptados y hay con qué pagar.
+  ACCOUNT_SELECTION_REQUIRED: 80,
 };
 
 export function prioridadDe(tipo: TipoHandoff): number {
@@ -62,6 +81,8 @@ export function prioridadDe(tipo: TipoHandoff): number {
 export interface Handoff {
   readonly id: string;
   readonly organizationId: string;
+  /** Quién lo exige. Derivado del canal, nunca recibido de fuera. */
+  readonly proveedor: ProveedorHandoff;
   readonly canal: CanalHandoff;
   readonly tipo: TipoHandoff;
   readonly estado: EstadoHandoff;
@@ -83,22 +104,40 @@ export interface Handoff {
   readonly actualizadoEn: string;
   readonly expiraEn: string | null;
   readonly completadoEn: string | null;
+  readonly canceladoEn: string | null;
 }
 
 export class HandoffInvalidoError extends Error {}
 
-/** Anfitriones a los que SOEC puede mandar a una persona. Default-deny: lo que no está, no se abre. */
-const HOSTS_PERMITIDOS: readonly string[] = [
-  'accounts.google.com', 'ads.google.com', 'business.google.com', 'payments.google.com',
-  'business.facebook.com', 'www.facebook.com', 'adsmanager.facebook.com',
-];
+/**
+ * Anfitriones a los que SOEC puede mandar a una persona, POR PROVEEDOR. Default-deny en dos sentidos: lo que
+ * no está en la lista no se abre, y una dirección de Meta no vale para una tarea de Google.
+ */
+const HOSTS_POR_PROVEEDOR: Readonly<Record<ProveedorHandoff, readonly string[]>> = {
+  GOOGLE: ['accounts.google.com', 'ads.google.com', 'business.google.com', 'payments.google.com'],
+  META: ['business.facebook.com', 'www.facebook.com', 'adsmanager.facebook.com'],
+  SOEC: [], // dentro de SOEC no se sale a ninguna parte: la acción ocurre aquí
+};
+
+/** Anfitriones que jamás son un proveedor: la máquina de uno mismo y las redes internas. */
+function esAnfitrionPrivado(host: string): boolean {
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '[::1]' || host === '0.0.0.0') return true;
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (ipv4 === null) return false;
+  const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+  return a === 127 || a === 10 || a === 0 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254);
+}
 
 /**
  * Valida a dónde se manda a la persona. Un handoff es, literalmente, un botón que la saca de SOEC: si esa
  * dirección pudiera fijarla cualquiera, sería una puerta de phishing con nuestro nombre encima. Sólo https,
- * sólo anfitriones conocidos, sin credenciales embebidas.
+ * sólo anfitriones conocidos DEL PROVEEDOR de la tarea, sin credenciales embebidas.
+ *
+ * `javascript:`, `data:`, `file:` y compañía mueren en el filtro de esquema; localhost y las redes privadas,
+ * en el de anfitrión privado —que se comprueba aparte de la lista blanca justamente para que añadir una
+ * entrada a esa lista no pueda abrir, de rebote, una puerta a la red interna.
  */
-export function urlDeProveedorValida(url: string | null | undefined): string | null {
+export function urlDeProveedorValida(url: string | null | undefined, proveedor: ProveedorHandoff = 'GOOGLE'): string | null {
   if (url === null || url === undefined || String(url).trim() === '') return null;
   let u: URL;
   try {
@@ -109,7 +148,8 @@ export function urlDeProveedorValida(url: string | null | undefined): string | n
   if (u.protocol !== 'https:') throw new HandoffInvalidoError('la dirección del proveedor debe usar https');
   if (u.username !== '' || u.password !== '') throw new HandoffInvalidoError('la dirección del proveedor no puede llevar credenciales');
   const host = u.hostname.toLowerCase();
-  if (!HOSTS_PERMITIDOS.includes(host)) throw new HandoffInvalidoError(`SOEC no envía a nadie a «${host}»`);
+  if (esAnfitrionPrivado(host)) throw new HandoffInvalidoError('la dirección del proveedor no puede apuntar a una red interna');
+  if (!HOSTS_POR_PROVEEDOR[proveedor].includes(host)) throw new HandoffInvalidoError(`SOEC no envía a nadie a «${host}»`);
   return u.toString();
 }
 
@@ -164,19 +204,33 @@ export function tareaPrincipal(handoffs: readonly Handoff[]): Handoff | null {
 }
 
 /**
- * CONTRATO DEL VERIFICADOR (Fase I.3 declara el puerto; los verificadores automáticos llegan después).
+ * CONTRATO DEL VERIFICADOR.
  *
  * La idea que sostiene todo el diseño: la persona NO marca la tarea como hecha. Sale, hace lo suyo en el
  * proveedor, y SOEC lo comprueba contra el mundo real. Decir «ya lo hice» no es lo mismo que haberlo hecho, y
  * el sistema no puede confundir las dos cosas sin volver a inventarse la realidad.
+ *
+ * Cuatro veredictos, y ninguno es «no sé, dalo por bueno»:
+ *
+ *   · `COMPLETED`        el mundo cambió y se puede comprobar ⇒ la tarea se cierra y el recorrido sigue.
+ *   · `STILL_REQUIRED`   se comprobó y sigue faltando ⇒ la tarea se queda, sin ruido.
+ *   · `BLOCKED_EXTERNAL` el proveedor no permite avanzar hoy ⇒ se dice, y no se le echa la culpa a nadie.
+ *   · `RETRY_LATER`      NO se pudo comprobar ⇒ no se concluye nada. Éste es el veredicto de la ignorancia,
+ *                        y existe para que «no pude preguntar» no se confunda nunca con «no está hecho».
  */
+export type ResultadoVerificacion = 'COMPLETED' | 'STILL_REQUIRED' | 'BLOCKED_EXTERNAL' | 'RETRY_LATER';
+
+export interface VeredictoHandoff {
+  readonly resultado: ResultadoVerificacion;
+  /** Por qué. Se audita, así que va en lenguaje entendible y sin secretos. */
+  readonly detalle: string;
+  readonly referenciaProveedor?: string | null;
+}
+
 export interface VerificadorHandoff {
   readonly nombre: string;
   /** ¿Este verificador sabe comprobar esta tarea? */
   soporta(h: Handoff): boolean;
-  /**
-   * Comprueba la condición EXTERNA. `cumplida: true` ⇒ el servicio cierra la tarea, recalcula la preparación
-   * y el recorrido sigue. Nunca devuelve `true` por suposición: si no se puede comprobar, es `false` con motivo.
-   */
-  verificar(h: Handoff): Promise<{ readonly cumplida: boolean; readonly detalle: string; readonly referenciaProveedor?: string | null }>;
+  /** Comprueba la condición EXTERNA. Sólo `COMPLETED` cierra la tarea, y sólo si se pudo comprobar. */
+  verificar(h: Handoff): Promise<VeredictoHandoff>;
 }

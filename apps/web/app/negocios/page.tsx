@@ -15,6 +15,7 @@ import { estadoAds, lineaObjetivoAds, midiendoContactos } from '../../lib/ads-es
 import { BotonActualizarAds } from '../../components/boton-actualizar-ads';
 import { CampaignOperator } from '../../components/campaign-operator';
 import { GoogleAdsConexion } from '../../components/google-ads-conexion';
+import { TareaPendiente } from '../../components/tarea-pendiente';
 import { CampaniaVigente } from '../../components/campana-vigente';
 import { MiDirector } from '../../components/mi-director';
 import { Decisiones } from '../../components/decisiones';
@@ -294,6 +295,11 @@ export default function Panel(): React.ReactElement {
           </button>
         ))}
       </div>
+
+      {/* LA ÚNICA COSA QUE FALTA. Va sobre las secciones y fuera de las pestañas a propósito: cuando hay algo
+          que sólo puede hacer una persona, ninguna otra cifra de esta pantalla avanza hasta que se haga. La
+          acción que ocurre dentro de SOEC se atiende en Conexiones, que es donde de verdad se conecta. */}
+      {org && <TareaPendiente org={org} alActuarDentro={() => { window.location.href = '/negocios/conexiones#conexion-google'; }} />}
 
       {cargando && !negocio && <div className="card"><p className="muted">Cargando el panel de este negocio…</p></div>}
 

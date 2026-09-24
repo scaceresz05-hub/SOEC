@@ -102,6 +102,33 @@ describe('la tarjeta de una sola cosa', () => {
     expect(screen.queryByRole('button', { name: 'Continuar con Google' })).toBeNull();
   });
 
+  /** La reanudación vista desde la persona: termina una cosa y aparece la siguiente, nunca una lista. */
+  it('al cerrarse una tarea, la tarjeta pide la SIGUIENTE, no un listado', async () => {
+    const SIGUIENTE = {
+      ...TAREA_CP,
+      id: 'hand-def456',
+      titulo: 'Elige en qué cuenta debe trabajar SOEC',
+      motivo: 'Ya existe una cuenta de anuncios. Falta decir en cuál trabajamos.',
+      etiquetaAccion: 'Elegir cuenta',
+      urlProveedor: null,
+      esperando: false,
+    };
+    servidor(
+      { organizationId: 'org-qa', tarea: { ...TAREA_CP, esperando: true }, pendientes: 0 },
+      () => ({ organizationId: 'org-qa', tarea: SIGUIENTE, pendientes: 0, revisadas: 1, completadas: 1, preparacionRecalculada: true }),
+    );
+    render(h(TareaPendiente, { org: 'org-qa', alActuarDentro: () => {} }));
+    fireEvent.click(await screen.findByRole('button', { name: /Ya lo hice, compruébalo/i }));
+
+    await screen.findByText('Elige en qué cuenta debe trabajar SOEC');
+    expect(screen.queryByText('Crea tu cuenta de anuncios en Google')).toBeNull(); // la anterior se fue
+    expect(screen.getAllByRole('button')).toHaveLength(1); // sigue siendo UNA cosa con UN botón
+    const texto = document.body.textContent ?? '';
+    for (const interno of ['ACCOUNT_SELECTION_REQUIRED', 'COMPLETED', 'preparacion', 'handoff']) {
+      expect(texto, `«${interno}» no puede salir a la pantalla`).not.toContain(interno);
+    }
+  });
+
   it('cuando la acción ocurre dentro de SOEC, no se abre ninguna pestaña', async () => {
     const abrir = vi.fn();
     vi.stubGlobal('open', abrir);

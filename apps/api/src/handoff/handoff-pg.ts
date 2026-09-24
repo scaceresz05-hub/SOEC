@@ -2,7 +2,7 @@
  * apps/api · HANDOFF EXTERNO · persistencia.
  *
  * Una tabla, multiempresa, con una regla dura en el índice: **no puede haber dos tareas abiertas para la
- * misma empresa, el mismo canal, el mismo tipo y la misma causa**. La idempotencia no se implementa «con
+ * misma empresa, el mismo proveedor, el mismo canal, el mismo tipo y la misma causa**. La idempotencia no se implementa «con
  * cuidado» en el servicio: se impone en la base, que es donde las carreras se pierden o se ganan.
  *
  * Cuando una tarea se completa y la condición vuelve a aparecer, se crea una instancia NUEVA. El historial es
@@ -10,7 +10,7 @@
  */
 import type { Pool, PoolClient } from 'pg';
 import type { Migration } from '@soec/event-store/pg';
-import type { CanalHandoff, EstadoHandoff, Handoff, TipoHandoff } from './handoff-tipos';
+import { proveedorDeCanal, type CanalHandoff, type EstadoHandoff, type Handoff, type ProveedorHandoff, type TipoHandoff } from './handoff-tipos';
 
 type Queryable = Pool | PoolClient;
 
@@ -43,6 +43,28 @@ export const handoffMigrations: ReadonlyArray<Migration> = [
         where estado in ('OPEN', 'WAITING_EXTERNAL', 'BLOCKED_EXTERNAL');
     `,
   },
+  {
+    // El proveedor (quién lo exige) se separa del canal (dónde se nota): las exigencias de la cuenta de
+    // Google —entrar, segundo factor, identidad— no son de Google Ads y valdrán igual para otro canal suyo.
+    // Y una cancelación necesita su fecha: sin ella, «dejó de hacer falta» no se puede fechar en el historial.
+    id: '0002_handoff_proveedor_y_cancelacion',
+    sql: `
+      alter table external_handoff add column if not exists proveedor    text;
+      alter table external_handoff add column if not exists cancelado_en timestamptz;
+      update external_handoff set proveedor = case
+          when canal = 'GOOGLE_ADS' then 'GOOGLE'
+          when canal = 'META_ADS'   then 'META'
+          else 'SOEC' end
+        where proveedor is null;
+      alter table external_handoff alter column proveedor set not null;
+      -- La clave de idempotencia pasa a nombrar al proveedor, como manda el contrato de la entidad. Hoy el
+      -- canal ya lo determina, así que el índice no cambia de comportamiento: cambia de vocabulario.
+      drop index if exists external_handoff_abierta_uniq;
+      create unique index if not exists external_handoff_abierta_uniq
+        on external_handoff (organization_id, proveedor, canal, tipo, causa)
+        where estado in ('OPEN', 'WAITING_EXTERNAL', 'BLOCKED_EXTERNAL');
+    `,
+  },
 ];
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v ?? ''));
@@ -52,6 +74,7 @@ function aHandoff(r: Record<string, unknown>): Handoff {
   return {
     id: String(r.id),
     organizationId: String(r.organization_id),
+    proveedor: String(r.proveedor) as ProveedorHandoff,
     canal: String(r.canal) as CanalHandoff,
     tipo: String(r.tipo) as TipoHandoff,
     estado: String(r.estado) as EstadoHandoff,
@@ -66,6 +89,7 @@ function aHandoff(r: Record<string, unknown>): Handoff {
     actualizadoEn: iso(r.actualizado_en),
     expiraEn: isoNulo(r.expira_en),
     completadoEn: isoNulo(r.completado_en),
+    canceladoEn: isoNulo(r.cancelado_en),
   };
 }
 
@@ -78,12 +102,12 @@ export class RepositorioHandoff {
    */
   async abrirSiFalta(q: Queryable, h: Handoff): Promise<Handoff> {
     const { rows } = await q.query(
-      `insert into external_handoff (id, organization_id, canal, tipo, estado, causa, instruccion, motivo,
+      `insert into external_handoff (id, organization_id, proveedor, canal, tipo, estado, causa, instruccion, motivo,
          url_proveedor, etiqueta_accion, referencia_proveedor, metadata, creado_en, actualizado_en, expira_en)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb, now(), now(), $13)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb, now(), now(), $14)
        on conflict do nothing
        returning *`,
-      [h.id, h.organizationId, h.canal, h.tipo, h.estado, h.causa, h.instruccion, h.motivo,
+      [h.id, h.organizationId, proveedorDeCanal(h.canal), h.canal, h.tipo, h.estado, h.causa, h.instruccion, h.motivo,
         h.urlProveedor, h.etiquetaAccion, h.referenciaProveedor, JSON.stringify(h.metadata), h.expiraEn],
     );
     if (rows.length > 0) return aHandoff(rows[0] as Record<string, unknown>);
@@ -106,6 +130,7 @@ export class RepositorioHandoff {
       `update external_handoff
           set estado = $3,
               completado_en = case when $3 = 'COMPLETED' then now() else completado_en end,
+              cancelado_en  = case when $3 = 'CANCELLED' then now() else cancelado_en  end,
               referencia_proveedor = coalesce($4, referencia_proveedor),
               actualizado_en = now()
         where organization_id = $1 and id = $2
@@ -115,27 +140,32 @@ export class RepositorioHandoff {
     return rows[0] ? aHandoff(rows[0] as Record<string, unknown>) : null;
   }
 
-  /** Cierra como CANCELLED las tareas abiertas de un canal que ya no tienen sentido. */
-  async cancelarAbiertas(q: Queryable, org: string, canal: CanalHandoff, tipos: readonly TipoHandoff[]): Promise<number> {
-    if (tipos.length === 0) return 0;
-    const { rowCount } = await q.query(
-      `update external_handoff set estado = 'CANCELLED', actualizado_en = now()
+  /**
+   * Cierra como CANCELLED las tareas abiertas de un canal que ya no tienen sentido. Devuelve CUÁLES: la
+   * auditoría de «esto dejó de hacer falta» sin decir qué dejó de hacer falta no sirve para nada.
+   */
+  async cancelarAbiertas(q: Queryable, org: string, canal: CanalHandoff, tipos: readonly TipoHandoff[]): Promise<readonly Handoff[]> {
+    if (tipos.length === 0) return [];
+    const { rows } = await q.query(
+      `update external_handoff set estado = 'CANCELLED', cancelado_en = now(), actualizado_en = now()
         where organization_id = $1 and canal = $2 and tipo = any($3::text[])
-          and estado in ('OPEN','WAITING_EXTERNAL','BLOCKED_EXTERNAL')`,
+          and estado in ('OPEN','WAITING_EXTERNAL','BLOCKED_EXTERNAL')
+        returning *`,
       [org, canal, tipos],
     );
-    return rowCount ?? 0;
+    return rows.map((r: Record<string, unknown>) => aHandoff(r));
   }
 
   /** Marca como vencidas las que pasaron su fecha. Una tarea vencida vuelve a abrirse si la causa sigue. */
-  async vencerCaducadas(q: Queryable, org: string): Promise<number> {
-    const { rowCount } = await q.query(
+  async vencerCaducadas(q: Queryable, org: string): Promise<readonly Handoff[]> {
+    const { rows } = await q.query(
       `update external_handoff set estado = 'EXPIRED', actualizado_en = now()
         where organization_id = $1 and expira_en is not null and expira_en < now()
-          and estado in ('OPEN','WAITING_EXTERNAL','BLOCKED_EXTERNAL')`,
+          and estado in ('OPEN','WAITING_EXTERNAL','BLOCKED_EXTERNAL')
+        returning *`,
       [org],
     );
-    return rowCount ?? 0;
+    return rows.map((r: Record<string, unknown>) => aHandoff(r));
   }
 
   async abiertas(org: string): Promise<readonly Handoff[]> {

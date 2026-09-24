@@ -17,15 +17,42 @@ import { RepositorioNegocios } from '../negocio/negocio-pg';
 import { RepositorioHandoff } from './handoff-pg';
 import { handoffDeGoogle, TIPOS_DE_GOOGLE, type EstadoGoogleParaHandoff, type IntencionHandoff } from './handoff-google';
 import {
-  aTareaVisible, metadataSegura, tareaPrincipal, urlDeProveedorValida,
-  type CanalHandoff, type Handoff, type TareaVisible, type TipoHandoff, type VerificadorHandoff,
+  aTareaVisible, metadataSegura, proveedorDeCanal, tareaPrincipal, urlDeProveedorValida,
+  type CanalHandoff, type Handoff, type TareaVisible, type TipoHandoff, type VerificadorHandoff, type VeredictoHandoff,
 } from './handoff-tipos';
 
 export interface DepsHandoff {
   readonly ahora?: () => string;
-  /** Verificadores de condición externa. En esta fase pueden no existir: el contrato ya está. */
+  /** Verificadores de condición externa. Sin ellos nada se cierra solo, que es el sesgo seguro. */
   readonly verificadores?: readonly VerificadorHandoff[];
+  /**
+   * Estado real del canal de Google para una empresa. Es el MISMO lector que usan los verificadores: así lo
+   * que abre una tarea y lo que la cierra miran al mismo sitio.
+   */
+  readonly leerEstadoGoogle?: (org: string) => Promise<EstadoGoogleParaHandoff | null>;
+  /**
+   * Recalcular la preparación del negocio tras cerrar una tarea. La preparación es un read model —se calcula
+   * al mirarla, no hay caché que invalidar—, así que este puerto no «refresca» nada: sirve para que el paso
+   * siguiente del recorrido se evalúe en el mismo acto en que se desbloquea, y para poder observarlo.
+   */
+  readonly recalcularPreparacion?: (org: string) => Promise<unknown>;
   readonly log?: (info: Record<string, unknown>) => void;
+}
+
+/** Lo que devuelve una reanudación: qué se cerró, qué se abrió detrás y qué toca ahora. */
+export interface Reanudacion {
+  readonly organizationId: string;
+  /** Tareas que vencieron en esta pasada. */
+  readonly vencidas: number;
+  /** Tareas abiertas que se pasaron por un verificador. */
+  readonly revisadas: number;
+  /** Ids de las que el mundo confirmó como hechas. */
+  readonly completadas: readonly string[];
+  /** `true` cuando se volvió a calcular la preparación porque algo se cerró. */
+  readonly preparacionRecalculada: boolean;
+  /** La única cosa que se le pide a la persona DESPUÉS de reanudar. */
+  readonly siguiente: TareaVisible | null;
+  readonly pendientes: number;
 }
 
 export interface VistaHandoff {
@@ -67,12 +94,14 @@ export class HandoffService {
    * tareas, y si la anterior se completó y la condición vuelve, nace una instancia nueva con su historia.
    */
   async abrir(org: string, intencion: IntencionHandoff, opciones: { readonly expiraEn?: string | null; readonly actor?: string } = {}): Promise<Handoff> {
-    const url = urlDeProveedorValida(intencion.urlProveedor); // fail-closed: host no permitido ⇒ lanza
+    // fail-closed: un host que no sea del proveedor de este canal ⇒ lanza y no se escribe nada.
+    const url = urlDeProveedorValida(intencion.urlProveedor, proveedorDeCanal(intencion.canal));
     const metadata = metadataSegura(intencion.metadata);
     const ahora = this.ahora();
     const propuesta: Handoff = {
       id: `hand-${randomUUID().slice(0, 12)}`,
       organizationId: org,
+      proveedor: proveedorDeCanal(intencion.canal),
       canal: intencion.canal,
       tipo: intencion.tipo,
       // Una tarea que el proveedor no permite completar hoy se dice así desde el principio.
@@ -88,6 +117,7 @@ export class HandoffService {
       actualizadoEn: ahora,
       expiraEn: opciones.expiraEn ?? null,
       completadoEn: null,
+      canceladoEn: null,
     };
 
     const guardada = await enTransaccion(this.pool, async (tx) => {
@@ -95,8 +125,8 @@ export class HandoffService {
       if (h.id === propuesta.id) {
         // Sólo se audita el ALTA real, no cada vez que se vuelve a mirar el mismo estado.
         await this.negocios.registrarAuditoria(tx, {
-          organizationId: org, actor: opciones.actor ?? 'soec', action: 'EXTERNAL_HANDOFF_OPENED',
-          changedFields: { tipo: h.tipo, canal: h.canal, causa: h.causa, at: ahora },
+          organizationId: org, actor: opciones.actor ?? 'soec', action: 'HANDOFF_CREATED',
+          changedFields: { tipo: h.tipo, proveedor: h.proveedor, canal: h.canal, causa: h.causa, at: ahora },
         });
       }
       return h;
@@ -106,8 +136,16 @@ export class HandoffService {
   }
 
   /** La persona salió al proveedor: la tarea queda esperando al mundo, no a ella. */
-  async marcarEsperandoFuera(org: string, id: string): Promise<Handoff | null> {
-    return this.repo.cambiarEstado(this.pool, org, id, 'WAITING_EXTERNAL');
+  async marcarEsperandoFuera(org: string, id: string, actor = 'soec'): Promise<Handoff | null> {
+    return enTransaccion(this.pool, async (tx) => {
+      const h = await this.repo.cambiarEstado(tx, org, id, 'WAITING_EXTERNAL');
+      if (h === null) return null; // de otra empresa, o inexistente: no se audita lo que no ocurrió
+      await this.negocios.registrarAuditoria(tx, {
+        organizationId: org, actor, action: 'HANDOFF_UPDATED',
+        changedFields: { tipo: h.tipo, causa: h.causa, estado: 'WAITING_EXTERNAL', at: this.ahora() },
+      });
+      return h;
+    });
   }
 
   /**
@@ -116,24 +154,39 @@ export class HandoffService {
    */
   async sincronizarGoogle(org: string, estado: EstadoGoogleParaHandoff, actor = 'soec'): Promise<Handoff | null> {
     const intencion = handoffDeGoogle(estado);
-    const vigentes: TipoHandoff[] = intencion === null
+    // Lo que ya no aplica se cancela. Si no hace falta nada, se cancelan TODOS los tipos del canal.
+    const sobran: TipoHandoff[] = intencion === null
       ? [...TIPOS_DE_GOOGLE]
       : TIPOS_DE_GOOGLE.filter((t) => t !== intencion.tipo);
     await enTransaccion(this.pool, async (tx) => {
-      await this.repo.vencerCaducadas(tx, org);
-      await this.repo.cancelarAbiertas(tx, org, 'GOOGLE_ADS', vigentes);
+      await this.vencerYAuditar(tx, org, actor);
+      const canceladas = await this.repo.cancelarAbiertas(tx, org, 'GOOGLE_ADS', sobran);
+      for (const c of canceladas) {
+        await this.negocios.registrarAuditoria(tx, {
+          organizationId: org, actor, action: 'HANDOFF_CANCELLED',
+          changedFields: { tipo: c.tipo, causa: c.causa, motivo: 'dejó de hacer falta', at: this.ahora() },
+        });
+      }
     });
-    if (intencion === null) {
-      // También se cierra la del tipo vigente si ya no hace falta: el canal quedó resuelto.
-      await enTransaccion(this.pool, async (tx) => { await this.repo.cancelarAbiertas(tx, org, 'GOOGLE_ADS', [...TIPOS_DE_GOOGLE]); });
-      return null;
-    }
+    if (intencion === null) return null;
     return this.abrir(org, intencion, { actor });
+  }
+
+  /** Vence lo caducado dejando constancia de cada una. Un vencimiento silencioso no se puede explicar después. */
+  private async vencerYAuditar(tx: PoolClient, org: string, actor: string): Promise<number> {
+    const vencidas = await this.repo.vencerCaducadas(tx, org);
+    for (const v of vencidas) {
+      await this.negocios.registrarAuditoria(tx, {
+        organizationId: org, actor, action: 'HANDOFF_EXPIRED',
+        changedFields: { tipo: v.tipo, causa: v.causa, expiraEn: v.expiraEn, at: this.ahora() },
+      });
+    }
+    return vencidas.length;
   }
 
   /** Qué se le pide a esta empresa ahora mismo, y cuántas cosas quedan detrás. */
   async vista(org: string): Promise<VistaHandoff> {
-    await enTransaccion(this.pool, async (tx) => { await this.repo.vencerCaducadas(tx, org); });
+    await enTransaccion(this.pool, async (tx) => { await this.vencerYAuditar(tx, org, 'soec'); });
     const abiertas = await this.repo.abiertas(org);
     const principal = tareaPrincipal(abiertas);
     return {
@@ -156,23 +209,80 @@ export class HandoffService {
     for (const h of abiertas) {
       const v = verificadores.find((x) => x.soporta(h));
       if (v === undefined) continue;
-      let resultado: Awaited<ReturnType<VerificadorHandoff['verificar']>>;
+      let veredicto: VeredictoHandoff;
       try {
-        resultado = await v.verificar(h);
+        veredicto = await v.verificar(h);
       } catch {
-        continue; // un verificador que falla no cierra nada: el silencio no es una confirmación
+        // Un verificador que falla no cierra nada ni cambia nada: el silencio no es una confirmación.
+        continue;
       }
-      if (!resultado.cumplida) continue;
+
+      // Ni `STILL_REQUIRED` ni `RETRY_LATER` tocan la fila. La primera porque la tarea sigue siendo cierta; la
+      // segunda porque no sabemos nada nuevo, y escribir «no sé» como si fuera un hecho es el error a evitar.
+      if (veredicto.resultado === 'STILL_REQUIRED' || veredicto.resultado === 'RETRY_LATER') continue;
+
+      if (veredicto.resultado === 'BLOCKED_EXTERNAL') {
+        if (h.estado === 'BLOCKED_EXTERNAL') continue; // ya estaba dicho: no se repite la auditoría
+        await enTransaccion(this.pool, async (tx) => {
+          await this.repo.cambiarEstado(tx, org, h.id, 'BLOCKED_EXTERNAL');
+          await this.negocios.registrarAuditoria(tx, {
+            organizationId: org, actor, action: 'HANDOFF_UPDATED',
+            changedFields: { tipo: h.tipo, causa: h.causa, estado: 'BLOCKED_EXTERNAL', verificador: v.nombre, detalle: veredicto.detalle, at: this.ahora() },
+          });
+        });
+        continue;
+      }
+
       await enTransaccion(this.pool, async (tx) => {
-        await this.repo.cambiarEstado(tx, org, h.id, 'COMPLETED', { referenciaProveedor: resultado.referenciaProveedor ?? null });
+        await this.repo.cambiarEstado(tx, org, h.id, 'COMPLETED', { referenciaProveedor: veredicto.referenciaProveedor ?? null });
         await this.negocios.registrarAuditoria(tx, {
-          organizationId: org, actor, action: 'EXTERNAL_HANDOFF_COMPLETED',
-          changedFields: { tipo: h.tipo, canal: h.canal, causa: h.causa, verificador: v.nombre, detalle: resultado.detalle, at: this.ahora() },
+          organizationId: org, actor, action: 'HANDOFF_COMPLETED',
+          changedFields: { tipo: h.tipo, canal: h.canal, causa: h.causa, verificador: v.nombre, detalle: veredicto.detalle, at: this.ahora() },
         });
       });
       completadas.push(h.id);
     }
     return { revisadas: abiertas.length, completadas };
+  }
+
+  /**
+   * REANUDACIÓN. El paso que convierte una lista de tareas en un recorrido que avanza solo:
+   *
+   *   vencer lo caducado → verificar contra el mundo → cerrar lo que ya está hecho → recalcular qué falta
+   *   ahora → abrir la tarea siguiente si corresponde → devolver esa única cosa.
+   *
+   * Es idempotente: llamarla dos veces no cierra dos veces nada, no duplica filas y no vuelve a auditar lo
+   * mismo. Lo que NO hace, y es deliberado: no crea mandato, no autoriza gasto, no enciende escritura y no
+   * activa campañas. Desbloquea el paso; no se concede a sí misma el permiso del paso siguiente.
+   */
+  async reanudar(org: string, actor = 'soec'): Promise<Reanudacion> {
+    const vencidas = await enTransaccion(this.pool, async (tx) => this.vencerYAuditar(tx, org, actor));
+    const r = await this.verificarPendientes(org, actor);
+
+    // Recalcular QUÉ FALTA AHORA contra el mundo: puede que al cerrar una tarea aparezca la siguiente (se creó
+    // la cuenta ⇒ ahora falta elegirla) o que ya no falte nada por este canal.
+    if (this.deps.leerEstadoGoogle !== undefined) {
+      const estado = await this.deps.leerEstadoGoogle(org).catch(() => null);
+      if (estado !== null) await this.sincronizarGoogle(org, estado, actor);
+    }
+
+    let preparacionRecalculada = false;
+    if (r.completadas.length > 0 && this.deps.recalcularPreparacion !== undefined) {
+      // Si el recálculo falla, la tarea sigue cerrada: lo que se comprobó del mundo no se deshace por esto.
+      await this.deps.recalcularPreparacion(org).then(() => { preparacionRecalculada = true; }).catch(() => undefined);
+    }
+
+    const v = await this.vista(org);
+    this.deps.log?.({ handoff: 'reanudado', org, vencidas, completadas: r.completadas.length, siguiente: v.tarea?.id ?? null });
+    return {
+      organizationId: org,
+      vencidas,
+      revisadas: r.revisadas,
+      completadas: r.completadas,
+      preparacionRecalculada,
+      siguiente: v.tarea,
+      pendientes: v.pendientes,
+    };
   }
 
   /** Historial completo, para auditoría y para entender por qué una empresa tardó lo que tardó. */
