@@ -1,13 +1,19 @@
 /**
- * Autonomy Fase I.6 · ¿PUEDE ESTA CUENTA PAGAR SUS ANUNCIOS? El mapeo, como función pura.
+ * Autonomy Fase I.6.1 · ¿PUEDE ESTA CUENTA PAGAR SUS ANUNCIOS? El mapeo, como función pura.
  *
- * La regla innegociable: **la falta de información nunca se convierte en «listo»**. Google no expone si una
- * tarjeta es válida hoy —ni un rechazo reciente, ni el saldo—, así que hay situaciones en las que la única
- * respuesta honesta es «no lo sé». Que exista ese valor es lo que impide que el sistema dé por bueno un
- * silencio y siga adelante hacia el gasto.
+ * Este fichero existe por un error que casi se despliega. La versión anterior leía `billing_setup`, no
+ * encontraba filas y concluía «falta configurar el pago». Es falso: la documentación de Google dice que los
+ * flujos de facturación de la API exigen **facturación mensual**, un régimen que pide un año de empresa y
+ * miles de dólares de gasto mensual. Para una cuenta con tarjeta —casi todo el mundo— esa consulta devuelve
+ * cero filas SIEMPRE, y eso no dice nada sobre su tarjeta. Habríamos acusado de no haber hecho algo a gente
+ * que lo tenía hecho.
  *
- * La otra cosa que se fija aquí: los estados intermedios existen de verdad. «Google está aprobando la forma
- * de pago» no es ni listo ni pendiente de la persona; es esperar, y se dice así.
+ * Las tres reglas que estas pruebas fijan:
+ *
+ *   1. `billing_setup` vacío NO significa «falta pago»; significa «no lo podemos ver».
+ *   2. `customer.status = ENABLED` sirve para descartar cuentas muertas, jamás para afirmar que hay con qué
+ *      pagar. Ni el gasto histórico tampoco.
+ *   3. Cuando el proveedor no deja comprobarlo, lo único que cierra el paso es que una persona lo atestigüe.
  */
 import { describe, expect, it } from 'vitest';
 import { evaluarFacturacion, URL_FACTURACION_GOOGLE, type SenalesFacturacion } from '../src/facturacion/facturacion-tipos';
@@ -15,66 +21,86 @@ import { evaluarFacturacion, URL_FACTURACION_GOOGLE, type SenalesFacturacion } f
 const senales = (over: Partial<SenalesFacturacion> = {}): SenalesFacturacion => ({
   estadoCuenta: 'ENABLED',
   configuraciones: [],
-  gastoHistoricoMinor: 0,
+  confirmacionHumanaVigente: false,
   ...over,
 });
 
-describe('la preparación para facturar', () => {
-  it('con una configuración aprobada, y sólo entonces, está lista', () => {
+describe('facturación mensual: lo único que la API deja observar', () => {
+  it('aprobada ⇒ lista, y el sistema puede cerrarlo solo', () => {
     const r = evaluarFacturacion(senales({ configuraciones: ['APPROVED'] }));
     expect(r.estado).toBe('READY');
-    expect(r.motivo).toBe('CONFIGURACION_APROBADA');
+    expect(r.observacion).toBe('MONTHLY_INVOICING_READY');
+    expect(r.requiereConfirmacionHumana).toBe(false);
   });
 
-  it('sin ninguna configuración, hace falta que una persona la configure en Google', () => {
-    const r = evaluarFacturacion(senales({ configuraciones: [] }));
-    expect(r.estado).toBe('PAYMENT_SETUP_REQUIRED');
-    expect(r.motivo).toBe('SIN_CONFIGURACION_DE_PAGO');
-    expect(r.explicacion).toMatch(/cómo se pagan tus anuncios/i);
-  });
-
-  it('una configuración cancelada no cuenta como configuración', () => {
-    expect(evaluarFacturacion(senales({ configuraciones: ['CANCELLED'] })).estado).toBe('PAYMENT_SETUP_REQUIRED');
-  });
-
-  it('mientras Google la aprueba, no se le pide nada más a nadie', () => {
+  it('en aprobación ⇒ esperar, sin pedirle nada a nadie', () => {
     for (const c of ['PENDING', 'APPROVED_HELD'] as const) {
       const r = evaluarFacturacion(senales({ configuraciones: [c] }));
       expect(r.estado, c).toBe('PENDING_PROVIDER');
+      expect(r.observacion).toBe('MONTHLY_INVOICING_PENDING');
       expect(r.explicacion).toMatch(/no hace falta que hagas nada más/i);
     }
   });
 
-  it('una cuenta que Google tiene inactiva es un bloqueo externo, no una tarea', () => {
+  it('cancelada ⇒ ese camino está bloqueado, y se cae al trato de autoservicio', () => {
+    const r = evaluarFacturacion(senales({ configuraciones: ['CANCELLED'] }));
+    expect(r.observacion).toBe('MONTHLY_INVOICING_BLOCKED');
+    expect(r.estado).toBe('PAYMENT_SETUP_REQUIRED');
+    expect(r.requiereConfirmacionHumana).toBe(true);
+  });
+});
+
+describe('autoservicio: la API no lo expone, y se dice', () => {
+  /** El defecto corregido, fijado para que no vuelva. */
+  it('sin filas de facturación NO se afirma que falte un método de pago', () => {
+    const r = evaluarFacturacion(senales({ configuraciones: [] }));
+    expect(r.observacion).toBe('SELF_SERVICE_PAYMENT_UNVERIFIABLE');
+    expect(r.motivo).toBe('PAGO_NO_VERIFICABLE_POR_API');
+    expect(r.estado).not.toBe('READY');
+    // Lo que se le dice a la persona es lo que es cierto: que no podemos comprobarlo.
+    expect(r.explicacion).toMatch(/no permite que SOEC compruebe/i);
+    expect(r.explicacion).not.toMatch(/falta|no tienes|no has configurado/i);
+    expect(r.requiereConfirmacionHumana).toBe(true);
+  });
+
+  it('una cuenta activa no es una cuenta con pago: ENABLED no prueba nada', () => {
+    const r = evaluarFacturacion(senales({ estadoCuenta: 'ENABLED', configuraciones: [] }));
+    expect(r.estado).not.toBe('READY');
+  });
+
+  it('haber gastado antes tampoco prueba que hoy se pueda cobrar', () => {
+    const r = evaluarFacturacion(senales({ configuraciones: [], gastoHistoricoMinor: 2_500_000 }));
+    expect(r.estado).not.toBe('READY');
+    expect(r.requiereConfirmacionHumana).toBe(true);
+  });
+
+  it('la confirmación de la persona es lo único que cierra el paso', () => {
+    const r = evaluarFacturacion(senales({ configuraciones: [], confirmacionHumanaVigente: true }));
+    expect(r.estado).toBe('READY');
+    expect(r.motivo).toBe('CONFIRMADO_POR_LA_PERSONA');
+    // Y se sigue diciendo qué se observó de verdad: que no lo vimos, nos lo contaron.
+    expect(r.observacion).toBe('SELF_SERVICE_PAYMENT_UNVERIFIABLE');
+    expect(r.requiereConfirmacionHumana).toBe(false);
+  });
+});
+
+describe('lo que nunca puede pasar', () => {
+  it('una cuenta inactiva es un bloqueo externo, por encima de cualquier otra señal', () => {
     for (const estado of ['SUSPENDED', 'CANCELED', 'CLOSED']) {
-      const r = evaluarFacturacion(senales({ estadoCuenta: estado, configuraciones: ['APPROVED'] }));
+      const r = evaluarFacturacion(senales({ estadoCuenta: estado, configuraciones: ['APPROVED'], confirmacionHumanaVigente: true }));
       expect(r.estado, estado).toBe('BLOCKED_EXTERNAL');
-      expect(r.motivo).toBe('CUENTA_NO_OPERATIVA');
+      expect(r.observacion).toBe('ACCOUNT_BLOCKED');
     }
   });
 
   it('si no se pudo consultar, no se concluye nada', () => {
     expect(evaluarFacturacion(senales({ configuraciones: null })).estado).toBe('RETRY_LATER');
     expect(evaluarFacturacion(senales({ estadoCuenta: null })).estado).toBe('RETRY_LATER');
-    // Y no saber manda sobre todo lo demás: ni siquiera una configuración aprobada lo convierte en listo.
-    expect(evaluarFacturacion({ estadoCuenta: null, configuraciones: ['APPROVED'], gastoHistoricoMinor: 0 }).estado).toBe('RETRY_LATER');
+    // Ni siquiera una confirmación humana convierte en «listo» algo que no se pudo mirar.
+    expect(evaluarFacturacion(senales({ configuraciones: null, confirmacionHumanaVigente: true })).estado).toBe('RETRY_LATER');
   });
 
-  it('un estado de cuenta que no entendemos nunca es «listo»', () => {
-    const r = evaluarFacturacion(senales({ estadoCuenta: 'UNKNOWN', configuraciones: ['APPROVED'] }));
-    expect(r.estado).toBe('UNKNOWN');
-    expect(r.motivo).toBe('SIN_EVIDENCIA_SUFICIENTE');
-  });
-
-  /** Contraprueba: a quien ya publicó no se le manda a configurar lo que probablemente ya tiene. */
-  it('una cuenta que ya gastó no recibe la tarea, pero tampoco se declara lista', () => {
-    const r = evaluarFacturacion(senales({ configuraciones: [], gastoHistoricoMinor: 125_000 }));
-    expect(r.estado).toBe('UNKNOWN');
-    expect(r.estado).not.toBe('READY');
-    expect(r.estado).not.toBe('PAYMENT_SETUP_REQUIRED');
-  });
-
-  it('NINGUNA combinación sin configuración aprobada termina en READY', () => {
+  it('NINGUNA combinación sin aprobación ni confirmación termina en READY', () => {
     const cuentas = ['ENABLED', 'SUSPENDED', 'CANCELED', 'CLOSED', 'UNKNOWN', 'RARO', null];
     const configs: Array<readonly ('PENDING' | 'APPROVED_HELD' | 'CANCELLED' | 'UNKNOWN')[] | null> = [
       [], ['PENDING'], ['APPROVED_HELD'], ['CANCELLED'], ['UNKNOWN'], ['PENDING', 'CANCELLED'], null,
@@ -82,7 +108,7 @@ describe('la preparación para facturar', () => {
     for (const estadoCuenta of cuentas) {
       for (const configuraciones of configs) {
         for (const gastoHistoricoMinor of [null, 0, 999_999]) {
-          const r = evaluarFacturacion({ estadoCuenta, configuraciones, gastoHistoricoMinor });
+          const r = evaluarFacturacion({ estadoCuenta, configuraciones, gastoHistoricoMinor, confirmacionHumanaVigente: false });
           expect(r.estado, `${estadoCuenta}/${JSON.stringify(configuraciones)}/${gastoHistoricoMinor}`).not.toBe('READY');
         }
       }
@@ -92,11 +118,12 @@ describe('la preparación para facturar', () => {
   it('ninguna explicación menciona jerga del proveedor ni datos de pago', () => {
     const combinaciones: SenalesFacturacion[] = [
       senales(), senales({ configuraciones: ['APPROVED'] }), senales({ configuraciones: ['PENDING'] }),
-      senales({ estadoCuenta: 'SUSPENDED' }), senales({ configuraciones: null }), senales({ estadoCuenta: 'UNKNOWN' }),
+      senales({ estadoCuenta: 'SUSPENDED' }), senales({ configuraciones: null }), senales({ estadoCuenta: 'RARO' }),
+      senales({ confirmacionHumanaVigente: true }),
     ];
     for (const s of combinaciones) {
       const t = evaluarFacturacion(s).explicacion;
-      for (const jerga of ['billing_setup', 'BillingSetup', 'customer.status', 'APPROVED', 'PENDING', 'payments account', 'PAN', 'CVV']) {
+      for (const jerga of ['billing_setup', 'BillingSetup', 'customer.status', 'APPROVED', 'PENDING', 'monthly invoicing', 'PAN', 'CVV']) {
         expect(t, `«${jerga}» no puede salir a la pantalla`).not.toContain(jerga);
       }
     }

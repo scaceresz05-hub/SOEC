@@ -11,7 +11,7 @@
  * «Ya lo hice» pregunta al proveedor; si el mundo no cambió, la tarea sigue ahí, y eso es lo correcto.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { leerTarea, marcarAbierta, revisarTareas, type VistaTareas } from '../lib/handoff-client';
+import { confirmarPago, leerTarea, marcarAbierta, revisarTareas, type VistaTareas } from '../lib/handoff-client';
 
 /** Cada cuánto se vuelve a preguntar por la tarea. 25 s: se nota inmediato sin ser un martilleo. */
 const MS_ENTRE_LECTURAS = 25_000;
@@ -89,6 +89,23 @@ export function TareaPendiente({ org, alActuarDentro, alCambiarTarea }: {
     }
   };
 
+  /**
+   * La persona atestigua lo que el proveedor no nos deja ver. No se le pide ningún dato: sólo que mire y
+   * diga. Después se relee el estado, que es quien decide si el paso queda cerrado.
+   */
+  const confirmar = async (): Promise<void> => {
+    setOcupado('confirmar');
+    setError(null);
+    try {
+      await confirmarPago(org);
+      await cargar();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'no se pudo confirmar');
+    } finally {
+      setOcupado(null);
+    }
+  };
+
   const comprobar = async (): Promise<void> => {
     setOcupado('comprobar');
     setError(null);
@@ -123,7 +140,11 @@ export function TareaPendiente({ org, alActuarDentro, alCambiarTarea }: {
             {ocupado === 'accion' ? 'Abriendo…' : tarea.etiquetaAccion}
           </button>
         )}
-        {tarea.esperando && (
+        {tarea.confirmacion ? (
+          <button type="button" className="btn" disabled={ocupado !== null} onClick={() => void confirmar()}>
+            {ocupado === 'confirmar' ? 'Guardando…' : tarea.confirmacion.etiqueta}
+          </button>
+        ) : tarea.esperando && (
           <button type="button" className="btn" disabled={ocupado !== null} onClick={() => void comprobar()}>
             {ocupado === 'comprobar' ? 'Comprobando…' : 'Ya lo hice, compruébalo'}
           </button>

@@ -221,6 +221,53 @@ describe('la tarjeta de una sola cosa', () => {
     }
   });
 
+  /**
+   * FASE I.6.1 · lo que Google no deja comprobar lo cierra una afirmación de la persona. Es la única tarea
+   * que se completa por palabra, y precisamente por eso el texto no le pide ni un dígito de su tarjeta.
+   */
+  it('la tarea de pago ofrece confirmar, y confirmar no envía ningún dato financiero', async () => {
+    const TAREA_PAGO = {
+      ...TAREA_CP,
+      id: 'hand-pago',
+      titulo: 'Revisa el pago de tus anuncios en Google',
+      motivo: 'Google no permite que SOEC compruebe tu tarjeta o método de pago. SOEC no guarda números de tarjeta ni datos bancarios.',
+      etiquetaAccion: 'Abrir Google',
+      urlProveedor: 'https://ads.google.com/aw/billing/summary',
+      confirmacion: { etiqueta: 'Confirmo que el pago está configurado' },
+    };
+    const cuerpos: string[] = [];
+    const llamadas: string[] = [];
+    let confirmado = false;
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { method?: string; body?: string }) => {
+      const u = String(url);
+      llamadas.push(`${init?.method ?? 'GET'} ${u}`);
+      if (init?.body !== undefined) cuerpos.push(init.body);
+      if (u.includes('/facturacion/confirmacion')) {
+        confirmado = true;
+        return new Response(JSON.stringify({ confirmadoEn: '2026-09-24T12:00:00.000Z', estado: 'READY' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      const cuerpo = { organizationId: 'org-qa', tarea: confirmado ? null : TAREA_PAGO, pendientes: 0 };
+      return new Response(JSON.stringify(cuerpo), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+
+    const { container } = render(h(TareaPendiente, { org: 'org-qa' }));
+    await screen.findByText('Revisa el pago de tus anuncios en Google');
+    expect(screen.getByRole('button', { name: 'Abrir Google' })).toBeTruthy();
+    // No se ofrece «ya lo hice, compruébalo»: esto no se comprueba, se atestigua.
+    expect(screen.queryByRole('button', { name: /compruébalo/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmo que el pago está configurado' }));
+    await waitFor(() => { expect(container.textContent).toBe(''); }); // el paso queda cerrado
+
+    expect(llamadas.some((l) => l.startsWith('POST') && l.includes('/facturacion/confirmacion'))).toBe(true);
+    // El cuerpo va vacío: ni tarjeta, ni identificadores, ni nada que se le haya pedido a la persona.
+    for (const c of cuerpos) expect(c).toBe('{}');
+    const texto = document.body.textContent ?? '';
+    for (const prohibido of ['PAN', 'CVV', 'tarjeta de crédito', 'número de tarjeta']) {
+      expect(texto).not.toContain(prohibido);
+    }
+  });
+
   it('cuando la acción ocurre dentro de SOEC, no se abre ninguna pestaña', async () => {
     const abrir = vi.fn();
     vi.stubGlobal('open', abrir);

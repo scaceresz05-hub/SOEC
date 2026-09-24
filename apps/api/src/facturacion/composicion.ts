@@ -9,6 +9,7 @@
  */
 import type { Pool } from 'pg';
 import { RepositorioConexiones } from '../conexion/conexion-pg';
+import { RepositorioConfirmacionDePago } from './facturacion-pg';
 import { clienteDeLecturaGoogle } from '../ejecucion/composicion';
 import type { ComponentesFlujoGoogleAds } from '../acquisition/google-ads-oauth-flow';
 import { FacturacionGoogleAds, type ClienteConsultaGoogle } from './facturacion-google';
@@ -36,6 +37,9 @@ export function puertoFacturacionGoogle(pool: Pool, o: OpcionesFacturacionGoogle
       pool, env: o.env, composicionGoogleAds: o.composicionGoogleAds, ...(o.log ? { log: o.log } : {}),
     }),
     cuenta: (org) => cuentaElegidaDe(pool, org),
+    // Lo único observable cuando el pago es autoservicio: que una persona ya lo revisó y lo confirmó.
+    confirmacionVigente: async (org, customerId) =>
+      (await new RepositorioConfirmacionDePago(pool).vigente(org, customerId)) !== null,
     ...(o.gastoHistoricoMinor ? { gastoHistoricoMinor: o.gastoHistoricoMinor } : {}),
     ...(o.log ? { log: o.log } : {}),
   });

@@ -10,10 +10,14 @@
  *   SELECT customer.status FROM customer
  *   SELECT billing_setup.status FROM billing_setup
  *
- * Y aquí está el límite, dicho sin rodeos: **ninguna de las dos dice si la tarjeta funciona hoy**. Google no
- * expone la validez de un medio de pago, ni un rechazo reciente, ni el saldo. Lo que se puede saber es si la
- * cuenta está activa y si tiene una configuración de pago aprobada. Cuando eso no alcanza para afirmar que la
- * cuenta puede publicar, la respuesta es `UNKNOWN` — nunca `READY`.
+ * Y aquí está el límite, dicho sin rodeos. `billing_setup` **sólo existe bajo facturación mensual**: la
+ * documentación de Google lo exige para manejar facturación por API, y ese régimen pide un año de empresa y
+ * unos 5.000 USD mensuales de gasto. Para una cuenta con tarjeta —es decir, para casi todo el mundo— la
+ * consulta devuelve cero filas, y eso NO significa que falte una forma de pago: significa que no la podemos
+ * ver. Confundir ambas cosas era el defecto de la versión anterior de este archivo.
+ *
+ * Tampoco `customer.status = ENABLED` sirve como prueba de pago: sirve para descartar cuentas canceladas,
+ * suspendidas o cerradas, y para nada más.
  */
 import { evaluarFacturacion, type LecturaFacturacion, type EstadoConfiguracionPago, type PuertoFacturacionPublicitaria } from './facturacion-tipos';
 
@@ -27,7 +31,12 @@ export interface DepsFacturacionGoogle {
   readonly cliente: (org: string) => Promise<ClienteConsultaGoogle | null>;
   /** Cuenta sobre la que preguntar: la elegida y escrita en el SSOT. `null` ⇒ todavía no hay ninguna. */
   readonly cuenta: (org: string) => Promise<string | null>;
-  /** Gasto histórico observado, si se conoce. Contraprueba para no molestar a quien ya publicó. */
+  /**
+   * ¿Hay confirmación humana vigente para ESA cuenta? Es lo único que puede cerrar el paso cuando el pago es
+   * autoservicio, porque es lo único observable: la API no expone la tarjeta de nadie.
+   */
+  readonly confirmacionVigente?: (org: string, customerId: string) => Promise<boolean>;
+  /** Contexto, nunca prueba: que la cuenta haya publicado antes no dice que hoy pueda cobrarse. */
   readonly gastoHistoricoMinor?: (org: string) => Promise<number | null>;
   readonly log?: (info: Record<string, unknown>) => void;
 }
@@ -58,7 +67,7 @@ export class FacturacionGoogleAds implements PuertoFacturacionPublicitaria {
     if (cuenta === null || cliente === null) {
       // Sin cuenta elegida o sin camino al proveedor no se afirma nada: este paso del recorrido ni siquiera
       // ha llegado. Devolver RETRY_LATER evita que alguien vea una tarea de pago antes de tener cuenta.
-      return evaluarFacturacion({ estadoCuenta: null, configuraciones: null, gastoHistoricoMinor: null });
+      return evaluarFacturacion({ estadoCuenta: null, configuraciones: null, confirmacionHumanaVigente: false });
     }
 
     let estadoCuenta: string | null = null;
@@ -73,10 +82,13 @@ export class FacturacionGoogleAds implements PuertoFacturacionPublicitaria {
     } catch (e) {
       // Un proveedor que no responde no es una respuesta: se reintenta, no se concluye.
       this.deps.log?.({ facturacion: 'consulta-fallida', org, error: e instanceof Error ? e.message : 'error' });
-      return evaluarFacturacion({ estadoCuenta: null, configuraciones: null, gastoHistoricoMinor: null });
+      return evaluarFacturacion({ estadoCuenta: null, configuraciones: null, confirmacionHumanaVigente: false });
     }
 
+    const confirmacionHumanaVigente = this.deps.confirmacionVigente === undefined
+      ? false
+      : await this.deps.confirmacionVigente(org, cuenta).catch(() => false);
     const gasto = this.deps.gastoHistoricoMinor === undefined ? null : await this.deps.gastoHistoricoMinor(org).catch(() => null);
-    return evaluarFacturacion({ estadoCuenta, configuraciones, gastoHistoricoMinor: gasto });
+    return evaluarFacturacion({ estadoCuenta, configuraciones, confirmacionHumanaVigente, gastoHistoricoMinor: gasto });
   }
 }

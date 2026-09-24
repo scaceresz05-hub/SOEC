@@ -18,6 +18,11 @@ export interface TareaPendiente {
   esperando: boolean;
   /** Hoy no se puede avanzar por una razón del proveedor. */
   bloqueadaFuera: boolean;
+  /**
+   * Cuando el proveedor no deja comprobar algo, lo único que cierra el paso es que la persona lo atestigüe.
+   * Es una afirmación, no un formulario: no se le pide ni un dígito de nada.
+   */
+  confirmacion?: { etiqueta: string } | null;
 }
 
 export interface VistaTareas {
@@ -42,6 +47,17 @@ export async function leerTarea(org: string): Promise<VistaTareas> {
 /** La persona pulsó el botón y salió al proveedor: la tarea pasa a esperar al mundo. */
 export async function marcarAbierta(org: string, id: string): Promise<VistaTareas> {
   return j<VistaTareas>(await fetch(`/api/backend/handoff/${id}/abierta`, {
+    method: 'POST', headers: { 'content-type': 'application/json', ...cabecerasOrg(org) }, body: '{}',
+  }));
+}
+
+/**
+ * ATESTACIÓN. La persona confirma lo que Google no nos deja comprobar —que el pago de sus anuncios está
+ * puesto—. El cuerpo va VACÍO a propósito: la cuenta la resuelve el servidor, y datos financieros no se piden
+ * ni se envían. No crea mandato ni autoriza gasto: sólo cierra un paso que no era observable.
+ */
+export async function confirmarPago(org: string): Promise<{ confirmadoEn: string; estado: string }> {
+  return j<{ confirmadoEn: string; estado: string }>(await fetch('/api/backend/facturacion/confirmacion', {
     method: 'POST', headers: { 'content-type': 'application/json', ...cabecerasOrg(org) }, body: '{}',
   }));
 }

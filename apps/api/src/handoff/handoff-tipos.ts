@@ -187,6 +187,22 @@ export interface TareaVisible {
   readonly esperando: boolean;
   /** `true` cuando hoy no se puede avanzar por una razón del proveedor. */
   readonly bloqueadaFuera: boolean;
+  /**
+   * Etiqueta de la ATESTACIÓN, cuando cerrar este paso depende de que la persona confirme algo que el
+   * proveedor no nos deja comprobar. `null` en todo lo demás: lo normal es que compruebe el sistema.
+   */
+  readonly confirmacion: { readonly etiqueta: string } | null;
+}
+
+/**
+ * ¿Esta tarea se cierra con una confirmación humana? Hoy sólo una: el pago autoservicio, que Google no deja
+ * verificar por API. Se deriva del tipo y la causa —no se guarda como texto duplicado— para que no puedan
+ * discrepar la tarea y su forma de cerrarse.
+ */
+function etiquetaDeConfirmacion(h: Handoff): { readonly etiqueta: string } | null {
+  return h.tipo === 'PAYMENT_SETUP_REQUIRED' && h.causa === 'pago-no-verificable'
+    ? { etiqueta: 'Confirmo que el pago está configurado' }
+    : null;
 }
 
 export function aTareaVisible(h: Handoff): TareaVisible {
@@ -199,6 +215,7 @@ export function aTareaVisible(h: Handoff): TareaVisible {
     urlProveedor: h.urlProveedor,
     esperando: h.estado === 'WAITING_EXTERNAL',
     bloqueadaFuera: h.estado === 'BLOCKED_EXTERNAL',
+    confirmacion: etiquetaDeConfirmacion(h),
   };
 }
 

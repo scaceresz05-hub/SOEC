@@ -25,6 +25,11 @@ export interface IntencionHandoff {
   readonly metadata?: Record<string, unknown>;
   /** `true` ⇒ hoy no se puede avanzar por una razón del proveedor, no por desidia de nadie. */
   readonly bloqueadaFuera?: boolean;
+  /**
+   * Cuando el proveedor no deja comprobar algo, lo único que puede cerrar el paso es que la persona lo
+   * atestigüe. Esto es la etiqueta de ese acto; nunca pide ni transporta un dato financiero.
+   */
+  readonly confirmacion?: { readonly etiqueta: string };
 }
 
 export interface EstadoGoogleParaHandoff {
@@ -143,13 +148,20 @@ export function decidirHandoffGoogle(e: EstadoGoogleParaHandoff): DecisionGoogle
     const f = e.facturacion;
     if (f === undefined || f === 'READY') return { accion: 'CERRAR' };
     if (f === 'PAYMENT_SETUP_REQUIRED') {
+      /**
+       * OJO CON LO QUE SE AFIRMA AQUÍ. No decimos «te falta configurar el pago», porque no lo sabemos: la
+       * API de Google no expone el medio de pago de una cuenta autoservicio. Decimos lo que es cierto —que
+       * no podemos comprobarlo— y pedimos lo mínimo: que lo mire y nos lo confirme. La diferencia entre
+       * ambas frases es la diferencia entre acusar a alguien de no haber hecho algo y pedirle ayuda.
+       */
       return {
         accion: 'ABRIR',
         intencion: {
-          canal: 'GOOGLE_ADS', tipo: 'PAYMENT_SETUP_REQUIRED', causa: 'sin-forma-de-pago',
-          instruccion: 'Configura cómo pagarás los anuncios',
-          motivo: 'Google necesita que completes el método de pago directamente en tu cuenta. SOEC no guarda números de tarjeta ni datos bancarios: los escribes sólo en Google.',
-          etiquetaAccion: 'Continuar con Google', urlProveedor: URL_FACTURACION_GOOGLE,
+          canal: 'GOOGLE_ADS', tipo: 'PAYMENT_SETUP_REQUIRED', causa: 'pago-no-verificable',
+          instruccion: 'Revisa el pago de tus anuncios en Google',
+          motivo: 'Google no permite que SOEC compruebe tu tarjeta o método de pago, así que no podemos saberlo por nuestra cuenta. Ábrelo en Google, revísalo y confírmanos que está listo. SOEC no guarda números de tarjeta ni datos bancarios.',
+          etiquetaAccion: 'Abrir Google', urlProveedor: URL_FACTURACION_GOOGLE,
+          confirmacion: { etiqueta: 'Confirmo que el pago está configurado' },
         },
       };
     }

@@ -22,6 +22,8 @@ import { HandoffService } from '../src/handoff/handoff-service';
 import { verificadorDeFacturacion, verificadoresDeGoogle, VERIFICADORES_PENDIENTES } from '../src/handoff/handoff-verificadores';
 import { correrTickDeHandoffs } from '../src/handoff/handoff-scheduler';
 import { FacturacionGoogleAds } from '../src/facturacion/facturacion-google';
+import { facturacionMigrations, RepositorioConfirmacionDePago } from '../src/facturacion/facturacion-pg';
+import { FacturacionService, NoHayCuentaQueConfirmarError } from '../src/facturacion/facturacion-service';
 import type { EstadoFacturacion } from '../src/facturacion/facturacion-tipos';
 import type { EstadoGoogleParaHandoff } from '../src/handoff/handoff-google';
 
@@ -68,7 +70,8 @@ beforeEach(async () => {
   await runMigrations(pool, conexionMigrations);
   await runMigrations(pool, accionMigrations);
   await runMigrations(pool, handoffMigrations);
-  await ejecutarDestructivoDePrueba(pool, 'truncate external_handoff, accion_ledger, accion_mandato, business_connection_ciphertext, business_capability, business_connection, business_audit, business_restriction, business_geo_scope, business_offering, business_objective, business_governance, business_profile cascade');
+  await runMigrations(pool, facturacionMigrations);
+  await ejecutarDestructivoDePrueba(pool, 'truncate payment_attestation, external_handoff, accion_ledger, accion_mandato, business_connection_ciphertext, business_capability, business_connection, business_audit, business_restriction, business_geo_scope, business_offering, business_objective, business_governance, business_profile cascade');
   await altaDeNegocio(ORG_A);
   await altaDeNegocio(ORG_B);
 });
@@ -105,14 +108,27 @@ describe('con cuenta elegida, la forma de pago es la única cosa que falta', () 
     expect(t[0]!.tipo).toBe('PAYMENT_SETUP_REQUIRED');
 
     const v = await s.vista(ORG_A);
-    expect(v.tarea?.titulo).toBe('Configura cómo pagarás los anuncios');
+    expect(v.tarea?.titulo).toBe('Revisa el pago de tus anuncios en Google');
+    expect(v.tarea?.motivo).toMatch(/no permite que SOEC compruebe tu tarjeta/i);
     expect(v.tarea?.motivo).toMatch(/SOEC no guarda números de tarjeta ni datos bancarios/i);
-    expect(v.tarea?.etiquetaAccion).toBe('Continuar con Google');
+    expect(v.tarea?.etiquetaAccion).toBe('Abrir Google');
     expect(v.tarea?.urlProveedor).toBe('https://ads.google.com/aw/billing/summary');
     expect(v.pendientes).toBe(0);
+    // Y se ofrece la atestación, que es lo único que puede cerrar este paso.
+    expect(v.tarea?.confirmacion?.etiqueta).toBe('Confirmo que el pago está configurado');
     for (const jerga of ['billing_setup', 'PAYMENT_SETUP_REQUIRED', 'customer.status', 'APPROVED', 'PAN', 'CVV']) {
       expect(`${v.tarea?.titulo} ${v.tarea?.motivo} ${v.tarea?.etiquetaAccion}`).not.toContain(jerga);
     }
+  });
+
+  /** El defecto de I.6, fijado para que no vuelva: no se acusa a nadie de no haber hecho algo. */
+  it('la tarea NO afirma que falte un método de pago: afirma que no podemos verlo', async () => {
+    const s = servicio(() => CONECTADA('PAYMENT_SETUP_REQUIRED'));
+    await s.sincronizarGoogle(ORG_A, CONECTADA('PAYMENT_SETUP_REQUIRED'));
+    const t = `${(await s.vista(ORG_A)).tarea?.titulo} ${(await s.vista(ORG_A)).tarea?.motivo}`;
+    expect(t).not.toMatch(/falta (el|la|tu) (método|forma) de pago/i);
+    expect(t).not.toMatch(/no has configurado/i);
+    expect(t).toMatch(/revisa/i);
   });
 
   it('con la forma de pago lista, no queda nada pendiente', async () => {
@@ -222,6 +238,120 @@ describe('el cierre ocurre solo, sin que nadie diga «ya lo hice»', () => {
     expect((await adaptador.inspeccionar(ORG_A)).estado).toBe('READY');
     cuentas.actual = '2222222222'; // la empresa cambió de cuenta
     expect((await adaptador.inspeccionar(ORG_A)).estado).toBe('PAYMENT_SETUP_REQUIRED');
+  });
+});
+
+describe('la confirmación humana: lo único que cierra lo que no se puede ver', () => {
+  const adaptador = (cuenta: () => string | null, filasPago: () => Array<Record<string, unknown>>): FacturacionGoogleAds =>
+    new FacturacionGoogleAds({
+      cliente: async () => ({
+        buscar: async (_c: string, query: string) => (query.includes('billing_setup') ? filasPago() : [{ 'customer.status': 'ENABLED' }]),
+      }),
+      cuenta: async () => cuenta(),
+      confirmacionVigente: async (org, customerId) =>
+        (await new RepositorioConfirmacionDePago(pool).vigente(org, customerId)) !== null,
+    });
+
+  const servicioDe = (cuenta: () => string | null): FacturacionService => new FacturacionService(pool, {
+    puerto: adaptador(cuenta, () => []),
+    cuentaElegida: async () => cuenta(),
+  });
+
+  it('confirmar deja huella de quién y cuándo, y ni un dato financiero', async () => {
+    const f = servicioDe(() => '1111111111');
+    expect((await f.estado(ORG_A)).estado).toBe('PAYMENT_SETUP_REQUIRED');
+
+    const c = await f.confirmar(ORG_A, 'persona-qa');
+    expect(c.customerId).toBe('1111111111');
+    expect((await f.estado(ORG_A)).estado).toBe('READY');
+
+    const filas = await pool.query('select * from payment_attestation where organization_id = $1', [ORG_A]);
+    expect(filas.rows).toHaveLength(1);
+    const columnas = Object.keys(filas.rows[0] as Record<string, unknown>);
+    expect(columnas.sort()).toEqual(['actor', 'confirmado_en', 'customer_id', 'id', 'organization_id', 'proveedor']);
+    const audit = await pool.query("select action, changed_fields from business_audit where organization_id = $1 and action = 'PAYMENT_CONFIRMED_BY_HUMAN'", [ORG_A]);
+    expect(audit.rows).toHaveLength(1);
+    const texto = `${JSON.stringify(filas.rows)} ${JSON.stringify(audit.rows)}`.toLowerCase();
+    for (const prohibido of ['pan', 'cvv', 'card', 'iban', 'tarjeta', 'token', 'secret']) {
+      expect(texto, `«${prohibido}» no puede guardarse`).not.toContain(prohibido);
+    }
+  });
+
+  it('confirmar dos veces no son dos hechos', async () => {
+    const f = servicioDe(() => '1111111111');
+    await f.confirmar(ORG_A, 'persona-qa');
+    await f.confirmar(ORG_A, 'persona-qa');
+    const { rows } = await pool.query('select count(*)::int as n from payment_attestation where organization_id = $1', [ORG_A]);
+    expect(rows[0].n).toBe(1);
+  });
+
+  it('la confirmación vale para ESA cuenta: cambiar de cuenta la invalida', async () => {
+    const cuenta = { actual: '1111111111' as string | null };
+    const f = servicioDe(() => cuenta.actual);
+    await f.confirmar(ORG_A, 'persona-qa');
+    expect((await f.estado(ORG_A)).estado).toBe('READY');
+
+    cuenta.actual = '2222222222'; // la empresa elige otra cuenta
+    expect((await f.estado(ORG_A)).estado).toBe('PAYMENT_SETUP_REQUIRED');
+    expect(await f.confirmacionVigente(ORG_A)).toBeNull();
+
+    // Y volver a la anterior recupera lo ya confirmado: era un hecho sobre esa cuenta.
+    cuenta.actual = '1111111111';
+    expect((await f.estado(ORG_A)).estado).toBe('READY');
+  });
+
+  it('sin cuenta elegida no hay nada que confirmar', async () => {
+    await expect(servicioDe(() => null).confirmar(ORG_A, 'persona-qa')).rejects.toThrow(NoHayCuentaQueConfirmarError);
+    const { rows } = await pool.query('select count(*)::int as n from payment_attestation where organization_id = $1', [ORG_A]);
+    expect(rows[0].n).toBe(0);
+  });
+
+  it('la confirmación de una empresa no vale para otra', async () => {
+    await servicioDe(() => '1111111111').confirmar(ORG_A, 'persona-qa');
+    const otra = new FacturacionService(pool, {
+      puerto: adaptador(() => '1111111111', () => []),
+      cuentaElegida: async () => '1111111111',
+    });
+    expect(await otra.confirmacionVigente(ORG_B)).toBeNull();
+    expect((await otra.estado(ORG_B)).estado).toBe('PAYMENT_SETUP_REQUIRED');
+  });
+
+  it('con la tarea abierta, la confirmación la cierra en el tick siguiente', async () => {
+    const cuenta = { actual: '1111111111' };
+    const f = servicioDe(() => cuenta.actual);
+    // UNA sola fuente para las dos mitades —la que abre la tarea y la que la cierra—, igual que en producción:
+    // si cada una mirara a un sitio distinto, el recorrido se pelearía consigo mismo.
+    const estadoDelCanal = async (): Promise<EstadoFacturacion> => (await f.estado(ORG_A)).estado;
+    const leer = async (): Promise<EstadoGoogleParaHandoff> => ({ ...CONECTADA(), facturacion: await estadoDelCanal() });
+    const s = new HandoffService(pool, {
+      leerEstadoGoogle: leer,
+      verificadores: [...verificadoresDeGoogle(leer), verificadorDeFacturacion(estadoDelCanal), ...VERIFICADORES_PENDIENTES],
+    });
+
+    await correrTickDeHandoffs({ reanudador: s, elegibles: async () => [ORG_A] });
+    const tarea = (await new RepositorioHandoff(pool).abiertas(ORG_A))[0]!;
+    expect(tarea.tipo).toBe('PAYMENT_SETUP_REQUIRED');
+
+    // La persona revisa en Google y confirma. Nadie pulsa «comprobar».
+    await f.confirmar(ORG_A, 'persona-qa');
+    const r = await correrTickDeHandoffs({ reanudador: s, elegibles: async () => [ORG_A] });
+    expect(r.completados).toBe(1);
+    expect((await new RepositorioHandoff(pool).porId(ORG_A, tarea.id))?.estado).toBe('COMPLETED');
+    expect(await abiertas(ORG_A)).toHaveLength(0);
+  });
+
+  it('confirmar el pago no concede NINGÚN permiso', async () => {
+    await servicioDe(() => '1111111111').confirmar(ORG_A, 'persona-qa');
+
+    const caps = (await new RepositorioConexiones(pool).capacidades(ORG_A)).filter((c) => c.habilitada).map((c) => c.capacidad);
+    expect(caps).not.toContain('ESCRITURA_ADS');
+    expect(caps).not.toContain('AUTONOMIA_ADS');
+    expect(await new PgMandatoRepo(pool).actual(ORG_A)).toBeNull();
+    const g = await new RepositorioNegocios(pool).gobierno(ORG_A);
+    expect(g?.autonomousSpend ?? false).toBe(false);
+    expect(g?.campaignExecution ?? false).toBe(false);
+    const { rows } = await pool.query('select count(*)::int as n from campaign_plan where organization_id = $1', [ORG_A]).catch(() => ({ rows: [{ n: 0 }] }));
+    expect(rows[0].n).toBe(0);
   });
 });
 
