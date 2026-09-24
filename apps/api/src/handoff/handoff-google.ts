@@ -11,6 +11,7 @@
  */
 import type { CanalHandoff, TipoHandoff } from './handoff-tipos';
 import type { EstadoCapacidad } from '../provisionamiento/provisionamiento-tipos';
+import { URL_FACTURACION_GOOGLE, type EstadoFacturacion } from '../facturacion/facturacion-tipos';
 
 /** Lo que este módulo pide abrir. El servicio le pone id, fechas y estado. */
 export interface IntencionHandoff {
@@ -38,6 +39,11 @@ export interface EstadoGoogleParaHandoff {
    * comportamiento anterior: pedirle a la persona que la cree. No saber nunca debe ahorrar un paso.
    */
   readonly capacidadProvisionamiento?: EstadoCapacidad;
+  /**
+   * ¿Puede esta cuenta pagar sus anuncios? (Fase I.6.) Ausente ⇒ no se evaluó, y entonces no se pide nada:
+   * no saber nunca inventa una tarea, igual que no saber nunca borra una.
+   */
+  readonly facturacion?: EstadoFacturacion;
 }
 
 /**
@@ -128,6 +134,41 @@ export function handoffDeGoogle(e: EstadoGoogleParaHandoff): IntencionHandoff | 
  * averiguar si podemos, no se toca nada — la tarea que hubiera sigue donde está.
  */
 export function decidirHandoffGoogle(e: EstadoGoogleParaHandoff): DecisionGoogle {
+  /**
+   * CUENTA ELEGIDA ⇒ toca la facturación. Es el paso siguiente del recorrido y tiene su propio dueño: Google
+   * cobra, el cliente paga y SOEC no toca datos de pago jamás. Ojo con el orden: esta rama sólo se evalúa
+   * cuando YA hay cuenta, así que a quien todavía no tiene ninguna no se le habla de tarjetas.
+   */
+  if (e.cuentaEnElSsot) {
+    const f = e.facturacion;
+    if (f === undefined || f === 'READY') return { accion: 'CERRAR' };
+    if (f === 'PAYMENT_SETUP_REQUIRED') {
+      return {
+        accion: 'ABRIR',
+        intencion: {
+          canal: 'GOOGLE_ADS', tipo: 'PAYMENT_SETUP_REQUIRED', causa: 'sin-forma-de-pago',
+          instruccion: 'Configura cómo pagarás los anuncios',
+          motivo: 'Google necesita que completes el método de pago directamente en tu cuenta. SOEC no guarda números de tarjeta ni datos bancarios: los escribes sólo en Google.',
+          etiquetaAccion: 'Continuar con Google', urlProveedor: URL_FACTURACION_GOOGLE,
+        },
+      };
+    }
+    if (f === 'BLOCKED_EXTERNAL') {
+      return {
+        accion: 'ABRIR',
+        intencion: {
+          canal: 'GOOGLE_ADS', tipo: 'PAYMENT_SETUP_REQUIRED', causa: 'cuenta-no-operativa',
+          instruccion: 'Tu cuenta de anuncios no está activa en Google',
+          motivo: 'Google la tiene inactiva y sólo su soporte puede reactivarla. No es algo que puedas resolver desde aquí: te avisamos en cuanto cambie.',
+          etiquetaAccion: 'Entendido', urlProveedor: null, bloqueadaFuera: true,
+        },
+      };
+    }
+    // PENDING_PROVIDER, UNKNOWN y RETRY_LATER: la persona ya hizo lo suyo o no sabemos. En ningún caso se
+    // inventa una tarea nueva, y en ninguno se borra la que estuviera esperando.
+    return { accion: 'ESPERAR' };
+  }
+
   const capacidad = e.capacidadProvisionamiento;
   const sinCuentas = e.cuentasAccesibles === 0 && !e.cuentaEnElSsot
     && (e.estadoProveedor === 'ACCOUNT_SELECTION_PENDING' || e.estadoProveedor === 'CONNECTED');
@@ -160,4 +201,5 @@ export function decidirHandoffGoogle(e: EstadoGoogleParaHandoff): DecisionGoogle
 /** Tipos que este canal gestiona: al cambiar el estado, lo que ya no aplica se cancela en bloque. */
 export const TIPOS_DE_GOOGLE: readonly TipoHandoff[] = [
   'OAUTH_CONSENT_REQUIRED', 'ACCOUNT_PROVISIONING_REQUIRED', 'ACCOUNT_SELECTION_REQUIRED',
+  'PAYMENT_SETUP_REQUIRED',
 ];

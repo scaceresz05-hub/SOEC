@@ -15,6 +15,8 @@ import { connectionIdDe } from '../acquisition/google-ads-connection';
 import { RepositorioConexiones } from '../conexion/conexion-pg';
 import { RepositorioNegocios } from '../negocio/negocio-pg';
 import { datosDeCuentaDesdeNegocio, inspeccionarCapacidad, type CuentaAccesible } from '../provisionamiento/provisionamiento-tipos';
+import { verificadorDeFacturacion } from './handoff-verificadores';
+import type { EstadoFacturacion } from '../facturacion/facturacion-tipos';
 import { verificadoresDeGoogle, VERIFICADORES_PENDIENTES } from './handoff-verificadores';
 import type { DepsHandoff } from './handoff-service';
 import type { EstadoGoogleParaHandoff } from './handoff-google';
@@ -63,6 +65,8 @@ export function lectorEstadoGoogle(
   pool: Pool,
   estadoGoogle: EstadoGoogleCrudo | undefined,
   env: Record<string, string | undefined> = process.env,
+  /** Estado de facturación del canal (Fase I.6). Ausente ⇒ no se evalúa y no se pide nada. */
+  leerFacturacion?: (org: string) => Promise<EstadoFacturacion | null>,
 ): (org: string) => Promise<EstadoGoogleParaHandoff | null> {
   return async (org: string) => {
     if (estadoGoogle === undefined) return null;
@@ -83,12 +87,23 @@ export function lectorEstadoGoogle(
       datosDeCuenta: datosDeCuentaDesdeNegocio(await new RepositorioNegocios(pool).perfil(org).catch(() => null)),
     }).estado;
 
+    const cuentaEnElSsot = conexion !== null && conexion.estado === 'CONNECTED'
+      && String((conexion.configuracion as { customerId?: string }).customerId ?? conexion.externalAccountId ?? '') !== '';
+
+    /**
+     * FACTURACIÓN (Fase I.6). Sólo se pregunta cuando YA hay cuenta elegida: antes de eso el recorrido ni
+     * siquiera ha llegado a este paso, y preguntarlo gastaría dos consultas al proveedor para nada.
+     */
+    const facturacion = cuentaEnElSsot && leerFacturacion !== undefined
+      ? await leerFacturacion(org).catch(() => null)
+      : null;
+
     return {
       estadoProveedor: estado.estadoProveedor,
       cuentasAccesibles: estado.cuentasAccesibles,
-      cuentaEnElSsot: conexion !== null && conexion.estado === 'CONNECTED'
-        && String((conexion.configuracion as { customerId?: string }).customerId ?? conexion.externalAccountId ?? '') !== '',
+      cuentaEnElSsot,
       ...(capacidad === undefined ? {} : { capacidadProvisionamiento: capacidad }),
+      ...(facturacion === null ? {} : { facturacion }),
     };
   };
 }
@@ -98,12 +113,25 @@ export function lectorEstadoGoogle(
  * los adaptadores pendientes de lo que todavía no sabemos observar. Rutas y scheduler construyen las suyas
  * desde aquí, de modo que reanudar por un clic y reanudar por un tick son literalmente lo mismo.
  */
-export function depsDeHandoff(pool: Pool, opciones: Partial<DepsHandoff> & { readonly estadoGoogle?: EstadoGoogleCrudo } = {}): DepsHandoff {
-  const leer = opciones.leerEstadoGoogle ?? lectorEstadoGoogle(pool, opciones.estadoGoogle);
+export function depsDeHandoff(
+  pool: Pool,
+  opciones: Partial<DepsHandoff> & {
+    readonly estadoGoogle?: EstadoGoogleCrudo;
+    /** Lector de facturación del canal (Fase I.6). Ausente ⇒ nunca se pide configurar una forma de pago. */
+    readonly facturacion?: (org: string) => Promise<EstadoFacturacion | null>;
+  } = {},
+): DepsHandoff {
+  const leer = opciones.leerEstadoGoogle ?? lectorEstadoGoogle(pool, opciones.estadoGoogle, process.env, opciones.facturacion);
   const base: DepsHandoff = {
     ...opciones,
     leerEstadoGoogle: leer,
-    verificadores: opciones.verificadores ?? [...verificadoresDeGoogle(leer), ...VERIFICADORES_PENDIENTES],
+    verificadores: opciones.verificadores ?? [
+      ...verificadoresDeGoogle(leer),
+      // El verificador de la forma de pago cierra la tarea SIN que nadie pulse nada, en cuanto Google la
+      // refleja aprobada. Sin lector de facturación no existe, y entonces nada se cierra solo: el sesgo seguro.
+      ...(opciones.facturacion === undefined ? [] : [verificadorDeFacturacion(opciones.facturacion)]),
+      ...VERIFICADORES_PENDIENTES,
+    ],
   };
   return base;
 }

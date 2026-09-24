@@ -21,7 +21,7 @@ import {
   HandoffInvalidoError, metadataSegura, prioridadDe, proveedorDeCanal, tareaPrincipal, urlDeProveedorValida,
   type Handoff, type ResultadoVerificacion, type VerificadorHandoff,
 } from '../src/handoff/handoff-tipos';
-import { verificadoresDeGoogle, VERIFICADORES_PENDIENTES } from '../src/handoff/handoff-verificadores';
+import { verificadorDeFacturacion, verificadoresDeGoogle, VERIFICADORES_PENDIENTES } from '../src/handoff/handoff-verificadores';
 import type { EstadoGoogleParaHandoff } from '../src/handoff/handoff-google';
 
 const pool = makeTestPool();
@@ -562,12 +562,28 @@ describe('los verificadores de Google miran el mundo, no la palabra de nadie', (
   });
 
   it('lo que todavía no sabemos comprobar no se cierra: adaptador pendiente explícito', async () => {
-    for (const tipo of ['PAYMENT_SETUP_REQUIRED', 'TERMS_ACCEPTANCE_REQUIRED', 'IDENTITY_VERIFICATION_REQUIRED', 'LOGIN_REQUIRED', 'TWO_FACTOR_REQUIRED'] as const) {
+    // `PAYMENT_SETUP_REQUIRED` salió de esta lista en la Fase I.6: ya tiene verificador real. Lo que sigue
+    // aquí es lo que de verdad no sabemos observar todavía, y se dice en voz alta en vez de esconderse.
+    for (const tipo of ['TERMS_ACCEPTANCE_REQUIRED', 'IDENTITY_VERIFICATION_REQUIRED', 'LOGIN_REQUIRED', 'TWO_FACTOR_REQUIRED'] as const) {
       const h = { organizationId: ORG_A, canal: 'GOOGLE_ADS', tipo } as Handoff;
       const v = VERIFICADORES_PENDIENTES.find((x) => x.soporta(h));
       expect(v, `${tipo} debe tener un adaptador, aunque sea pendiente`).toBeDefined();
       expect((await v!.verificar(h)).resultado).toBe('RETRY_LATER');
     }
+  });
+});
+
+describe('la forma de pago sí tiene verificador real (Fase I.6)', () => {
+  it('existe, y sin evidencia de facturación no cierra nada', async () => {
+    const h = { organizationId: ORG_A, canal: 'GOOGLE_ADS', tipo: 'PAYMENT_SETUP_REQUIRED' } as Handoff;
+    expect(VERIFICADORES_PENDIENTES.some((x) => x.soporta(h)), 'ya no es un hueco pendiente').toBe(false);
+
+    const sinSaber = verificadorDeFacturacion(async () => null);
+    expect((await sinSaber.verificar(h)).resultado).toBe('RETRY_LATER');
+    const roto = verificadorDeFacturacion(async () => { throw new Error('429'); });
+    expect((await roto.verificar(h)).resultado).toBe('RETRY_LATER');
+    const lista = verificadorDeFacturacion(async () => 'READY');
+    expect((await lista.verificar(h)).resultado).toBe('COMPLETED');
   });
 });
 

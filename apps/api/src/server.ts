@@ -16,6 +16,7 @@ import { ExternalHandoffScheduler, organizacionesConCanalIniciado } from './hand
 import { HandoffService } from './handoff/handoff-service';
 import { OnboardingService } from './onboarding/onboarding-service';
 import { depsDeHandoff, estadoGoogleParaHandoff } from './handoff/composicion';
+import { lectorFacturacionGoogle } from './facturacion/composicion';
 import { GoogleAdsScheduler } from './ingesta/google-ads-scheduler';
 import { StopMonitorService, iniciarStopMonitor } from './campana/stop-monitor';
 import { crearDepsStopMonitor, construirLectorMetricasCampania } from './campana/stop-monitor-composition';
@@ -253,6 +254,8 @@ async function main(): Promise<void> {
       estadoGoogleParaHandoff(org, compGoogleAds);
     const servicioHandoff = new HandoffService(pool, depsDeHandoff(pool, {
       estadoGoogle,
+      // Mismo lector de facturación que usan las rutas: una sola verdad sobre si la cuenta puede pagar.
+      facturacion: lectorFacturacionGoogle(pool, { env: process.env, composicionGoogleAds: compGoogleAds }),
       recalcularPreparacion: async (org) => new OnboardingService(pool, { leerModo: async () => 'PILOT' }).readiness(org),
       log: (i) => console.log(JSON.stringify({ handoff: i })),
     }));

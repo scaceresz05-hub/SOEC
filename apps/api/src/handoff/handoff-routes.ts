@@ -22,6 +22,7 @@ import { OnboardingService } from '../onboarding/onboarding-service';
 import { HandoffInvalidoError } from './handoff-tipos';
 import { HandoffService, type DepsHandoff } from './handoff-service';
 import { depsDeHandoff } from './composicion';
+import type { EstadoFacturacion } from '../facturacion/facturacion-tipos';
 
 export interface OpcionesHandoffRoutes extends DepsHandoff {
   /**
@@ -29,6 +30,8 @@ export interface OpcionesHandoffRoutes extends DepsHandoff {
    * Se inyecta porque vive en el módulo de adquisición; `null` ⇒ el despliegue no tiene Google configurado.
    */
   readonly estadoGoogle?: (org: string) => Promise<{ readonly estadoProveedor: string | null; readonly cuentasAccesibles: number | null } | null>;
+  /** Estado de facturación del canal (Fase I.6). Ausente ⇒ nunca se pide configurar una forma de pago. */
+  readonly facturacion?: (org: string) => Promise<EstadoFacturacion | null>;
 }
 
 export function registerHandoffRoutes(app: FastifyInstance, pool: Pool, opciones: OpcionesHandoffRoutes = {}): void {
