@@ -11,6 +11,7 @@ import { GoogleAdsMutateHttpClient } from '../campana/google-ads-mutate-http';
 import { obtenerAccessTokenDeOrg } from '../acquisition/google-ads-oauth-flow';
 import type { ComponentesFlujoGoogleAds } from '../acquisition/google-ads-oauth-flow';
 import { conCache, VerificacionGoogleAds, type RespuestaVerificacion } from './verificacion-google';
+import { RepositorioConfirmacionDeVerificacion, RepositorioObservabilidadVerificacion } from './verificacion-pg';
 import type { EstadoProgramaGoogle, EstadoVerificacionAnunciante, PuertoVerificacionAnunciante } from './verificacion-tipos';
 
 export interface OpcionesVerificacionGoogle {
@@ -72,11 +73,20 @@ export function puertoVerificacionGoogle(pool: Pool, o: OpcionesVerificacionGoog
     }
   };
 
+  const observabilidad = new RepositorioObservabilidadVerificacion(pool);
+  const confirmaciones = new RepositorioConfirmacionDeVerificacion(pool);
+
   const base: PuertoVerificacionAnunciante = {
     nombre: 'google-ads',
     inspeccionar: async (org: string) => new VerificacionGoogleAds({
       cuenta: async () => (await cuentaYManager(pool, org))?.cuenta ?? null,
       consultar: consultarPara(org),
+      // Lo que Google ya dijo sobre ESTA cuenta se recuerda: no se le vuelve a preguntar cada tick.
+      observabilidadConocida: (o2, customerId) => observabilidad.de(o2, customerId),
+      recordarNoObservable: async (o2, customerId, detalle) => {
+        await observabilidad.registrar(pool, o2, customerId, 'SELF_SERVICE_VERIFICATION_UNOBSERVABLE', detalle);
+      },
+      confirmadaPorLaPersona: async (o2, customerId) => (await confirmaciones.vigente(o2, customerId)) !== null,
       ...(o.log ? { log: o.log } : {}),
     }).inspeccionar(org),
   };

@@ -11,7 +11,7 @@
  * «Ya lo hice» pregunta al proveedor; si el mundo no cambió, la tarea sigue ahí, y eso es lo correcto.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { confirmarPago, leerTarea, marcarAbierta, revisarTareas, type VistaTareas } from '../lib/handoff-client';
+import { confirmar as confirmarAtestacion, leerTarea, marcarAbierta, revisarTareas, type VistaTareas } from '../lib/handoff-client';
 
 /** Cada cuánto se vuelve a preguntar por la tarea. 25 s: se nota inmediato sin ser un martilleo. */
 const MS_ENTRE_LECTURAS = 25_000;
@@ -97,7 +97,7 @@ export function TareaPendiente({ org, alActuarDentro, alCambiarTarea }: {
     setOcupado('confirmar');
     setError(null);
     try {
-      await confirmarPago(org);
+      await confirmarAtestacion(org, tarea.confirmacion?.recurso ?? 'FACTURACION');
       await cargar();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'no se pudo confirmar');

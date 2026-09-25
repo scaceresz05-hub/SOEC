@@ -159,7 +159,8 @@ import { registerAceptacionRoutes } from './aceptacion/aceptacion-routes';
 import { registerHandoffRoutes } from './handoff/handoff-routes';
 import { lectorFacturacionGoogle } from './facturacion/composicion';
 import { registerFacturacionRoutes } from './facturacion/facturacion-routes';
-import { lectorVerificacionGoogle, puertoVerificacionGoogle } from './verificacion/composicion';
+import { lectorVerificacionGoogle } from './verificacion/composicion';
+import { registerVerificacionRoutes } from './verificacion/verificacion-routes';
 import { estadoGoogleParaHandoff } from './handoff/composicion';
 import type { GoogleAdsMutateHttpClient } from './campana/google-ads-mutate-http';
 import type { DepsInvestigacion } from './investigacion/investigacion-service';
@@ -522,11 +523,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // HANDOFF EXTERNO (Autonomy Fase I.3): «SOEC llegó hasta aquí; ahora Google necesita que hagas una
       // cosa». Una tarea persistente por causa, y UNA sola a la vez en pantalla.
       // FACTURACIÓN (Fase I.6.1): estado del pago y la confirmación humana cuando Google no deja comprobarlo.
-      registerFacturacionRoutes(target, pool, {
+      registerFacturacionRoutes(target, pool, { composicionGoogleAds, env: process.env });
+      // VERIFICACIÓN DEL ANUNCIANTE (Fase I.7): estado, diagnóstico y la confirmación humana cuando Google
+      // no permite comprobarlo en cuentas de autoservicio.
+      registerVerificacionRoutes(target, pool, {
         composicionGoogleAds, env: process.env,
-        verificacion: puertoVerificacionGoogle(pool, {
-          env: process.env, composicionGoogleAds, log: (i) => console.log(JSON.stringify({ verificacionAnunciante: i })),
-        }),
+        log: (i) => console.log(JSON.stringify({ verificacionAnunciante: i })),
       });
       registerHandoffRoutes(target, pool, {
         estadoGoogle: (org) => estadoGoogleParaHandoff(org, composicionGoogleAds),

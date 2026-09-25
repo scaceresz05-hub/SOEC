@@ -34,7 +34,20 @@ export type RespuestaVerificacion =
  * publica y se registra del error: el cuerpo crudo de Google no sale de aquí, porque puede traer datos de la
  * cuenta que nadie necesita en un log.
  */
+/**
+ * El código que Google devuelve cuando la consulta no existe para el régimen de pago de la cuenta. Es la
+ * respuesta que recibimos de una cuenta de autoservicio real, y la razón de todo este fallback.
+ */
+export const CODIGO_NO_OBSERVABLE = 'BILLING_NOT_ON_MONTHLY_INVOICING';
+
+/** ¿Este fallo significa «aquí no se puede consultar, y no va a cambiar»? */
+export function esNoObservable(errorCode: string | null | undefined): boolean {
+  return typeof errorCode === 'string' && errorCode.includes(CODIGO_NO_OBSERVABLE);
+}
+
 export function diagnosticoDeFallo(httpStatus: number | null | undefined, errorCode: string | null | undefined): DiagnosticoVerificacion {
+  // Primero lo estable: no es un permiso denegado ni un límite de cuota, es un régimen distinto.
+  if (esNoObservable(errorCode)) return 'SELF_SERVICE_VERIFICATION_UNOBSERVABLE';
   if (httpStatus === 401 || httpStatus === 403) return 'PERMISSION_DENIED';
   if (httpStatus === 429) return 'RATE_LIMITED';
   if (typeof errorCode === 'string' && /PERMISSION|NOT_ADS_USER|CUSTOMER_NOT_ENABLED/i.test(errorCode)) return 'PERMISSION_DENIED';
@@ -47,6 +60,15 @@ export interface DepsVerificacionGoogle {
   readonly cuenta: (org: string) => Promise<string | null>;
   /** Ausente ⇒ este despliegue no consulta la verificación: entonces no se afirma nada (`RETRY_LATER`). */
   readonly consultar?: ConsultaVerificacion;
+  /**
+   * ¿Ya sabemos que en esta cuenta no se puede consultar? Si sí, NO se vuelve a llamar al proveedor: es una
+   * propiedad del régimen de facturación, no un fallo que se cure esperando, y esa llamada tiene cuota
+   * estricta. Se vuelve a preguntar solo cuando cambia la cuenta.
+   */
+  readonly observabilidadConocida?: (org: string, customerId: string) => Promise<'OBSERVABLE' | 'SELF_SERVICE_VERIFICATION_UNOBSERVABLE' | null>;
+  readonly recordarNoObservable?: (org: string, customerId: string, detalle: string) => Promise<void>;
+  /** ¿Confirmó una persona que completó lo que Google le pidió PARA ESTA CUENTA? */
+  readonly confirmadaPorLaPersona?: (org: string, customerId: string) => Promise<boolean>;
   readonly log?: (info: Record<string, unknown>) => void;
 }
 
@@ -73,6 +95,19 @@ export class VerificacionGoogleAds implements PuertoVerificacionAnunciante {
       return evaluarVerificacion({ programas: null, fallo: { diagnostico: 'NOT_QUERIED' } });
     }
 
+    const confirmada = this.deps.confirmadaPorLaPersona === undefined
+      ? false
+      : await this.deps.confirmadaPorLaPersona(org, cuenta).catch(() => false);
+
+    // ¿Ya sabíamos que aquí no se puede preguntar? Entonces no se pregunta. Una puerta cerrada no se vuelve
+    // a empujar cada cinco minutos, y menos cuando el proveedor limita especialmente esa llamada.
+    if (this.deps.observabilidadConocida !== undefined) {
+      const conocida = await this.deps.observabilidadConocida(org, cuenta).catch(() => null);
+      if (conocida === 'SELF_SERVICE_VERIFICATION_UNOBSERVABLE') {
+        return evaluarVerificacion({ programas: null, noObservableEnEstaCuenta: true, confirmadaPorLaPersona: confirmada });
+      }
+    }
+
     let r: RespuestaVerificacion;
     try {
       r = await this.deps.consultar(cuenta);
@@ -85,6 +120,10 @@ export class VerificacionGoogleAds implements PuertoVerificacionAnunciante {
         verificacion: 'consulta-fallida', org, cuenta, operacion: 'GetIdentityVerification',
         httpStatus, errorCode, diagnostico, duracionMs: Date.now() - t0,
       });
+      if (diagnostico === 'SELF_SERVICE_VERIFICATION_UNOBSERVABLE') {
+        await this.deps.recordarNoObservable?.(org, cuenta, `${httpStatus ?? ''} ${errorCode ?? ''}`.trim()).catch(() => undefined);
+        return evaluarVerificacion({ programas: null, noObservableEnEstaCuenta: true, confirmadaPorLaPersona: confirmada });
+      }
       return evaluarVerificacion({ programas: null, fallo: { diagnostico, httpProveedor: httpStatus } });
     }
 
@@ -95,6 +134,12 @@ export class VerificacionGoogleAds implements PuertoVerificacionAnunciante {
         motivo: r.motivo, httpStatus: r.httpStatus ?? null, errorCode: r.errorCode ?? null, diagnostico,
         duracionMs: Date.now() - t0,
       });
+
+      // NO OBSERVABLE: se anota para no volver a preguntarlo, y el paso pasa a depender de una persona.
+      if (diagnostico === 'SELF_SERVICE_VERIFICATION_UNOBSERVABLE') {
+        await this.deps.recordarNoObservable?.(org, cuenta, `${r.httpStatus ?? ''} ${r.errorCode ?? ''}`.trim()).catch(() => undefined);
+        return evaluarVerificacion({ programas: null, noObservableEnEstaCuenta: true, confirmadaPorLaPersona: confirmada });
+      }
       return evaluarVerificacion({ programas: null, fallo: { diagnostico, httpProveedor: r.httpStatus ?? null } });
     }
 

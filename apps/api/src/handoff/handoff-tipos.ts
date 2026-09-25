@@ -107,6 +107,12 @@ export interface Handoff {
   readonly canceladoEn: string | null;
 }
 
+/**
+ * A qué confirmación pertenece una atestación. No se muestra: le dice a la pantalla a dónde enviar el «lo
+ * confirmo», para que no tenga que adivinarlo por el texto del botón.
+ */
+export type RecursoDeConfirmacion = 'FACTURACION' | 'VERIFICACION';
+
 export class HandoffInvalidoError extends Error {}
 
 /**
@@ -191,7 +197,7 @@ export interface TareaVisible {
    * Etiqueta de la ATESTACIÓN, cuando cerrar este paso depende de que la persona confirme algo que el
    * proveedor no nos deja comprobar. `null` en todo lo demás: lo normal es que compruebe el sistema.
    */
-  readonly confirmacion: { readonly etiqueta: string } | null;
+  readonly confirmacion: { readonly etiqueta: string; readonly recurso: RecursoDeConfirmacion } | null;
 }
 
 /**
@@ -199,10 +205,14 @@ export interface TareaVisible {
  * verificar por API. Se deriva del tipo y la causa —no se guarda como texto duplicado— para que no puedan
  * discrepar la tarea y su forma de cerrarse.
  */
-function etiquetaDeConfirmacion(h: Handoff): { readonly etiqueta: string } | null {
-  return h.tipo === 'PAYMENT_SETUP_REQUIRED' && h.causa === 'pago-no-verificable'
-    ? { etiqueta: 'Confirmo que el pago está configurado' }
-    : null;
+function etiquetaDeConfirmacion(h: Handoff): { readonly etiqueta: string; readonly recurso: RecursoDeConfirmacion } | null {
+  if (h.tipo === 'PAYMENT_SETUP_REQUIRED' && h.causa === 'pago-no-verificable') {
+    return { etiqueta: 'Confirmo que el pago está configurado', recurso: 'FACTURACION' };
+  }
+  if (h.tipo === 'IDENTITY_VERIFICATION_REQUIRED' && h.causa === 'verificacion-no-observable') {
+    return { etiqueta: 'Confirmo que completé la verificación', recurso: 'VERIFICACION' };
+  }
+  return null;
 }
 
 export function aTareaVisible(h: Handoff): TareaVisible {

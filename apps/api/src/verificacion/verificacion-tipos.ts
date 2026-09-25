@@ -11,15 +11,24 @@
  * o la naturaleza política de un anuncio son actos con consecuencias jurídicas para quien los firma. Un
  * sistema que los automatice está falsificando una firma, por muy cómodo que resulte.
  *
- * Lo que sí se puede es MIRAR: la API expone `GetIdentityVerification`, de sólo lectura, con el estado del
- * programa. Se usa eso y nada más — y cuando no responde, no se concluye.
+ * Lo que sí se puede es MIRAR… cuando Google deja. Y resulta que en las cuentas de autoservicio no deja:
+ * `GetIdentityVerification` responde `BILLING_NOT_ON_MONTHLY_INVOICING`, es decir, esa consulta está detrás
+ * del mismo muro que la facturación por API. No es un fallo pasajero ni una negativa de permisos: es una
+ * propiedad estable del régimen de pago de la cuenta, y hay que tratarla como tal —clasificarla, recordarla
+ * y dejar de preguntar— en vez de reintentar cada cinco minutos contra una puerta cerrada.
+ *
+ * Cuando no se puede mirar, queda la única salida honesta: pedirle a la persona que lo haga y que nos lo
+ * confirme. Su confirmación dice «completé lo que Google me pidió», y en ningún sitio se traduce a «Google
+ * aprobó la empresa», porque eso no lo sabemos.
  */
 
 export type EstadoVerificacionAnunciante =
-  | 'ADVERTISER_VERIFICATION_READY'    // no hace falta nada, o ya está verificado
-  | 'ADVERTISER_VERIFICATION_REQUIRED' // hay que completarla, y sólo puede hacerlo una persona
+  | 'ADVERTISER_VERIFICATION_READY'    // Google dice que está completa
+  | 'ADVERTISER_VERIFICATION_REQUIRED' // Google dice que falta, y sólo puede hacerlo una persona
   | 'PENDING_PROVIDER'                 // la persona ya la envió y Google la está revisando
-  | 'RETRY_LATER'                      // no se pudo consultar
+  | 'SELF_SERVICE_VERIFICATION_UNOBSERVABLE' // Google NO deja consultarlo en esta cuenta: hace falta una persona
+  | 'CONFIRMED_BY_USER'                // la persona confirmó que la completó. NO es «Google la aprobó»
+  | 'RETRY_LATER'                      // no se pudo consultar por algo que puede pasarse
   | 'UNKNOWN';                         // se consultó y no alcanza para concluir
 
 /** Estados del programa tal como los nombra Google. Vocabulario del proveedor: no sale a ninguna pantalla. */
@@ -41,6 +50,10 @@ export type DiagnosticoVerificacion =
   | 'PROGRAM_FAILED'
   | 'NO_ACCOUNT_SELECTED'
   | 'NOT_QUERIED'
+  /** Google rechaza la consulta por el régimen de facturación de la cuenta. Estable: no se reintenta. */
+  | 'SELF_SERVICE_VERIFICATION_UNOBSERVABLE'
+  /** La persona confirmó que completó lo que Google le pidió. */
+  | 'CONFIRMED_BY_USER'
   | 'UNKNOWN_PROVIDER_RESPONSE';
 
 export interface LecturaVerificacion {
@@ -61,6 +74,10 @@ export interface SenalesVerificacion {
   readonly programas: readonly { readonly estado: EstadoProgramaGoogle; readonly fechaLimite?: string | null }[] | null;
   /** Por qué no hubo programas, cuando fue por un fallo y no por una respuesta vacía. */
   readonly fallo?: { readonly diagnostico: DiagnosticoVerificacion; readonly httpProveedor?: number | null };
+  /** `true` cuando Google no permite consultar la verificación en esta cuenta (régimen de facturación). */
+  readonly noObservableEnEstaCuenta?: boolean;
+  /** `true` cuando una persona confirmó que completó lo que Google le pidió PARA ESTA CUENTA. */
+  readonly confirmadaPorLaPersona?: boolean;
 }
 
 /**
@@ -70,6 +87,25 @@ export interface SenalesVerificacion {
  * y distinta de no haber podido preguntar. La diferencia decide entre seguir el recorrido y quedarse quieto.
  */
 export function evaluarVerificacion(s: SenalesVerificacion): LecturaVerificacion {
+  /**
+   * NO OBSERVABLE EN ESTA CUENTA. Manda sobre todo lo demás: si Google no deja preguntar, ningún otro dato
+   * de esta lectura viene de Google. Lo único que puede cerrar el paso es que la persona lo confirme, y eso
+   * se dice con su nombre —`CONFIRMED_BY_USER`— para que nadie lo lea nunca como una aprobación del proveedor.
+   */
+  if (s.noObservableEnEstaCuenta === true) {
+    if (s.confirmadaPorLaPersona === true) {
+      return {
+        estado: 'CONFIRMED_BY_USER', fechaLimite: null, diagnostico: 'CONFIRMED_BY_USER', programas: null, httpProveedor: null,
+        explicacion: 'Nos confirmaste que completaste la verificación que Google te pidió para esta cuenta.',
+      };
+    }
+    return {
+      estado: 'SELF_SERVICE_VERIFICATION_UNOBSERVABLE', fechaLimite: null,
+      diagnostico: 'SELF_SERVICE_VERIFICATION_UNOBSERVABLE', programas: null, httpProveedor: null,
+      explicacion: 'En este tipo de cuenta Google no permite que SOEC compruebe el estado de la verificación.',
+    };
+  }
+
   if (s.programas === null) {
     return {
       estado: 'RETRY_LATER', fechaLimite: null,
@@ -114,6 +150,14 @@ export function evaluarVerificacion(s: SenalesVerificacion): LecturaVerificacion
     estado: 'UNKNOWN', fechaLimite: limite, ...comun,
     explicacion: 'No pudimos interpretar el estado de tu verificación con Google.', diagnostico: 'UNKNOWN_PROVIDER_RESPONSE',
   };
+}
+
+/**
+ * ¿Sigue bloqueando la identidad el recorrido? Se pregunta así —y no con una lista de estados repartida por
+ * el código— para que añadir un estado nuevo obligue a decidir aquí de qué lado cae.
+ */
+export function identidadBloquea(estado: EstadoVerificacionAnunciante): boolean {
+  return estado === 'ADVERTISER_VERIFICATION_REQUIRED' || estado === 'SELF_SERVICE_VERIFICATION_UNOBSERVABLE';
 }
 
 /** Puerto de SÓLO LECTURA. No existe un verbo para «verificar»: eso lo hace una persona, en Google. */

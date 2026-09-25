@@ -48,6 +48,7 @@ import { optimizacionMigrations } from './optimizacion/optimizacion-pg';
 import { handoffMigrations } from './handoff/handoff-pg';
 import { provisionamientoMigrations } from './provisionamiento/provisionamiento-pg';
 import { facturacionMigrations } from './facturacion/facturacion-pg';
+import { verificacionMigrations } from './verificacion/verificacion-pg';
 import { migrarPoliticasDelRegistro } from './politica/migracion-politica';
 import { PoliticaService } from './politica/politica-service';
 import { estadoKillSwitch, crearEvaluadorPausaSeguridad } from './gobierno';
@@ -157,6 +158,7 @@ async function main(): Promise<void> {
   await runMigrations(pool, handoffMigrations); // Autonomy Fase I: tareas externas persistentes (handoff humano)
   await runMigrations(pool, provisionamientoMigrations); // Autonomy Fase I.5: solicitudes de alta de cuenta publicitaria
   await runMigrations(pool, facturacionMigrations); // Autonomy Fase I.6.1: confirmación humana del pago (sin datos financieros)
+  await runMigrations(pool, verificacionMigrations); // Autonomy Fase I.7: observabilidad y confirmación de la verificación
   // No hay migración de datos: el asistente se apoya en lo que ya está persistido y precarga lo que SOEC
   // sabe. Una empresa histórica lo abre y encuentra sus respuestas puestas, no un formulario vacío.
   // PRIMER SNAPSHOT: desde aquí el runtime resuelve `organización → negocio / perfil / fuentes` contra la

@@ -23,6 +23,8 @@ import { conexionMigrations, RepositorioConexiones } from '../src/conexion/conex
 import { accionMigrations, PgMandatoRepo } from '../src/accion/accion-pg';
 import { handoffMigrations, RepositorioHandoff } from '../src/handoff/handoff-pg';
 import { facturacionMigrations } from '../src/facturacion/facturacion-pg';
+import { verificacionMigrations } from '../src/verificacion/verificacion-pg';
+import { VerificacionService } from '../src/verificacion/verificacion-service';
 import { HandoffService } from '../src/handoff/handoff-service';
 import { depsDeHandoff, estadoGoogleParaHandoff } from '../src/handoff/composicion';
 import { correrTickDeHandoffs } from '../src/handoff/handoff-scheduler';
@@ -46,6 +48,10 @@ const mundo = {
   estadoCuenta: 'ENABLED',
   /** Cuando no es null, la llamada de identidad responde ese estado HTTP en vez de programas. */
   identidadHttp: null as number | null,
+  /** Código de error de Google para la llamada de identidad. */
+  identidadErrorCode: 'PERMISSION_DENIED',
+  /** Cuántas veces se llamó de verdad al proveedor de identidad. */
+  llamadasIdentidad: 0,
   llamadas: [] as string[],
 };
 
@@ -56,8 +62,14 @@ const fetchFalso: typeof fetch = (async (url: unknown, init?: { body?: string })
   mundo.llamadas.push(u.includes('searchStream') ? `GAQL:${cuerpo.includes('billing_setup') ? 'billing' : 'customer'}` : 'identidad');
 
   if (u.includes('getIdentityVerification')) {
+    mundo.llamadasIdentidad += 1;
     if (mundo.identidadHttp !== null) {
-      return new Response(JSON.stringify({ error: { code: mundo.identidadHttp, status: 'PERMISSION_DENIED' } }), { status: mundo.identidadHttp, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({
+        error: {
+          code: mundo.identidadHttp, status: 'INVALID_ARGUMENT',
+          details: [{ errors: [{ errorCode: { identityVerificationError: mundo.identidadErrorCode }, message: 'no disponible' }] }],
+        },
+      }), { status: mundo.identidadHttp, headers: { 'content-type': 'application/json' } });
     }
     return new Response(JSON.stringify({ identityVerification: mundo.programas }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
@@ -138,12 +150,15 @@ beforeEach(async () => {
   await runMigrations(pool, accionMigrations);
   await runMigrations(pool, handoffMigrations);
   await runMigrations(pool, facturacionMigrations);
-  await ejecutarDestructivoDePrueba(pool, 'truncate payment_attestation, external_handoff, accion_ledger, accion_mandato, business_connection_ciphertext, business_capability, business_connection, business_audit, business_restriction, business_geo_scope, business_offering, business_objective, business_governance, business_profile cascade');
+  await runMigrations(pool, verificacionMigrations);
+  await ejecutarDestructivoDePrueba(pool, 'truncate verification_attestation, verification_observability, payment_attestation, external_handoff, accion_ledger, accion_mandato, business_connection_ciphertext, business_capability, business_connection, business_audit, business_restriction, business_geo_scope, business_offering, business_objective, business_governance, business_profile cascade');
   await altaDeNegocioYCuenta();
   mundo.configuracionAprobada = true;
   mundo.programas = [];
   mundo.estadoCuenta = 'ENABLED';
   mundo.identidadHttp = null;
+  mundo.identidadErrorCode = 'PERMISSION_DENIED';
+  mundo.llamadasIdentidad = 0;
   mundo.llamadas = [];
 });
 afterAll(async () => { await pool.end(); });
@@ -276,6 +291,108 @@ describe('una observación fallida no es un avance', () => {
     for (const prohibido of ['token', 'bearer', 'authorization', 'developer', 'secret', 'password', 'refresh']) {
       expect(texto, `«${prohibido}» no puede aparecer en un log`).not.toContain(prohibido);
     }
+  });
+});
+
+describe('Fase I.7 · cuando Google no deja mirar, lo confirma una persona', () => {
+  const puerto = () => puertoVerificacionGoogle(pool, { env: ENV, composicionGoogleAds: composicionGoogle(), fetchFn: fetchFalso, ttlMs: 0 });
+  const servicioVerificacion = () => new VerificacionService(pool, {
+    puerto: puerto(), cuentaElegida: (org) => cuentaElegidaDe(pool, org),
+  });
+
+  /** La respuesta REAL de Google para una cuenta autoservicio, tal como la devolvió la de CP. */
+  const comoCP = (): void => { mundo.identidadHttp = 400; mundo.identidadErrorCode = 'BILLING_NOT_ON_MONTHLY_INVOICING'; };
+
+  it('BILLING_NOT_ON_MONTHLY_INVOICING se clasifica como «no observable», no como error pasajero', async () => {
+    comoCP();
+    const v = await puerto().inspeccionar(ORG);
+    expect(v.estado).toBe('SELF_SERVICE_VERIFICATION_UNOBSERVABLE');
+    expect(v.diagnostico).toBe('SELF_SERVICE_VERIFICATION_UNOBSERVABLE');
+    expect(v.estado).not.toBe('RETRY_LATER');
+    expect(v.estado).not.toBe('ADVERTISER_VERIFICATION_READY');
+  });
+
+  it('y NO se vuelve a preguntar al proveedor en los ticks siguientes', async () => {
+    comoCP();
+    await puerto().inspeccionar(ORG);
+    expect(mundo.llamadasIdentidad).toBe(1);
+
+    for (let i = 0; i < 4; i += 1) await puerto().inspeccionar(ORG);
+    expect(mundo.llamadasIdentidad, 'una puerta cerrada no se empuja cada cinco minutos').toBe(1);
+  });
+
+  it('un 429 sigue siendo temporal: no se confunde con el régimen de la cuenta', async () => {
+    mundo.identidadHttp = 429;
+    mundo.identidadErrorCode = 'QUOTA_ERROR';
+    expect((await puerto().inspeccionar(ORG)).estado).toBe('RETRY_LATER');
+    expect((await puerto().inspeccionar(ORG)).diagnostico).toBe('RATE_LIMITED');
+    // No se recuerda como «no observable»: mañana puede responder, así que se vuelve a preguntar.
+    expect(mundo.llamadasIdentidad).toBe(2);
+  });
+
+  it('el recorrido de CP: identidad primero, pago después, y nada al final', async () => {
+    comoCP();
+    await correrTickDeHandoffs({ reanudador: servicioComoEnProduccion(), elegibles });
+    expect(await abiertas()).toEqual(['IDENTITY_VERIFICATION_REQUIRED']);
+
+    const v = await servicioComoEnProduccion().vista(ORG);
+    expect(v.tarea?.titulo).toBe('Verifica tu empresa en Google');
+    expect(v.tarea?.confirmacion).toEqual({ etiqueta: 'Confirmo que completé la verificación', recurso: 'VERIFICACION' });
+    expect(v.tarea?.motivo).not.toMatch(/Google aprobó/i);
+    expect(v.pendientes).toBe(0); // el pago todavía NO está abierto: una cosa a la vez
+
+    await servicioVerificacion().confirmar(ORG, 'persona-qa');
+    await correrTickDeHandoffs({ reanudador: servicioComoEnProduccion(), elegibles });
+    expect(await abiertas()).toEqual(['PAYMENT_SETUP_REQUIRED']);
+
+    await new FacturacionService(pool, {
+      puerto: puertoFacturacionGoogle(pool, { env: ENV, composicionGoogleAds: composicionGoogle(), fetchFn: fetchFalso }),
+      cuentaElegida: (org) => cuentaElegidaDe(pool, org),
+    }).confirmar(ORG, 'persona-qa');
+    await correrTickDeHandoffs({ reanudador: servicioComoEnProduccion(), elegibles });
+    expect(await abiertas()).toEqual([]);
+  });
+
+  it('cambiar de cuenta deja sin efecto la confirmación anterior', async () => {
+    comoCP();
+    await servicioVerificacion().confirmar(ORG, 'persona-qa');
+    expect((await puerto().inspeccionar(ORG)).estado).toBe('CONFIRMED_BY_USER');
+
+    await pool.query("update business_connection set configuracion = jsonb_set(configuracion, '{customerId}', to_jsonb('9999999999'::text)) where organization_id = $1", [ORG]);
+    expect((await puerto().inspeccionar(ORG)).estado).toBe('SELF_SERVICE_VERIFICATION_UNOBSERVABLE');
+  });
+
+  it('confirmar no registra que Google aprobó nada, y no guarda documentos', async () => {
+    comoCP();
+    await servicioVerificacion().confirmar(ORG, 'persona-qa');
+    const filas = await pool.query('select * from verification_attestation where organization_id = $1', [ORG]);
+    expect(Object.keys(filas.rows[0] as Record<string, unknown>).sort())
+      .toEqual(['actor', 'confirmado_por_persona_en', 'customer_id', 'id', 'organization_id', 'proveedor']);
+    const audit = await pool.query('select action, changed_fields from business_audit where organization_id = $1', [ORG]);
+    expect(audit.rows.map((r: { action: string }) => r.action)).toContain('ADVERTISER_VERIFICATION_CONFIRMED_BY_HUMAN');
+    const texto = `${JSON.stringify(filas.rows)} ${JSON.stringify(audit.rows)}`.toLowerCase();
+    for (const prohibido of ['verified', 'approved', 'rut', 'documento', 'provider_verified']) {
+      expect(texto, `«${prohibido}» no puede aparecer`).not.toContain(prohibido);
+    }
+  });
+
+  it('confirmar no concede ningún permiso', async () => {
+    comoCP();
+    await servicioVerificacion().confirmar(ORG, 'persona-qa');
+    const caps = (await new RepositorioConexiones(pool).capacidades(ORG)).filter((c) => c.habilitada).map((c) => c.capacidad);
+    expect(caps).not.toContain('ESCRITURA_ADS');
+    expect(caps).not.toContain('AUTONOMIA_ADS');
+    expect(await new PgMandatoRepo(pool).actual(ORG)).toBeNull();
+    const g = await new RepositorioNegocios(pool).gobierno(ORG);
+    expect(g?.autonomousSpend ?? false).toBe(false);
+    expect(g?.campaignExecution ?? false).toBe(false);
+  });
+
+  it('si Google SÍ responde (facturación mensual), no se pide ninguna confirmación', async () => {
+    mundo.programas = [{ verificationProgress: { programStatus: 'SUCCESS' } }];
+    expect((await puerto().inspeccionar(ORG)).estado).toBe('ADVERTISER_VERIFICATION_READY');
+    await correrTickDeHandoffs({ reanudador: servicioComoEnProduccion(), elegibles });
+    expect(await abiertas()).toEqual(['PAYMENT_SETUP_REQUIRED']);
   });
 });
 

@@ -12,7 +12,7 @@
 import type { CanalHandoff, TipoHandoff } from './handoff-tipos';
 import type { EstadoCapacidad } from '../provisionamiento/provisionamiento-tipos';
 import { URL_FACTURACION_GOOGLE, type EstadoFacturacion } from '../facturacion/facturacion-tipos';
-import { URL_VERIFICACION_GOOGLE, type EstadoVerificacionAnunciante } from '../verificacion/verificacion-tipos';
+import { identidadBloquea, URL_VERIFICACION_GOOGLE, type EstadoVerificacionAnunciante } from '../verificacion/verificacion-tipos';
 
 /** Lo que este módulo pide abrir. El servicio le pone id, fechas y estado. */
 export interface IntencionHandoff {
@@ -155,15 +155,29 @@ export function decidirHandoffGoogle(e: EstadoGoogleParaHandoff): DecisionGoogle
      * sirve con normalidad, así que pedir la tarjeta primero sería pedir algo que todavía no desbloquea
      * nada. Una cosa a la vez significa también ponerlas en el orden en que el mundo las exige.
      */
-    if (e.verificacionAnunciante === 'ADVERTISER_VERIFICATION_REQUIRED') {
+    if (e.verificacionAnunciante !== undefined && identidadBloquea(e.verificacionAnunciante)) {
+      /**
+       * Dos causas distintas para la misma tarea, y la diferencia importa en lo que se le dice a la persona:
+       * cuando Google NOS lo dice, sabemos que falta; cuando no nos deja mirar, lo honesto es admitirlo y
+       * pedirle que nos lo confirme. En ningún caso se escribe «Google aprobó tu empresa».
+       */
+      const noObservable = e.verificacionAnunciante === 'SELF_SERVICE_VERIFICATION_UNOBSERVABLE';
       return {
         accion: 'ABRIR',
-        intencion: {
-          canal: 'GOOGLE_ADS', tipo: 'IDENTITY_VERIFICATION_REQUIRED', causa: 'verificacion-de-anunciante',
-          instruccion: 'Verifica tu empresa en Google',
-          motivo: 'Google necesita verificar quién está detrás de los anuncios. Completa la verificación directamente en Google —los documentos son tuyos y los presentas tú— y SOEC continúa después.',
-          etiquetaAccion: 'Continuar con Google', urlProveedor: URL_VERIFICACION_GOOGLE,
-        },
+        intencion: noObservable
+          ? {
+            canal: 'GOOGLE_ADS', tipo: 'IDENTITY_VERIFICATION_REQUIRED', causa: 'verificacion-no-observable',
+            instruccion: 'Verifica tu empresa en Google',
+            motivo: 'Google exige completar la verificación del anunciante en su propia plataforma. En este tipo de cuenta no nos deja comprobar ese estado, así que necesitamos que lo revises allí y nos confirmes que lo completaste.',
+            etiquetaAccion: 'Abrir Google', urlProveedor: URL_VERIFICACION_GOOGLE,
+            confirmacion: { etiqueta: 'Confirmo que completé la verificación' },
+          }
+          : {
+            canal: 'GOOGLE_ADS', tipo: 'IDENTITY_VERIFICATION_REQUIRED', causa: 'verificacion-de-anunciante',
+            instruccion: 'Verifica tu empresa en Google',
+            motivo: 'Google necesita verificar quién está detrás de los anuncios. Completa la verificación directamente en Google —los documentos son tuyos y los presentas tú— y SOEC continúa después.',
+            etiquetaAccion: 'Continuar con Google', urlProveedor: URL_VERIFICACION_GOOGLE,
+          },
       };
     }
 

@@ -22,7 +22,7 @@ export interface TareaPendiente {
    * Cuando el proveedor no deja comprobar algo, lo único que cierra el paso es que la persona lo atestigüe.
    * Es una afirmación, no un formulario: no se le pide ni un dígito de nada.
    */
-  confirmacion?: { etiqueta: string } | null;
+  confirmacion?: { etiqueta: string; recurso?: 'FACTURACION' | 'VERIFICACION' } | null;
 }
 
 export interface VistaTareas {
@@ -56,8 +56,18 @@ export async function marcarAbierta(org: string, id: string): Promise<VistaTarea
  * puesto—. El cuerpo va VACÍO a propósito: la cuenta la resuelve el servidor, y datos financieros no se piden
  * ni se envían. No crea mandato ni autoriza gasto: sólo cierra un paso que no era observable.
  */
-export async function confirmarPago(org: string): Promise<{ confirmadoEn: string; estado: string }> {
-  return j<{ confirmadoEn: string; estado: string }>(await fetch('/api/backend/facturacion/confirmacion', {
+export async function confirmarPago(org: string): Promise<{ estado: string }> {
+  return confirmar(org, 'FACTURACION');
+}
+
+/**
+ * Envía la atestación al recurso que corresponda. El servidor dice cuál en la propia tarea, para que la
+ * pantalla no tenga que deducirlo del texto del botón. El cuerpo va vacío siempre: lo que se confirma es un
+ * hecho, no un formulario.
+ */
+export async function confirmar(org: string, recurso: 'FACTURACION' | 'VERIFICACION' = 'FACTURACION'): Promise<{ estado: string }> {
+  const ruta = recurso === 'VERIFICACION' ? 'verificacion/confirmacion' : 'facturacion/confirmacion';
+  return j<{ estado: string }>(await fetch(`/api/backend/${ruta}`, {
     method: 'POST', headers: { 'content-type': 'application/json', ...cabecerasOrg(org) }, body: '{}',
   }));
 }

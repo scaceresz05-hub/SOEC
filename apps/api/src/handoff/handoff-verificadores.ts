@@ -124,7 +124,10 @@ export function verificadorDeAnunciante(leer: (org: string) => Promise<EstadoVer
       }
       switch (estado) {
         case 'ADVERTISER_VERIFICATION_READY': return { resultado: 'COMPLETED', detalle: 'Google dio la verificación por completa' };
+        // La persona lo confirmó. Se cierra el paso, y el detalle dice QUIÉN lo afirma: no es Google.
+        case 'CONFIRMED_BY_USER': return { resultado: 'COMPLETED', detalle: 'la persona confirmó haber completado la verificación' };
         case 'ADVERTISER_VERIFICATION_REQUIRED': return { resultado: 'STILL_REQUIRED', detalle: 'la verificación sigue pendiente' };
+        case 'SELF_SERVICE_VERIFICATION_UNOBSERVABLE': return { resultado: 'STILL_REQUIRED', detalle: 'Google no permite comprobarlo en esta cuenta y nadie lo ha confirmado' };
         case 'PENDING_PROVIDER': return { resultado: 'STILL_REQUIRED', detalle: 'Google está revisando la verificación' };
         default: return { resultado: 'RETRY_LATER', detalle: 'no hay evidencia suficiente sobre la verificación' };
       }

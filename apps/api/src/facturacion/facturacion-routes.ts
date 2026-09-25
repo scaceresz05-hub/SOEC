@@ -18,11 +18,8 @@ import { contextoDe } from '../superficie-auth';
 import { cuentaElegidaDe, puertoFacturacionGoogle } from './composicion';
 import { FacturacionService, NoHayCuentaQueConfirmarError, type DepsFacturacion } from './facturacion-service';
 import type { ComponentesFlujoGoogleAds } from '../acquisition/google-ads-oauth-flow';
-import type { PuertoVerificacionAnunciante } from '../verificacion/verificacion-tipos';
 
 export interface OpcionesFacturacionRoutes {
-  /** Puerto de verificación del anunciante, para la ruta de lectura. Ausente ⇒ se responde «no se sabe». */
-  readonly verificacion?: PuertoVerificacionAnunciante;
   readonly composicionGoogleAds?: ComponentesFlujoGoogleAds | null;
   readonly env?: Record<string, string | undefined>;
   /** Override completo, sólo para pruebas deterministas. */
@@ -52,24 +49,6 @@ export function registerFacturacionRoutes(app: FastifyInstance, pool: Pool, opci
       requiereConfirmacionHumana: estado.requiereConfirmacionHumana,
       // Se devuelve CUÁNDO se confirmó, nunca nada del medio de pago: no existe en el sistema.
       confirmadoEn: confirmacion?.confirmadoEn ?? null,
-    });
-  });
-
-  /**
-   * ESTADO DE LA VERIFICACIÓN DEL ANUNCIANTE. Existe porque su ausencia dolió: cuando CP no recibía ninguna
-   * tarea no había forma de saber, desde fuera, qué había contestado Google. Se devuelve también el estado
-   * crudo del programa —dato técnico, para quien opera— sin que eso llegue nunca a una pantalla.
-   */
-  app.get('/verificacion', async (req: FastifyRequest, reply) => {
-    const org = String(contextoDe(req).organizationId);
-    if (opciones.verificacion === undefined) {
-      return reply.send({ organizationId: org, estado: 'UNKNOWN', explicacion: 'Este despliegue no consulta la verificación del anunciante.' });
-    }
-    const v = await opciones.verificacion.inspeccionar(org);
-    return reply.send({
-      organizationId: org, estado: v.estado, explicacion: v.explicacion, fechaLimite: v.fechaLimite,
-      // Diagnóstico TÉCNICO y sanitizado, para quien opera: nunca el cuerpo crudo del proveedor.
-      diagnostico: v.diagnostico, programas: v.programas, httpProveedor: v.httpProveedor,
     });
   });
 
