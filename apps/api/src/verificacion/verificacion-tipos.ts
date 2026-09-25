@@ -50,8 +50,17 @@ export function evaluarVerificacion(s: SenalesVerificacion): LecturaVerificacion
       explicacion: 'Todavía no pudimos comprobar si Google te pide verificar tu empresa. Lo reintentamos solos.',
     };
   }
+  /**
+   * LISTA VACÍA ≠ VERIFICADO. La API sólo devuelve los programas que conoce para esa cuenta, y una cuenta
+   * puede estar detenida en la interfaz de Google por una verificación que esta llamada no enumera. Leer el
+   * silencio como un visto bueno sería inventar un `SUCCESS` que nadie dio — justo lo que no se puede hacer
+   * cuando lo que viene después es gastar dinero. Se dice que no se sabe.
+   */
   if (s.programas.length === 0) {
-    return { estado: 'ADVERTISER_VERIFICATION_READY', fechaLimite: null, explicacion: 'Google no te pide ninguna verificación pendiente.' };
+    return {
+      estado: 'UNKNOWN', fechaLimite: null,
+      explicacion: 'Google no nos informa de ninguna verificación pendiente, pero tampoco podemos confirmar que esté todo en regla.',
+    };
   }
 
   const limite = s.programas.map((p) => p.fechaLimite ?? null).find((f) => f !== null) ?? null;

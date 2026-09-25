@@ -224,20 +224,26 @@ describe('el cierre ocurre solo, sin que nadie diga «ya lo hice»', () => {
     expect(despues.rows).toEqual(antes.rows);
   });
 
-  it('cambiar de cuenta vuelve a evaluar la facturación de la nueva', async () => {
-    const cuentas = { actual: '1111111111', porCuenta: { '1111111111': 'READY', '2222222222': 'PAYMENT_SETUP_REQUIRED' } as Record<string, EstadoFacturacion> };
+  it('cambiar de cuenta vuelve a evaluar la facturación de la NUEVA', async () => {
+    const cuentas = { actual: '1111111111', consultadas: [] as string[] };
     const adaptador = new FacturacionGoogleAds({
       cliente: async () => ({
-        buscar: async (customerId: string, query: string) => (query.includes('billing_setup')
-          ? (cuentas.porCuenta[customerId] === 'READY' ? [{ 'billingSetup.status': 'APPROVED' }] : [])
-          : [{ 'customer.status': 'ENABLED' }]),
+        buscar: async (customerId: string, query: string) => {
+          if (query.includes('billing_setup')) cuentas.consultadas.push(customerId);
+          // Una configuración aprobada: en una cuenta autoservicio real esto NO prueba nada, y por eso
+          // ninguna de las dos cuentas queda «lista» sin que una persona lo confirme.
+          return query.includes('billing_setup') ? [{ 'billingSetup.status': 'APPROVED' }] : [{ 'customer.status': 'ENABLED' }];
+        },
       }),
       cuenta: async () => cuentas.actual,
+      // La confirmación vale sólo para la primera cuenta.
+      confirmacionVigente: async (_org, customerId) => customerId === '1111111111',
     });
 
-    expect((await adaptador.inspeccionar(ORG_A)).estado).toBe('READY');
+    expect((await adaptador.inspeccionar(ORG_A)).estado).toBe('READY'); // atestada
     cuentas.actual = '2222222222'; // la empresa cambió de cuenta
     expect((await adaptador.inspeccionar(ORG_A)).estado).toBe('PAYMENT_SETUP_REQUIRED');
+    expect(cuentas.consultadas).toEqual(['1111111111', '2222222222']); // se preguntó por la nueva, no por la vieja
   });
 });
 

@@ -5,12 +5,19 @@
  * acceso que necesita para trabajar y nada más. Nunca ve ni guarda un número de tarjeta: los datos de pago se
  * escriben sólo en Google.
  *
- * LA CORRECCIÓN QUE ORIGINA ESTE ARCHIVO. La versión anterior leía `billing_setup` y, al no encontrar filas,
- * concluía «falta configurar el pago». Es falso, y de una forma que habría hecho quedar mal al producto
- * delante de gente que tenía su tarjeta perfectamente puesta. La documentación de Google es explícita: los
- * flujos de facturación de la API exigen **facturación mensual** («monthly invoicing»), un régimen para el
- * que hace falta llevar un año como empresa y gastar unos 5.000 USD mensuales. Para todo lo demás —tarjeta,
- * PayPal, débito automático— `billing_setup` sencillamente **no existe**, y su ausencia no dice nada.
+ * DOS CORRECCIONES, Y LAS DOS LAS ENSEÑÓ UNA CUENTA REAL.
+ *
+ * La primera: leer `billing_setup`, no encontrar filas y concluir «falta configurar el pago» es falso. Los
+ * flujos de facturación de la API exigen **facturación mensual**, un régimen que pide un año de empresa y
+ * miles de dólares al mes; para una cuenta con tarjeta su ausencia no dice nada.
+ *
+ * La segunda, opuesta y peor: tampoco su PRESENCIA dice lo que yo creía. Una cuenta de autoservicio real
+ * —tarjeta, pospago, sin facturación mensual— devolvió una configuración `APPROVED`, y el sistema la declaró
+ * lista para gastar sin que nadie hubiera confirmado nada. Un falso «no» molesta; un falso «sí» empuja hacia
+ * el gasto. Así que `billing_setup` ya NO concluye por sí solo: hace falta evidencia POSITIVA de estar en
+ * facturación mensual, y hoy la API no expone ninguna señal inequívoca de eso. Mientras no la haya, toda
+ * cuenta se trata como autoservicio no verificable, y lo único que cierra el paso es que una persona lo
+ * atestigüe.
  *
  * De ahí la distinción que este módulo mantiene inequívoca:
  *
@@ -69,11 +76,18 @@ export interface SenalesFacturacion {
   /** `customer.status`. `null` ⇒ no se pudo leer. */
   readonly estadoCuenta: string | null;
   /**
-   * Configuraciones de facturación MENSUAL de la cuenta. `null` ⇒ la consulta falló. Una lista vacía NO
-   * significa «no tiene forma de pago»: significa «esta cuenta no usa facturación mensual», que es el caso
-   * normal de casi todo el mundo.
+   * Configuraciones de `billing_setup` de la cuenta. `null` ⇒ la consulta falló. Ni su ausencia ni su
+   * presencia prueban nada por sí solas: sólo se interpretan cuando hay evidencia positiva de facturación
+   * mensual (ver `facturacionMensualConfirmada`).
    */
   readonly configuraciones: readonly EstadoConfiguracionPago[] | null;
+  /**
+   * EVIDENCIA POSITIVA de que esta cuenta está en facturación mensual. Hoy es SIEMPRE `false`: la API no
+   * expone ninguna señal inequívoca del régimen de pago, y una cuenta de autoservicio real puede devolver
+   * `billing_setup` aprobado. Se prefiere un falso negativo —pedir una confirmación de más— antes que un
+   * falso «listo», porque lo que hay detrás de este paso es gastar el dinero de alguien.
+   */
+  readonly facturacionMensualConfirmada?: boolean;
   /** ¿Existe una confirmación humana vigente para la cuenta que está elegida AHORA? */
   readonly confirmacionHumanaVigente: boolean;
   /**
@@ -119,20 +133,26 @@ export function evaluarFacturacion(s: SenalesFacturacion): LecturaFacturacion {
       'No pudimos confirmar el estado de tu cuenta de anuncios.');
   }
 
-  // FACTURACIÓN MENSUAL: el único régimen que la API deja observar. Aquí sí se puede concluir.
-  if (s.configuraciones.includes('APPROVED')) {
-    return r('READY', 'MONTHLY_INVOICING_READY', 'FACTURACION_MENSUAL_APROBADA',
-      'La facturación de tu cuenta está aprobada en Google.');
-  }
-  if (s.configuraciones.includes('PENDING') || s.configuraciones.includes('APPROVED_HELD')) {
-    return r('PENDING_PROVIDER', 'MONTHLY_INVOICING_PENDING', 'APROBACION_EN_CURSO',
-      'Google está terminando de aprobar la facturación de tu cuenta. No hace falta que hagas nada más.');
+  /**
+   * FACTURACIÓN MENSUAL: el único régimen que la API deja interpretar… y sólo cuando CONSTA que la cuenta
+   * está en él. Sin esa evidencia positiva, `billing_setup` no se usa para nada: una cuenta de autoservicio
+   * puede devolver `APPROVED` igualmente, y tomarlo por bueno fue exactamente el fallo que se corrige aquí.
+   */
+  if (s.facturacionMensualConfirmada === true) {
+    if (s.configuraciones.includes('APPROVED')) {
+      return r('READY', 'MONTHLY_INVOICING_READY', 'FACTURACION_MENSUAL_APROBADA',
+        'La facturación de tu cuenta está aprobada en Google.');
+    }
+    if (s.configuraciones.includes('PENDING') || s.configuraciones.includes('APPROVED_HELD')) {
+      return r('PENDING_PROVIDER', 'MONTHLY_INVOICING_PENDING', 'APROBACION_EN_CURSO',
+        'Google está terminando de aprobar la facturación de tu cuenta. No hace falta que hagas nada más.');
+    }
+    return r('PAYMENT_SETUP_REQUIRED', 'MONTHLY_INVOICING_BLOCKED', 'PAGO_NO_VERIFICABLE_POR_API',
+      'La facturación mensual de tu cuenta no está activa en Google.', true);
   }
 
-  // AUTOSERVICIO (tarjeta, PayPal, débito): la API NO lo expone. Lo único honesto es decirlo.
-  const observacion: ObservacionFacturacion = s.configuraciones.includes('CANCELLED')
-    ? 'MONTHLY_INVOICING_BLOCKED'
-    : 'SELF_SERVICE_PAYMENT_UNVERIFIABLE';
+  // TODO LO DEMÁS —que hoy es todo— se trata como autoservicio: la API no expone el medio de pago.
+  const observacion: ObservacionFacturacion = 'SELF_SERVICE_PAYMENT_UNVERIFIABLE';
 
   if (s.confirmacionHumanaVigente) {
     return r('READY', observacion, 'CONFIRMADO_POR_LA_PERSONA',

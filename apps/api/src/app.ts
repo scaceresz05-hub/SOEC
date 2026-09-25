@@ -159,7 +159,7 @@ import { registerAceptacionRoutes } from './aceptacion/aceptacion-routes';
 import { registerHandoffRoutes } from './handoff/handoff-routes';
 import { lectorFacturacionGoogle } from './facturacion/composicion';
 import { registerFacturacionRoutes } from './facturacion/facturacion-routes';
-import { lectorVerificacionGoogle } from './verificacion/composicion';
+import { lectorVerificacionGoogle, puertoVerificacionGoogle } from './verificacion/composicion';
 import { estadoGoogleParaHandoff } from './handoff/composicion';
 import type { GoogleAdsMutateHttpClient } from './campana/google-ads-mutate-http';
 import type { DepsInvestigacion } from './investigacion/investigacion-service';
@@ -522,7 +522,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // HANDOFF EXTERNO (Autonomy Fase I.3): «SOEC llegó hasta aquí; ahora Google necesita que hagas una
       // cosa». Una tarea persistente por causa, y UNA sola a la vez en pantalla.
       // FACTURACIÓN (Fase I.6.1): estado del pago y la confirmación humana cuando Google no deja comprobarlo.
-      registerFacturacionRoutes(target, pool, { composicionGoogleAds, env: process.env });
+      registerFacturacionRoutes(target, pool, {
+        composicionGoogleAds, env: process.env,
+        verificacion: puertoVerificacionGoogle(pool, { env: process.env, composicionGoogleAds }),
+      });
       registerHandoffRoutes(target, pool, {
         estadoGoogle: (org) => estadoGoogleParaHandoff(org, composicionGoogleAds),
         // Fase I.6: ¿puede esta cuenta pagar sus anuncios? Solo lectura, y sólo si ya hay cuenta elegida.

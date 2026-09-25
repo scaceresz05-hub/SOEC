@@ -22,6 +22,12 @@ export interface OpcionesFacturacionGoogle {
   readonly log?: (info: Record<string, unknown>) => void;
   /** Gasto histórico observado, si algún día se puede leer de forma fiable. Contraprueba, nunca prueba. */
   readonly gastoHistoricoMinor?: (org: string) => Promise<number | null>;
+  /**
+   * Transporte HTTP. Existe para que una prueba pueda ejercitar ESTA composición —la de producción— con un
+   * proveedor de mentira. El defecto anterior sobrevivió a 500 pruebas porque todas inyectaban el lector ya
+   * construido y ninguna montaba la fábrica real; este hueco es lo que lo hace comprobable.
+   */
+  readonly fetchFn?: typeof fetch;
 }
 
 /** La cuenta elegida por la empresa, tal como la escribió la Fase I.1. `null` ⇒ todavía no hay ninguna. */
@@ -57,6 +63,7 @@ async function clienteDeSaludDeCuenta(pool: Pool, org: string, o: OpcionesFactur
     resolverAccessToken: () => obtenerAccessTokenDeOrg(comp, org),
     developerToken,
     loginCustomerId: String(cfg.loginCustomerId ?? cuenta).replace(/\D/g, '') || cuenta,
+    ...(o.fetchFn ? { fetchFn: o.fetchFn } : {}),
     ...(o.log ? { logger: (i: unknown) => o.log?.({ googleAdsSaludDeCuenta: i }) } : {}),
   });
 }

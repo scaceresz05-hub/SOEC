@@ -25,28 +25,50 @@ const senales = (over: Partial<SenalesFacturacion> = {}): SenalesFacturacion => 
   ...over,
 });
 
-describe('facturación mensual: lo único que la API deja observar', () => {
-  it('aprobada ⇒ lista, y el sistema puede cerrarlo solo', () => {
+describe('facturación mensual: sólo se interpreta cuando CONSTA que la cuenta está en ese régimen', () => {
+  /**
+   * La corrección que enseñó una cuenta real: una cuenta de autoservicio —tarjeta, pospago— devolvió
+   * `billing_setup` APPROVED. Tomarlo por «lista para gastar» era un falso «sí», que es el error caro: un
+   * falso «no» molesta a alguien, un falso «sí» empuja hacia el dinero de otro.
+   */
+  it('APPROVED sin evidencia del régimen NO basta: se pide confirmación humana', () => {
     const r = evaluarFacturacion(senales({ configuraciones: ['APPROVED'] }));
+    expect(r.estado).toBe('PAYMENT_SETUP_REQUIRED');
+    expect(r.observacion).toBe('SELF_SERVICE_PAYMENT_UNVERIFIABLE');
+    expect(r.requiereConfirmacionHumana).toBe(true);
+  });
+
+  it('con evidencia positiva de facturación mensual, aprobada ⇒ lista', () => {
+    const r = evaluarFacturacion(senales({ configuraciones: ['APPROVED'], facturacionMensualConfirmada: true }));
     expect(r.estado).toBe('READY');
     expect(r.observacion).toBe('MONTHLY_INVOICING_READY');
     expect(r.requiereConfirmacionHumana).toBe(false);
   });
 
-  it('en aprobación ⇒ esperar, sin pedirle nada a nadie', () => {
+  it('con evidencia positiva y en aprobación ⇒ esperar, sin pedirle nada a nadie', () => {
     for (const c of ['PENDING', 'APPROVED_HELD'] as const) {
-      const r = evaluarFacturacion(senales({ configuraciones: [c] }));
+      const r = evaluarFacturacion(senales({ configuraciones: [c], facturacionMensualConfirmada: true }));
       expect(r.estado, c).toBe('PENDING_PROVIDER');
       expect(r.observacion).toBe('MONTHLY_INVOICING_PENDING');
       expect(r.explicacion).toMatch(/no hace falta que hagas nada más/i);
     }
   });
 
-  it('cancelada ⇒ ese camino está bloqueado, y se cae al trato de autoservicio', () => {
-    const r = evaluarFacturacion(senales({ configuraciones: ['CANCELLED'] }));
+  it('con evidencia positiva y cancelada ⇒ ese camino está bloqueado', () => {
+    const r = evaluarFacturacion(senales({ configuraciones: ['CANCELLED'], facturacionMensualConfirmada: true }));
     expect(r.observacion).toBe('MONTHLY_INVOICING_BLOCKED');
     expect(r.estado).toBe('PAYMENT_SETUP_REQUIRED');
     expect(r.requiereConfirmacionHumana).toBe(true);
+  });
+
+  /** Y la red de seguridad: hoy nadie pasa esa bandera, así que ninguna cuenta real llega a READY sin persona. */
+  it('sin la bandera, NINGUNA combinación de billing_setup produce READY', () => {
+    const configs: Array<readonly ('APPROVED' | 'PENDING' | 'APPROVED_HELD' | 'CANCELLED' | 'UNKNOWN')[]> = [
+      ['APPROVED'], ['PENDING'], ['APPROVED_HELD'], ['CANCELLED'], ['UNKNOWN'], ['APPROVED', 'CANCELLED'],
+    ];
+    for (const configuraciones of configs) {
+      expect(evaluarFacturacion(senales({ configuraciones })).estado, JSON.stringify(configuraciones)).toBe('PAYMENT_SETUP_REQUIRED');
+    }
   });
 });
 

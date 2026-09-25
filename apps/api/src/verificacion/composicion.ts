@@ -19,6 +19,8 @@ export interface OpcionesVerificacionGoogle {
   readonly log?: (info: Record<string, unknown>) => void;
   /** Vencimiento de la caché. Por defecto media hora: una verificación de identidad no cambia en minutos. */
   readonly ttlMs?: number;
+  /** Transporte HTTP, para poder probar ESTA composición contra un proveedor de mentira. */
+  readonly fetchFn?: typeof fetch;
 }
 
 /** Cuenta elegida y su manager, tal como las escribió la Fase I.1. */
@@ -53,6 +55,7 @@ export function puertoVerificacionGoogle(pool: Pool, o: OpcionesVerificacionGoog
       resolverAccessToken: () => obtenerAccessTokenDeOrg(comp, org),
       developerToken,
       loginCustomerId: datos.login,
+      ...(o.fetchFn ? { fetchFn: o.fetchFn } : {}),
       ...(o.log ? { logger: (i: unknown) => o.log?.({ googleAdsVerificacion: i }) } : {}),
     });
     return { ok: true, programas: programasDe(await cliente.verificacionDeIdentidad(customerId)) };
