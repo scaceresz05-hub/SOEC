@@ -70,19 +70,32 @@ export class FacturacionGoogleAds implements PuertoFacturacionPublicitaria {
       return evaluarFacturacion({ estadoCuenta: null, configuraciones: null, confirmacionHumanaVigente: false });
     }
 
+    // PRIMERO el estado de la cuenta. Si esta consulta funciona, el proveedor está ahí y las credenciales
+    // sirven: eso convierte cualquier fallo POSTERIOR en información, no en ruido.
     let estadoCuenta: string | null = null;
-    let configuraciones: readonly EstadoConfiguracionPago[] | null = null;
     try {
       const filasCuenta = await cliente.buscar(cuenta, CONSULTA_CUENTA);
       estadoCuenta = filasCuenta.length > 0 ? valor(filasCuenta[0]!, 'customer', 'status') : null;
+    } catch (e) {
+      // Ni siquiera se pudo hablar con Google: no se concluye nada.
+      this.deps.log?.({ facturacion: 'cuenta-no-consultable', org, error: e instanceof Error ? e.message : 'error' });
+      return evaluarFacturacion({ estadoCuenta: null, configuraciones: null, confirmacionHumanaVigente: false });
+    }
 
+    /**
+     * AHORA la facturación mensual. Que esta consulta falle con el proveedor alcanzable es exactamente lo que
+     * le pasa a una cuenta autoservicio: no hay facturación mensual que leer. Devolver lista vacía —en vez de
+     * `null`— es lo que mantiene vivo ese camino; tratarlo como «no se pudo consultar» dejaba el paso de pago
+     * invisible para todo el mundo.
+     */
+    let configuraciones: readonly EstadoConfiguracionPago[] = [];
+    try {
       const filasPago = await cliente.buscar(cuenta, CONSULTA_PAGO);
       configuraciones = filasPago
         .map((f) => (valor(f, 'billingSetup', 'status') ?? valor(f, 'billing_setup', 'status') ?? 'UNKNOWN') as EstadoConfiguracionPago);
     } catch (e) {
-      // Un proveedor que no responde no es una respuesta: se reintenta, no se concluye.
-      this.deps.log?.({ facturacion: 'consulta-fallida', org, error: e instanceof Error ? e.message : 'error' });
-      return evaluarFacturacion({ estadoCuenta: null, configuraciones: null, confirmacionHumanaVigente: false });
+      this.deps.log?.({ facturacion: 'sin-facturacion-mensual-legible', org, detalle: e instanceof Error ? e.message : 'error' });
+      configuraciones = [];
     }
 
     const confirmacionHumanaVigente = this.deps.confirmacionVigente === undefined

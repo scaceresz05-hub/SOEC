@@ -10,7 +10,8 @@
 import type { Pool } from 'pg';
 import { RepositorioConexiones } from '../conexion/conexion-pg';
 import { RepositorioConfirmacionDePago } from './facturacion-pg';
-import { clienteDeLecturaGoogle } from '../ejecucion/composicion';
+import { GoogleAdsMutateHttpClient } from '../campana/google-ads-mutate-http';
+import { obtenerAccessTokenDeOrg } from '../acquisition/google-ads-oauth-flow';
 import type { ComponentesFlujoGoogleAds } from '../acquisition/google-ads-oauth-flow';
 import { FacturacionGoogleAds, type ClienteConsultaGoogle } from './facturacion-google';
 import type { EstadoFacturacion, PuertoFacturacionPublicitaria } from './facturacion-tipos';
@@ -31,11 +32,38 @@ export async function cuentaElegidaDe(pool: Pool, org: string): Promise<string |
   return id === '' ? null : id;
 }
 
+/**
+ * CLIENTE DE SALUD DE LA CUENTA. Deliberadamente SIN la puerta de capacidades.
+ *
+ * La primera versión reutilizó `clienteDeLecturaGoogle`, que exige `MEDICION_REAL` o `AUTONOMIA_ADS`. Parecía
+ * prudente y era un error de bulto: esas capacidades se encienden DESPUÉS, cuando ya se mide o se optimiza,
+ * mientras que preguntar «¿esta cuenta puede pagar sus anuncios?» es parte de la incorporación —justo cuando
+ * ninguna de las dos está encendida—. El resultado fue que el cliente siempre salía `null`, la lectura
+ * respondía «no se pudo consultar», y el paso de pago no le aparecía a NADIE. Un fail-closed correcto puede
+ * esconder un camino muerto: sólo se notó mirando una empresa real.
+ *
+ * Esto no concede nada nuevo: son dos consultas de lectura con la credencial que la empresa ya autorizó.
+ */
+async function clienteDeSaludDeCuenta(pool: Pool, org: string, o: OpcionesFacturacionGoogle): Promise<ClienteConsultaGoogle | null> {
+  const developerToken = o.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  if (!o.composicionGoogleAds || !developerToken) return null;
+  const conexion = await new RepositorioConexiones(pool).buscar(org, 'GOOGLE_ADS').catch(() => null);
+  if (conexion === null || conexion.estado !== 'CONNECTED') return null;
+  const cfg = (conexion.configuracion ?? {}) as { customerId?: string; loginCustomerId?: string };
+  const cuenta = String(cfg.customerId ?? conexion.externalAccountId ?? '').replace(/\D/g, '');
+  if (cuenta === '') return null;
+  const comp = o.composicionGoogleAds;
+  return new GoogleAdsMutateHttpClient({
+    resolverAccessToken: () => obtenerAccessTokenDeOrg(comp, org),
+    developerToken,
+    loginCustomerId: String(cfg.loginCustomerId ?? cuenta).replace(/\D/g, '') || cuenta,
+    ...(o.log ? { logger: (i: unknown) => o.log?.({ googleAdsSaludDeCuenta: i }) } : {}),
+  });
+}
+
 export function puertoFacturacionGoogle(pool: Pool, o: OpcionesFacturacionGoogle): PuertoFacturacionPublicitaria {
   return new FacturacionGoogleAds({
-    cliente: async (org): Promise<ClienteConsultaGoogle | null> => clienteDeLecturaGoogle(org, {
-      pool, env: o.env, composicionGoogleAds: o.composicionGoogleAds, ...(o.log ? { log: o.log } : {}),
-    }),
+    cliente: async (org): Promise<ClienteConsultaGoogle | null> => clienteDeSaludDeCuenta(pool, org, o),
     cuenta: (org) => cuentaElegidaDe(pool, org),
     // Lo único observable cuando el pago es autoservicio: que una persona ya lo revisó y lo confirmó.
     confirmacionVigente: async (org, customerId) =>

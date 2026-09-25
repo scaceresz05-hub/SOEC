@@ -23,6 +23,7 @@ import { HandoffInvalidoError } from './handoff-tipos';
 import { HandoffService, type DepsHandoff } from './handoff-service';
 import { depsDeHandoff } from './composicion';
 import type { EstadoFacturacion } from '../facturacion/facturacion-tipos';
+import type { EstadoVerificacionAnunciante } from '../verificacion/verificacion-tipos';
 
 export interface OpcionesHandoffRoutes extends DepsHandoff {
   /**
@@ -32,6 +33,8 @@ export interface OpcionesHandoffRoutes extends DepsHandoff {
   readonly estadoGoogle?: (org: string) => Promise<{ readonly estadoProveedor: string | null; readonly cuentasAccesibles: number | null } | null>;
   /** Estado de facturación del canal (Fase I.6). Ausente ⇒ nunca se pide configurar una forma de pago. */
   readonly facturacion?: (org: string) => Promise<EstadoFacturacion | null>;
+  /** Verificación del anunciante (gate post-conexión). Ausente ⇒ nunca se pide verificar nada. */
+  readonly verificacionAnunciante?: (org: string) => Promise<EstadoVerificacionAnunciante | null>;
 }
 
 export function registerHandoffRoutes(app: FastifyInstance, pool: Pool, opciones: OpcionesHandoffRoutes = {}): void {

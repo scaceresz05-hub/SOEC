@@ -15,6 +15,7 @@
  */
 import type { EstadoGoogleParaHandoff } from './handoff-google';
 import type { EstadoFacturacion } from '../facturacion/facturacion-tipos';
+import type { EstadoVerificacionAnunciante } from '../verificacion/verificacion-tipos';
 import type { Handoff, TipoHandoff, VerificadorHandoff, VeredictoHandoff } from './handoff-tipos';
 
 /** Estados del ciclo OAuth en los que la autorización ya sirve para trabajar. */
@@ -107,6 +108,31 @@ export function verificadorDeFacturacion(leer: (org: string) => Promise<EstadoFa
 }
 
 /**
+ * VERIFICADOR DE LA VERIFICACIÓN DEL ANUNCIANTE. Cierra la tarea cuando Google dice que ya está, y sólo
+ * entonces. Nadie declara nada en nombre de la persona: se mira el resultado de lo que ELLA presentó.
+ */
+export function verificadorDeAnunciante(leer: (org: string) => Promise<EstadoVerificacionAnunciante | null>): VerificadorHandoff {
+  return {
+    nombre: 'google-verificacion-anunciante',
+    soporta: (h: Handoff) => h.canal === 'GOOGLE_ADS' && h.tipo === 'IDENTITY_VERIFICATION_REQUIRED',
+    verificar: async (h) => {
+      let estado: EstadoVerificacionAnunciante | null;
+      try {
+        estado = await leer(h.organizationId);
+      } catch {
+        return { resultado: 'RETRY_LATER', detalle: 'no se pudo consultar la verificación del anunciante' };
+      }
+      switch (estado) {
+        case 'ADVERTISER_VERIFICATION_READY': return { resultado: 'COMPLETED', detalle: 'Google dio la verificación por completa' };
+        case 'ADVERTISER_VERIFICATION_REQUIRED': return { resultado: 'STILL_REQUIRED', detalle: 'la verificación sigue pendiente' };
+        case 'PENDING_PROVIDER': return { resultado: 'STILL_REQUIRED', detalle: 'Google está revisando la verificación' };
+        default: return { resultado: 'RETRY_LATER', detalle: 'no hay evidencia suficiente sobre la verificación' };
+      }
+    },
+  };
+}
+
+/**
  * ADAPTADOR PENDIENTE. Para los tipos que todavía no sabemos observar. No miente en ninguna dirección: no
  * cierra la tarea y tampoco afirma que siga faltando. Cuando exista el verificador de verdad, se sustituye.
  */
@@ -122,6 +148,5 @@ export function verificadorPendiente(tipos: readonly TipoHandoff[], porQue: stri
 export const VERIFICADORES_PENDIENTES: readonly VerificadorHandoff[] = [
   // `PAYMENT_SETUP_REQUIRED` ya NO está aquí: tiene verificador real (`verificadorDeFacturacion`).
   verificadorPendiente(['TERMS_ACCEPTANCE_REQUIRED'], 'SOEC todavía no sabe comprobar la aceptación de términos'),
-  verificadorPendiente(['IDENTITY_VERIFICATION_REQUIRED'], 'SOEC todavía no sabe comprobar la verificación de identidad'),
   verificadorPendiente(['LOGIN_REQUIRED', 'TWO_FACTOR_REQUIRED'], 'el acceso a la cuenta del proveedor no es observable desde SOEC'),
 ];

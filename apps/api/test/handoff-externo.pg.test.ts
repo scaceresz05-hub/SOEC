@@ -21,7 +21,7 @@ import {
   HandoffInvalidoError, metadataSegura, prioridadDe, proveedorDeCanal, tareaPrincipal, urlDeProveedorValida,
   type Handoff, type ResultadoVerificacion, type VerificadorHandoff,
 } from '../src/handoff/handoff-tipos';
-import { verificadorDeFacturacion, verificadoresDeGoogle, VERIFICADORES_PENDIENTES } from '../src/handoff/handoff-verificadores';
+import { verificadorDeAnunciante, verificadorDeFacturacion, verificadoresDeGoogle, VERIFICADORES_PENDIENTES } from '../src/handoff/handoff-verificadores';
 import type { EstadoGoogleParaHandoff } from '../src/handoff/handoff-google';
 
 const pool = makeTestPool();
@@ -562,9 +562,10 @@ describe('los verificadores de Google miran el mundo, no la palabra de nadie', (
   });
 
   it('lo que todavía no sabemos comprobar no se cierra: adaptador pendiente explícito', async () => {
-    // `PAYMENT_SETUP_REQUIRED` salió de esta lista en la Fase I.6: ya tiene verificador real. Lo que sigue
-    // aquí es lo que de verdad no sabemos observar todavía, y se dice en voz alta en vez de esconderse.
-    for (const tipo of ['TERMS_ACCEPTANCE_REQUIRED', 'IDENTITY_VERIFICATION_REQUIRED', 'LOGIN_REQUIRED', 'TWO_FACTOR_REQUIRED'] as const) {
+    // Salieron de esta lista al tener verificador real: `PAYMENT_SETUP_REQUIRED` (I.6) e
+    // `IDENTITY_VERIFICATION_REQUIRED` (gate post-conexión). Lo que queda es lo que de verdad no sabemos
+    // observar todavía, y se dice en voz alta en vez de esconderse en un `default`.
+    for (const tipo of ['TERMS_ACCEPTANCE_REQUIRED', 'LOGIN_REQUIRED', 'TWO_FACTOR_REQUIRED'] as const) {
       const h = { organizationId: ORG_A, canal: 'GOOGLE_ADS', tipo } as Handoff;
       const v = VERIFICADORES_PENDIENTES.find((x) => x.soporta(h));
       expect(v, `${tipo} debe tener un adaptador, aunque sea pendiente`).toBeDefined();
@@ -584,6 +585,20 @@ describe('la forma de pago sí tiene verificador real (Fase I.6)', () => {
     expect((await roto.verificar(h)).resultado).toBe('RETRY_LATER');
     const lista = verificadorDeFacturacion(async () => 'READY');
     expect((await lista.verificar(h)).resultado).toBe('COMPLETED');
+  });
+});
+
+describe('la verificación del anunciante también tiene verificador real', () => {
+  it('existe, cierra sólo cuando Google la da por completa, y calla si no sabe', async () => {
+    const h = { organizationId: ORG_A, canal: 'GOOGLE_ADS', tipo: 'IDENTITY_VERIFICATION_REQUIRED' } as Handoff;
+    expect(VERIFICADORES_PENDIENTES.some((x) => x.soporta(h))).toBe(false);
+
+    expect((await verificadorDeAnunciante(async () => 'ADVERTISER_VERIFICATION_READY').verificar(h)).resultado).toBe('COMPLETED');
+    expect((await verificadorDeAnunciante(async () => 'ADVERTISER_VERIFICATION_REQUIRED').verificar(h)).resultado).toBe('STILL_REQUIRED');
+    expect((await verificadorDeAnunciante(async () => 'PENDING_PROVIDER').verificar(h)).resultado).toBe('STILL_REQUIRED');
+    expect((await verificadorDeAnunciante(async () => null).verificar(h)).resultado).toBe('RETRY_LATER');
+    const roto = verificadorDeAnunciante(async () => { throw new Error('429'); });
+    expect((await roto.verificar(h)).resultado).toBe('RETRY_LATER');
   });
 });
 

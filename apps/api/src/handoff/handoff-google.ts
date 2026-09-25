@@ -12,6 +12,7 @@
 import type { CanalHandoff, TipoHandoff } from './handoff-tipos';
 import type { EstadoCapacidad } from '../provisionamiento/provisionamiento-tipos';
 import { URL_FACTURACION_GOOGLE, type EstadoFacturacion } from '../facturacion/facturacion-tipos';
+import { URL_VERIFICACION_GOOGLE, type EstadoVerificacionAnunciante } from '../verificacion/verificacion-tipos';
 
 /** Lo que este módulo pide abrir. El servicio le pone id, fechas y estado. */
 export interface IntencionHandoff {
@@ -49,6 +50,10 @@ export interface EstadoGoogleParaHandoff {
    * no saber nunca inventa una tarea, igual que no saber nunca borra una.
    */
   readonly facturacion?: EstadoFacturacion;
+  /**
+   * ¿Google pide verificar quién está detrás de los anuncios? Ausente ⇒ no se evaluó y no se pide nada.
+   */
+  readonly verificacionAnunciante?: EstadoVerificacionAnunciante;
 }
 
 /**
@@ -145,6 +150,23 @@ export function decidirHandoffGoogle(e: EstadoGoogleParaHandoff): DecisionGoogle
    * cuando YA hay cuenta, así que a quien todavía no tiene ninguna no se le habla de tarjetas.
    */
   if (e.cuentaEnElSsot) {
+    /**
+     * IDENTIDAD ANTES QUE PAGO, y no por gusto: mientras Google no verifique quién anuncia, la cuenta no
+     * sirve con normalidad, así que pedir la tarjeta primero sería pedir algo que todavía no desbloquea
+     * nada. Una cosa a la vez significa también ponerlas en el orden en que el mundo las exige.
+     */
+    if (e.verificacionAnunciante === 'ADVERTISER_VERIFICATION_REQUIRED') {
+      return {
+        accion: 'ABRIR',
+        intencion: {
+          canal: 'GOOGLE_ADS', tipo: 'IDENTITY_VERIFICATION_REQUIRED', causa: 'verificacion-de-anunciante',
+          instruccion: 'Verifica tu empresa en Google',
+          motivo: 'Google necesita verificar quién está detrás de los anuncios. Completa la verificación directamente en Google —los documentos son tuyos y los presentas tú— y SOEC continúa después.',
+          etiquetaAccion: 'Continuar con Google', urlProveedor: URL_VERIFICACION_GOOGLE,
+        },
+      };
+    }
+
     const f = e.facturacion;
     if (f === undefined || f === 'READY') return { accion: 'CERRAR' };
     if (f === 'PAYMENT_SETUP_REQUIRED') {
@@ -213,5 +235,5 @@ export function decidirHandoffGoogle(e: EstadoGoogleParaHandoff): DecisionGoogle
 /** Tipos que este canal gestiona: al cambiar el estado, lo que ya no aplica se cancela en bloque. */
 export const TIPOS_DE_GOOGLE: readonly TipoHandoff[] = [
   'OAUTH_CONSENT_REQUIRED', 'ACCOUNT_PROVISIONING_REQUIRED', 'ACCOUNT_SELECTION_REQUIRED',
-  'PAYMENT_SETUP_REQUIRED',
+  'IDENTITY_VERIFICATION_REQUIRED', 'PAYMENT_SETUP_REQUIRED',
 ];

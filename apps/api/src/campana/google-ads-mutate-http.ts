@@ -451,6 +451,34 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
   }
 
   /**
+   * IdentityVerificationService.GetIdentityVerification (READ ONLY). Devuelve en qué estado está el programa
+   * de verificación del anunciante para una cuenta. Misma credencial, mismo developer token, misma lista
+   * blanca de anfitriones: es una lectura más, no un segundo cliente.
+   *
+   * Sólo GET. `StartIdentityVerification` existe en la API y NO se implementa a propósito: iniciar un trámite
+   * de identidad en nombre de alguien es el primer paso hacia declarar cosas por él, y esa línea no se cruza.
+   *
+   * OJO: Google limita esta llamada más que el resto y pide cachear. Quien la use debe hacerlo con calma.
+   */
+  async verificacionDeIdentidad(customerId: string): Promise<Array<Record<string, unknown>>> {
+    const accessToken = await this.deps.resolverAccessToken();
+    if (!accessToken) throw new Error('NO_ACCESS_TOKEN');
+    const url = urlAutorizada(`${this.apiBaseUrl}/${API_VERSION}/customers/${customerId}/getIdentityVerification`);
+    if (url === null) throw new Error('HOST_NO_AUTORIZADO');
+    const res = await this.fetchFn(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': this.deps.developerToken, 'login-customer-id': this.deps.loginCustomerId, Accept: 'application/json' },
+    });
+    if (!res.ok) {
+      const f = parseGoogleAdsFailure(await res.text());
+      const primero = f.googleErrors[0];
+      throw new GoogleSearchError({ httpStatus: res.status, requestId: res.headers.get('request-id'), status: f.status, code: primero?.errorCode ?? null, message: mensajeSanitizado(primero?.message ?? null), errorPath: null, fieldPathElements: [], cuerpoResumen: null });
+    }
+    const json = (await res.json()) as { identityVerification?: Array<Record<string, unknown>> };
+    return json.identityVerification ?? [];
+  }
+
+  /**
    * GoogleAdsService.SearchStream (READ ONLY). Ejecuta una consulta GAQL y devuelve las filas APLANADAS (cada fila
    * = objeto con los recursos seleccionados). NO muta NADA (recuperación de identidad). Host allowlist + token por
    * conexión. searchStream responde un array de batches [{results:[…]}]; se tolera también {results:[…]}.

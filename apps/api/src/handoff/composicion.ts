@@ -15,8 +15,9 @@ import { connectionIdDe } from '../acquisition/google-ads-connection';
 import { RepositorioConexiones } from '../conexion/conexion-pg';
 import { RepositorioNegocios } from '../negocio/negocio-pg';
 import { datosDeCuentaDesdeNegocio, inspeccionarCapacidad, type CuentaAccesible } from '../provisionamiento/provisionamiento-tipos';
-import { verificadorDeFacturacion } from './handoff-verificadores';
+import { verificadorDeAnunciante, verificadorDeFacturacion } from './handoff-verificadores';
 import type { EstadoFacturacion } from '../facturacion/facturacion-tipos';
+import type { EstadoVerificacionAnunciante } from '../verificacion/verificacion-tipos';
 import { verificadoresDeGoogle, VERIFICADORES_PENDIENTES } from './handoff-verificadores';
 import type { DepsHandoff } from './handoff-service';
 import type { EstadoGoogleParaHandoff } from './handoff-google';
@@ -67,6 +68,8 @@ export function lectorEstadoGoogle(
   env: Record<string, string | undefined> = process.env,
   /** Estado de facturación del canal (Fase I.6). Ausente ⇒ no se evalúa y no se pide nada. */
   leerFacturacion?: (org: string) => Promise<EstadoFacturacion | null>,
+  /** Verificación del anunciante. Ausente ⇒ no se evalúa y no se pide nada. */
+  leerVerificacion?: (org: string) => Promise<EstadoVerificacionAnunciante | null>,
 ): (org: string) => Promise<EstadoGoogleParaHandoff | null> {
   return async (org: string) => {
     if (estadoGoogle === undefined) return null;
@@ -98,12 +101,22 @@ export function lectorEstadoGoogle(
       ? await leerFacturacion(org).catch(() => null)
       : null;
 
+    /**
+     * VERIFICACIÓN DEL ANUNCIANTE. También sólo con cuenta elegida, y va cacheada en su composición porque
+     * Google limita esa llamada más que el resto: preguntarla en cada tick nos dejaría sin cuota nosotros
+     * solos.
+     */
+    const verificacion = cuentaEnElSsot && leerVerificacion !== undefined
+      ? await leerVerificacion(org).catch(() => null)
+      : null;
+
     return {
       estadoProveedor: estado.estadoProveedor,
       cuentasAccesibles: estado.cuentasAccesibles,
       cuentaEnElSsot,
       ...(capacidad === undefined ? {} : { capacidadProvisionamiento: capacidad }),
       ...(facturacion === null ? {} : { facturacion }),
+      ...(verificacion === null ? {} : { verificacionAnunciante: verificacion }),
     };
   };
 }
@@ -119,9 +132,12 @@ export function depsDeHandoff(
     readonly estadoGoogle?: EstadoGoogleCrudo;
     /** Lector de facturación del canal (Fase I.6). Ausente ⇒ nunca se pide configurar una forma de pago. */
     readonly facturacion?: (org: string) => Promise<EstadoFacturacion | null>;
+    /** Lector de la verificación del anunciante. Ausente ⇒ nunca se pide verificar nada. */
+    readonly verificacionAnunciante?: (org: string) => Promise<EstadoVerificacionAnunciante | null>;
   } = {},
 ): DepsHandoff {
-  const leer = opciones.leerEstadoGoogle ?? lectorEstadoGoogle(pool, opciones.estadoGoogle, process.env, opciones.facturacion);
+  const leer = opciones.leerEstadoGoogle
+    ?? lectorEstadoGoogle(pool, opciones.estadoGoogle, process.env, opciones.facturacion, opciones.verificacionAnunciante);
   const base: DepsHandoff = {
     ...opciones,
     leerEstadoGoogle: leer,
@@ -130,6 +146,7 @@ export function depsDeHandoff(
       // El verificador de la forma de pago cierra la tarea SIN que nadie pulse nada, en cuanto Google la
       // refleja aprobada. Sin lector de facturación no existe, y entonces nada se cierra solo: el sesgo seguro.
       ...(opciones.facturacion === undefined ? [] : [verificadorDeFacturacion(opciones.facturacion)]),
+      ...(opciones.verificacionAnunciante === undefined ? [] : [verificadorDeAnunciante(opciones.verificacionAnunciante)]),
       ...VERIFICADORES_PENDIENTES,
     ],
   };
