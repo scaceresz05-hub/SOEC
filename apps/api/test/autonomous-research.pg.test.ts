@@ -421,7 +421,9 @@ describe('evidencia ausente y bloqueos, dichos en voz alta', () => {
     const plan = (await generarPlan(a, cookie, org)).plan as Vista;
     expect(plan.estado).toBe('NON_EXECUTABLE');
     expect(plan.readiness.RESEARCH_READY).toBe(false);
-    expect((plan.prerequisitos as string[]).join(' ')).toContain('conectar la cuenta de Google Ads');
+    // El prerrequisito nombra el MOTIVO observado. Aquí no hay cuenta conectada, y eso es lo que dice; no
+    // se da por supuesto que ésa sea siempre la causa de no poder medir la demanda.
+    expect((plan.prerequisitos as string[]).join(' ')).toContain('falta conectar la cuenta de Google');
     await a.close();
   });
 

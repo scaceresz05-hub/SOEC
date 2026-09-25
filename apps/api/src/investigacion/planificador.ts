@@ -118,8 +118,7 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
      * el motivo observado del propio canal —sin conexión, consulta fallida o planificador sin términos—, que
      * es el único que sabe cuál de los tres ocurrió.
      */
-    const motivo = e.canales.find((c) => c.canal === 'GOOGLE_SEARCH')?.motivos[0] ?? 'no se pudo medir la demanda de búsqueda';
-    prerequisitos.push(`poder medir la demanda de búsqueda: ${motivo}`);
+    prerequisitos.push(e.canales.find((c) => c.canal === 'GOOGLE_SEARCH')?.motivos[0] ?? 'no se pudo medir la demanda de búsqueda');
   }
   if (veredictoSearch === 'NOT_SUITABLE') prerequisitos.push('la demanda observada no justifica invertir en buscador con la oferta actual');
 
