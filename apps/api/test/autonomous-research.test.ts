@@ -84,7 +84,7 @@ const ctxAnalisis = (over: Partial<ContextoAnalisis> = {}): ContextoAnalisis => 
   organizationId: ORG, runId: RUN, oferta: [oferta('implantes', 'Implantes dentales')], restricciones: [],
   auditoria: auditoria([pagina(), pagina({ ruta: '/implantes-dentales', titulo: 'Implantes dentales' })]),
   terminos: [termino('implante dental curico')], geos: [geo('Curicó')], eventosConversion: ['contacto_whatsapp'],
-  techoDeclarado: { modalidad: 'MONTHLY', montoMinor: 300_000 }, reglasCanal: [], demandaDisponible: true,
+  techoDeclarado: { modalidad: 'MONTHLY', montoMinor: 300_000 }, reglasCanal: [], demanda: 'CON_DATOS',
   competidoresDisponibles: false, ahora: AHORA, ...over,
 });
 
@@ -287,9 +287,33 @@ describe('veredicto por canal', () => {
   });
 
   it('sin fuente de demanda el veredicto es INSUFFICIENT_EVIDENCE: faltan datos es una respuesta válida', () => {
-    const canales = evaluarCanales(ctxAnalisis({ demandaDisponible: false, terminos: [] }));
+    const canales = evaluarCanales(ctxAnalisis({ demanda: 'SIN_FUENTE', terminos: [] }));
     expect(veredictoDe(canales, 'GOOGLE_SEARCH')).toBe('INSUFFICIENT_EVIDENCE');
     expect(canales.find((c) => c.canal === 'GOOGLE_SEARCH')?.motivos.join(' ')).toContain('conectar la cuenta de Google');
+  });
+
+  /**
+   * EL SILENCIO DEL PROVEEDOR NO ES UN VEREDICTO. Salió de producción: el planificador de Google respondió a
+   * «clínica dental», «odontología general» y «rehabilitación oral» sin traer un solo término, y SOEC lo
+   * tradujo a «este canal no sirve para tu negocio» —una afirmación sobre el mercado de alguien, sostenida en
+   * una lista vacía—. Ahora se distingue: no traer nada es no saber; traer términos sin volumen sí es medir.
+   */
+  it('si el planificador responde sin términos NO se concluye que el canal no sirva', () => {
+    const canales = evaluarCanales(ctxAnalisis({ demanda: 'SIN_IDEAS', terminos: [] }));
+    expect(veredictoDe(canales, 'GOOGLE_SEARCH')).toBe('INSUFFICIENT_EVIDENCE');
+    const motivos = canales.find((c) => c.canal === 'GOOGLE_SEARCH')?.motivos.join(' ') ?? '';
+    expect(motivos).toMatch(/sin ningún término/i);
+    expect(motivos, 'no se puede afirmar que no haya demanda').not.toMatch(/no aparecen búsquedas relevantes/i);
+  });
+
+  it('si la consulta de demanda falla tampoco se concluye nada del mercado', () => {
+    const canales = evaluarCanales(ctxAnalisis({ demanda: 'SIN_RESPUESTA', terminos: [] }));
+    expect(veredictoDe(canales, 'GOOGLE_SEARCH')).toBe('INSUFFICIENT_EVIDENCE');
+  });
+
+  it('con términos devueltos y todos sin volumen SÍ se concluye: eso es una medición', () => {
+    const canales = evaluarCanales(ctxAnalisis({ demanda: 'CON_DATOS', terminos: [] }));
+    expect(veredictoDe(canales, 'GOOGLE_SEARCH')).toBe('NOT_SUITABLE');
   });
 
   it('DEMANDA NO ES RECOMENDACIÓN: con demanda pero sin landing, sin medición o sin techo es POSSIBLE', () => {

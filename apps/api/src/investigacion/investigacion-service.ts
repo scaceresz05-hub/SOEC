@@ -36,7 +36,7 @@ import {
   type EstadoInvestigacion,
 } from './investigacion-tipos';
 import { clasificarIntencion, evaluarTermino, type CandidatoNegativo } from './intencion';
-import { derivarHallazgos, evaluarCanales, evaluarLandings, type ContextoAnalisis } from './analisis';
+import { derivarHallazgos, evaluarCanales, evaluarLandings, type ContextoAnalisis, type EstadoDemanda } from './analisis';
 import {
   PRESUPUESTO_RASTREO_POR_DEFECTO,
   competidoresSinFuente,
@@ -400,21 +400,29 @@ export class InvestigacionService {
 
     // ── 3. DEMANDA DE BÚSQUEDA ──
     const terminos: TerminoInvestigado[] = [];
-    let demandaDisponible = false;
+    let demanda: EstadoDemanda = 'SIN_FUENTE';
     const semillas = activas.map((o) => o.name);
     if (this.deps.demanda === null || this.deps.demanda === undefined) {
-      fuentes.push({ fuente: 'GOOGLE_ADS_KEYWORD_DATA', disponibilidad: 'UNAVAILABLE', motivo: 'falta una conexión de Google Ads con permiso de lectura', versionDatos: null });
+      fuentes.push({ fuente: 'GOOGLE_ADS_KEYWORD_DATA', disponibilidad: 'UNAVAILABLE', motivo: 'no hay una cuenta de Google Ads conectada con la que consultar la demanda', versionDatos: null });
     } else {
       const geoIds = geos.filter((g) => g.disponible && g.targetId !== null).map((g) => g.targetId!);
       const respuesta = await this.deps.demanda.demanda({
         semillas, urlSitio: ctx.perfil.website, geoTargetIds: geoIds, idioma: ctx.perfil.language, pais: ctx.perfil.country,
       });
       if (respuesta === null) {
+        demanda = 'SIN_RESPUESTA';
         fuentes.push({ fuente: 'GOOGLE_ADS_KEYWORD_DATA', disponibilidad: 'FAILED', motivo: 'la consulta de demanda no respondió', versionDatos: null });
         fallos.push('demanda de búsqueda: la consulta no respondió');
       } else {
-        demandaDisponible = true;
-        fuentes.push({ fuente: 'GOOGLE_ADS_KEYWORD_DATA', disponibilidad: 'USED', motivo: null, versionDatos: respuesta.periodo ?? respuesta.observadoEn });
+        // UNA RESPUESTA VACÍA NO ES UN DATO. Se registra tal cual —se consultó, no trajo nada— en vez de
+        // dejarla pasar como una medición que después se lee como «este negocio no tiene demanda».
+        demanda = respuesta.ideas.length > 0 ? 'CON_DATOS' : 'SIN_IDEAS';
+        fuentes.push({
+          fuente: 'GOOGLE_ADS_KEYWORD_DATA',
+          disponibilidad: 'USED',
+          motivo: demanda === 'SIN_IDEAS' ? 'la consulta respondió sin ningún término: no hay con qué medir la demanda' : null,
+          versionDatos: respuesta.periodo ?? respuesta.observadoEn,
+        });
         const ctxClasificacion = {
           ofertas: activas.map((o) => o.name),
           localidades,
@@ -462,7 +470,7 @@ export class InvestigacionService {
     const ctxAnalisis: ContextoAnalisis = {
       organizationId: org, runId, oferta: ctx.oferta, restricciones: ctx.restricciones, auditoria,
       terminos, geos, eventosConversion: ctx.eventosConversion, techoDeclarado: ctx.techoDeclarado,
-      reglasCanal: ctx.reglasCanal, demandaDisponible, competidoresDisponibles: competidores !== null, ahora,
+      reglasCanal: ctx.reglasCanal, demanda, competidoresDisponibles: competidores !== null, ahora,
     };
     const landings = evaluarLandings(ctxAnalisis);
     const canales = evaluarCanales(ctxAnalisis);

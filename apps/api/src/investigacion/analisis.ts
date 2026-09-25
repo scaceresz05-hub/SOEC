@@ -27,6 +27,8 @@ import {
 } from './investigacion-tipos';
 import { terminosDeRestriccion } from './intencion';
 
+export type EstadoDemanda = 'SIN_FUENTE' | 'SIN_RESPUESTA' | 'SIN_IDEAS' | 'CON_DATOS';
+
 export interface ContextoAnalisis {
   readonly organizationId: string;
   readonly runId: string;
@@ -41,8 +43,20 @@ export interface ContextoAnalisis {
   readonly techoDeclarado: { readonly modalidad: string; readonly montoMinor: number | null } | null;
   /** Canales permitidos o prohibidos declarados por el negocio (Fase C). */
   readonly reglasCanal: readonly { readonly canal: string; readonly modo: string }[];
-  /** `true` si la fuente de demanda estuvo disponible en esta corrida. */
-  readonly demandaDisponible: boolean;
+  /**
+   * QUÉ PASÓ CON LA DEMANDA DE BÚSQUEDA en esta corrida. Era un booleano, y esa era su falla: agrupaba
+   * «el planificador contestó con términos» con «el planificador contestó y no trajo ninguno», y del segundo
+   * caso se concluía que el negocio no tiene demanda. No es lo mismo. Un planificador que devuelve una lista
+   * vacía para «clínica dental» no está midiendo un mercado sin búsquedas: está callando —pasa, por ejemplo,
+   * con cuentas nuevas sin historial—. Convertir ese silencio en «este canal no sirve» es inventar un
+   * veredicto, y encima uno que bloquea el plan del negocio.
+   *
+   *  · SIN_FUENTE   — no hay cuenta conectada con la que preguntar;
+   *  · SIN_RESPUESTA— se preguntó y la consulta falló;
+   *  · SIN_IDEAS    — se preguntó, respondió, y no trajo ni un término: no se sabe;
+   *  · CON_DATOS    — trajo términos; lo que digan sus métricas SÍ es una observación.
+   */
+  readonly demanda: EstadoDemanda;
   /** `true` si el proveedor de mercado devolvió competidores. */
   readonly competidoresDisponibles: boolean;
   readonly ahora: string;
@@ -181,9 +195,17 @@ export function evaluarCanales(ctx: ContextoAnalisis): readonly EvaluacionCanal[
     if (prohibido) {
       veredicto = 'BLOCKED';
       motivos.push('el negocio declaró este canal como prohibido');
-    } else if (!ctx.demandaDisponible) {
+    } else if (ctx.demanda === 'SIN_FUENTE') {
       veredicto = 'INSUFFICIENT_EVIDENCE';
       motivos.push('no hay datos de demanda de búsqueda: falta conectar la cuenta de Google para poder medirla');
+    } else if (ctx.demanda === 'SIN_RESPUESTA') {
+      veredicto = 'INSUFFICIENT_EVIDENCE';
+      motivos.push('se preguntó por la demanda de búsqueda y la consulta no respondió: no se pudo medir');
+    } else if (ctx.demanda === 'SIN_IDEAS') {
+      // El planificador contestó sin traer un solo término. Eso no dice que nadie busque esto: dice que hoy
+      // no tenemos con qué afirmarlo ni negarlo, y un «no sirve» aquí sería un veredicto inventado.
+      veredicto = 'INSUFFICIENT_EVIDENCE';
+      motivos.push('el planificador de palabras respondió sin ningún término: no hay con qué medir la demanda, y no se concluye que no exista');
     } else if (candidatos.length === 0 || volumenTotal === 0) {
       veredicto = 'NOT_SUITABLE';
       motivos.push('se consultó la demanda y no aparecen búsquedas relevantes para lo que ofrece el negocio');
@@ -288,8 +310,12 @@ export function derivarHallazgos(ctx: ContextoAnalisis, landings: readonly Compa
   };
 
   const { candidatos, volumenTotal, mejor } = demandaRelevante(ctx.terminos);
-  if (!ctx.demandaDisponible) {
-    añadir('h-demanda-sin-datos', 'DATA_INSUFFICIENT', 'No se pudo medir la demanda de búsqueda: falta una conexión de Google Ads con permiso de lectura.', [], ['UNKNOWN'], 'DEMAND');
+  if (ctx.demanda === 'SIN_FUENTE') {
+    añadir('h-demanda-sin-datos', 'DATA_INSUFFICIENT', 'No se pudo medir la demanda de búsqueda: el negocio no tiene una cuenta de Google Ads conectada.', [], ['UNKNOWN'], 'DEMAND');
+  } else if (ctx.demanda === 'SIN_RESPUESTA') {
+    añadir('h-demanda-sin-respuesta', 'DATA_INSUFFICIENT', 'Se preguntó por la demanda de búsqueda y la consulta no respondió: queda sin medir.', [], ['UNKNOWN'], 'DEMAND');
+  } else if (ctx.demanda === 'SIN_IDEAS') {
+    añadir('h-demanda-sin-ideas', 'DATA_INSUFFICIENT', 'El planificador de palabras respondió sin ningún término para la oferta declarada. No se sabe si hay demanda: no se concluye que no la haya.', [], ['UNKNOWN'], 'DEMAND');
   } else if (mejor !== null) {
     añadir(
       'h-demanda-existe',
@@ -307,7 +333,7 @@ export function derivarHallazgos(ctx: ContextoAnalisis, landings: readonly Compa
   for (const oferta of ctx.oferta.filter((o) => o.status === 'ACTIVE')) {
     const suyos = ctx.terminos.filter((t) => t.ofertaSlug === oferta.slug);
     const volumen = suyos.reduce((a, t) => a + Number((t.metricas as { avgMonthlySearches?: number | null }).avgMonthlySearches ?? 0), 0);
-    if (ctx.demandaDisponible && suyos.length > 0 && volumen === 0) {
+    if (ctx.demanda === 'CON_DATOS' && suyos.length > 0 && volumen === 0) {
       añadir(`h-oferta-sin-volumen-${oferta.slug}`, 'OFFER_HAS_LOW_SEARCH_VOLUME', `«${oferta.name}» aparece en las búsquedas pero sin volumen medible en el territorio declarado.`, suyos.slice(0, 3).map((t) => `ev-kw-${t.terminoNormalizado.replace(/\s/g, '-')}`), ['OBSERVED'], 'OFFER');
     }
   }
