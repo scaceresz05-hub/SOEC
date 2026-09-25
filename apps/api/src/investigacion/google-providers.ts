@@ -57,6 +57,16 @@ export class CoordinadorDeConsultas {
   get tamanoCache(): number {
     return this.cache.size;
   }
+
+  /**
+   * Olvida lo cacheado. La caché vive en el proceso, así que una prueba que no la vacía entre casos podría
+   * dar por buena una respuesta que en realidad se sirvió del caso anterior — justo lo contrario de lo que
+   * esas pruebas quieren demostrar. En producción no se llama: la vida corta de las entradas basta.
+   */
+  limpiar(): void {
+    this.cache.clear();
+    this.enVuelo.clear();
+  }
 }
 
 export interface DepsGoogleInvestigacion {

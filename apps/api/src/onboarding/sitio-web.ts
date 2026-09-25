@@ -48,10 +48,8 @@ export function dominioRegistrable(host: string): string {
   return partes.slice(-2).join('.');
 }
 
-/** ¿Es una IP privada, de loopback, link-local o de metadatos de nube? Fail-closed ante formatos raros. */
-export function esIpNoPublica(ip: string): boolean {
-  const v = ip.trim().toLowerCase();
-  if (v === '' || v === '::1' || v.startsWith('fe80:') || v.startsWith('fc') || v.startsWith('fd')) return true;
+/** ¿Es una IPv4 privada, de loopback, link-local o de metadatos de nube? */
+function esIpv4NoPublica(v: string): boolean {
   const o = v.split('.').map((x) => Number(x));
   if (o.length !== 4 || o.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true; // no es IPv4 válida
   const [a, b] = o as [number, number, number, number];
@@ -60,6 +58,43 @@ export function esIpNoPublica(ip: string): boolean {
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
   if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  return false;
+}
+
+/**
+ * ¿Es una IP privada, de loopback, link-local o de metadatos de nube? Fail-closed ante formatos raros.
+ *
+ * IPv6 SE CLASIFICA, NO SE RECHAZA EN BLOQUE. La versión anterior partía la dirección por puntos y, si no
+ * salían cuatro números, la declaraba no pública: es decir, TODA dirección IPv6 era «interna». El sitio de un
+ * negocio real detrás de Cloudflare publica AAAA además de A, la resolución del contenedor devuelve ambas, y
+ * bastaba una de ellas para que SOEC dijera que «el dominio no resuelve a una dirección pública» de un sitio
+ * que cualquiera abría en su navegador. La defensa contra direcciones internas es correcta; confundir «no es
+ * IPv4» con «es interna» no lo es.
+ *
+ * Lo que sigue siendo no público en IPv6: `::` y `::1` (no especificada y loopback), `fe80::/10` (link-local),
+ * `fc00::/7` (únicas locales) y las formas que embeben una IPv4 —`::ffff:a.b.c.d`, `64:ff9b::a.b.c.d`—, que se
+ * juzgan por la IPv4 que llevan dentro para que nadie alcance 169.254.169.254 envolviéndola en IPv6.
+ */
+export function esIpNoPublica(ip: string): boolean {
+  const v = ip.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/%.*$/, ''); // sin corchetes ni zona
+  if (v === '') return true;
+  if (!v.includes(':')) return esIpv4NoPublica(v);
+
+  // ── IPv6 ──
+  if (v === '::' || v === '::1') return true;
+  // Una IPv4 embebida manda sobre el envoltorio: ::ffff:169.254.169.254 es la dirección de metadatos.
+  const embebida = /(\d+\.\d+\.\d+\.\d+)$/.exec(v);
+  if (embebida !== null) return esIpv4NoPublica(embebida[1]!);
+  // Todo lo que empieza por `::` vive en el bloque reservado `::/8`: no es espacio público y no se admite
+  // (las formas con IPv4 dentro ya se resolvieron arriba, que son las únicas útiles de ese bloque).
+  if (v.startsWith('::')) return true;
+  const grupos = v.split(':').filter((g) => g !== '');
+  if (grupos.length === 0 || grupos.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return true; // formato raro ⇒ no
+  const primero = Number.parseInt(grupos[0]!, 16);
+  if (Number.isNaN(primero)) return true;
+  if ((primero & 0xfe00) === 0xfc00) return true; // fc00::/7 — únicas locales
+  if ((primero & 0xffc0) === 0xfe80) return true; // fe80::/10 — link-local
+  // El resto del espacio IPv6 en uso público (2000::/3 y vecinos) es alcanzable y legítimo.
   return false;
 }
 

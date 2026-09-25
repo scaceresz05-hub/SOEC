@@ -118,8 +118,8 @@ interface ContextoNegocio {
   readonly eventosConversion: readonly string[];
   readonly reglasCanal: readonly { readonly canal: string; readonly modo: string }[];
   readonly techoDeclarado: { readonly modalidad: string; readonly montoMinor: number | null } | null;
+  /** ¿Hay cuenta de publicidad conectada? Es un HECHO del negocio, no un permiso. */
   readonly conexionAdsConectada: boolean;
-  readonly capacidadLectura: boolean;
 }
 
 export class InvestigacionService {
@@ -148,12 +148,11 @@ export class InvestigacionService {
   private async contexto(org: string): Promise<ContextoNegocio> {
     const perfil = await this.negocios.perfil(org);
     if (perfil === null) throw new NegocioSinPerfilError(`el negocio '${org}' no existe`);
-    const [oferta, territorios, restricciones, politica, conexiones, capacidades, presupuesto] = await Promise.all([
+    const [oferta, territorios, restricciones, politica, conexiones, presupuesto] = await Promise.all([
       this.negocios.oferta(org), this.negocios.territorios(org), this.negocios.restricciones(org),
-      this.politica.completa(org), this.conexiones.listar(org), this.conexiones.capacidades(org),
+      this.politica.completa(org), this.conexiones.listar(org),
       this.onboarding.intencionPresupuesto(org),
     ]);
-    const habilitadas = new Set(capacidades.filter((c) => c.habilitada).map((c) => c.capacidad));
     return {
       perfil,
       oferta,
@@ -162,8 +161,8 @@ export class InvestigacionService {
       eventosConversion: politica.eventos.map((e) => e.eventKey),
       reglasCanal: politica.canales.map((c) => ({ canal: c.canal, modo: c.modo })),
       techoDeclarado: presupuesto === null ? null : { modalidad: presupuesto.modalidad, montoMinor: presupuesto.montoMinor },
+      // Investigar NO depende de ninguna capacidad: se mira lo que hay conectado, y nada de esto escribe.
       conexionAdsConectada: conexiones.some((c) => c.provider === 'GOOGLE_ADS' && c.estado === 'CONNECTED'),
-      capacidadLectura: habilitadas.has('MEDICION_REAL') || habilitadas.has('AUTONOMIA_ADS'),
     };
   }
 
