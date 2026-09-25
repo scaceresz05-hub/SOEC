@@ -19,7 +19,7 @@ import { googleAdsOAuthMigrations } from '../src/acquisition/google-ads-oauth-pg
 import { handoffMigrations, RepositorioHandoff } from '../src/handoff/handoff-pg';
 import { HandoffService } from '../src/handoff/handoff-service';
 import { verificadoresDeGoogle, VERIFICADORES_PENDIENTES } from '../src/handoff/handoff-verificadores';
-import { correrTickDeHandoffs, ExternalHandoffScheduler, organizacionesConCanalIniciado, INTERVALO_POR_DEFECTO_MS } from '../src/handoff/handoff-scheduler';
+import { correrTickDeHandoffs, ExternalHandoffScheduler, organizacionesIncorporandoCanal, INTERVALO_POR_DEFECTO_MS } from '../src/handoff/handoff-scheduler';
 import type { EstadoGoogleParaHandoff } from '../src/handoff/handoff-google';
 
 const pool = makeTestPool();
@@ -98,15 +98,57 @@ beforeEach(async () => {
 afterAll(async () => { await pool.end(); });
 
 describe('quién entra en el tick', () => {
+  /**
+   * La regla que costó un incidente: tener Google conectado NO es estar incorporándose. Una empresa que ya
+   * opera —SOEC le mide, le dirige o le optimiza— terminó esa etapa, y una etapa terminada no se reabre por
+   * la espalda. Aquí se fija con las capacidades, que es la señal que el sistema ya guarda.
+   */
+  it('una empresa que YA OPERA el canal queda fuera, aunque tenga conexión y tarea abierta', async () => {
+    const repo = new RepositorioConexiones(pool);
+    await repo.fijarCapacidadSiFalta(pool, {
+      organizationId: ORG_B, capacidad: 'MEDICION_REAL', habilitada: true, origen: 'SISTEMA',
+      nota: 'ya opera', actor: 'prueba',
+    });
+    // Aunque además tenga una tarea abierta de antes, no vuelve a entrar.
+    await servicioCon(mundo(SIN_CUENTAS)).abrir(ORG_B, {
+      canal: 'GOOGLE_ADS', tipo: 'PAYMENT_SETUP_REQUIRED', causa: 'pago-no-verificable',
+      instruccion: 'x', motivo: 'y', etiquetaAccion: 'z', urlProveedor: null,
+    });
+
+    const elegibles = await organizacionesIncorporandoCanal(pool)();
+    expect(elegibles).toContain(ORG_A);
+    expect(elegibles, 'una empresa operativa no entra al recorrido de incorporación').not.toContain(ORG_B);
+  });
+
+  it('y el tick no la toca: su tarea queda exactamente como estaba', async () => {
+    const repo = new RepositorioConexiones(pool);
+    await repo.fijarCapacidadSiFalta(pool, {
+      organizationId: ORG_B, capacidad: 'AUTONOMIA_ADS', habilitada: true, origen: 'SISTEMA', nota: 'ya opera', actor: 'prueba',
+    });
+    const suya = await servicioCon(mundo(SIN_CUENTAS)).abrir(ORG_B, {
+      canal: 'GOOGLE_ADS', tipo: 'PAYMENT_SETUP_REQUIRED', causa: 'pago-no-verificable',
+      instruccion: 'x', motivo: 'y', etiquetaAccion: 'z', urlProveedor: null,
+    });
+    const antes = await pool.query('select id, estado, actualizado_en from external_handoff where organization_id = $1', [ORG_B]);
+
+    for (let i = 0; i < 3; i += 1) {
+      await correrTickDeHandoffs({ reanudador: servicioCon(mundo(SIN_CUENTAS)), elegibles: organizacionesIncorporandoCanal(pool) });
+    }
+    const despues = await pool.query('select id, estado, actualizado_en from external_handoff where organization_id = $1', [ORG_B]);
+    expect(despues.rows).toEqual(antes.rows);
+    expect(despues.rows).toHaveLength(1);
+    expect(despues.rows[0].id).toBe(suya.id);
+  });
+
   it('sólo las empresas que ya empezaron el canal, o que ya tienen una tarea', async () => {
-    const elegibles = await organizacionesConCanalIniciado(pool)();
+    const elegibles = await organizacionesIncorporandoCanal(pool)();
     expect([...elegibles].sort()).toEqual([ORG_A, ORG_B]);
     expect(elegibles).not.toContain(ORG_SIN_GOOGLE);
   });
 
   it('una empresa que nunca tocó Google no recibe ninguna tarea de Google', async () => {
     const caja = mundo(SIN_CUENTAS);
-    const r = await correrTickDeHandoffs({ reanudador: servicioCon(caja), elegibles: organizacionesConCanalIniciado(pool) });
+    const r = await correrTickDeHandoffs({ reanudador: servicioCon(caja), elegibles: organizacionesIncorporandoCanal(pool) });
 
     expect(r.organizaciones).toBe(2);
     expect(await filas(ORG_SIN_GOOGLE)).toBe(0);
@@ -119,7 +161,7 @@ describe('la primera tarea nace sola', () => {
     const caja = mundo(SIN_CUENTAS);
     expect(await filas(ORG_A)).toBe(0);
 
-    const r = await correrTickDeHandoffs({ reanudador: servicioCon(caja), elegibles: organizacionesConCanalIniciado(pool) });
+    const r = await correrTickDeHandoffs({ reanudador: servicioCon(caja), elegibles: organizacionesIncorporandoCanal(pool) });
     expect(r.creados).toBe(2); // una por empresa elegible
     expect(await filas(ORG_A)).toBe(1);
 
@@ -133,7 +175,7 @@ describe('la primera tarea nace sola', () => {
   it('repetir el tick no duplica nada: ni fila, ni auditoría, ni marca de actualización', async () => {
     const caja = mundo(SIN_CUENTAS);
     const s = servicioCon(caja);
-    const elegibles = organizacionesConCanalIniciado(pool);
+    const elegibles = organizacionesIncorporandoCanal(pool);
     await correrTickDeHandoffs({ reanudador: s, elegibles });
 
     const antes = await pool.query('select id, estado, actualizado_en from external_handoff where organization_id = $1', [ORG_A]);
@@ -151,7 +193,7 @@ describe('cuando el mundo cambia, SOEC lo nota sin que nadie pulse nada', () => 
   it('aparece una cuenta ⇒ se cierra el alta y se abre la elección, en el mismo tick', async () => {
     const caja = mundo(SIN_CUENTAS);
     const s = servicioCon(caja);
-    const elegibles = organizacionesConCanalIniciado(pool);
+    const elegibles = organizacionesIncorporandoCanal(pool);
     await correrTickDeHandoffs({ reanudador: s, elegibles });
     const alta = (await new RepositorioHandoff(pool).abiertas(ORG_A))[0]!;
 
@@ -172,7 +214,7 @@ describe('cuando el mundo cambia, SOEC lo nota sin que nadie pulse nada', () => 
   it('con la cuenta ya elegida no queda nada pendiente, y no se inventa un paso más', async () => {
     const caja = mundo(CON_CUENTAS);
     const s = servicioCon(caja);
-    const elegibles = organizacionesConCanalIniciado(pool);
+    const elegibles = organizacionesIncorporandoCanal(pool);
     await correrTickDeHandoffs({ reanudador: s, elegibles });
     expect((await new RepositorioHandoff(pool).abiertas(ORG_A))[0]!.tipo).toBe('ACCOUNT_SELECTION_REQUIRED');
 
@@ -189,7 +231,7 @@ describe('un proveedor caído no es una decisión de negocio', () => {
   it('timeout/429/5xx ⇒ RETRY_LATER: nada se cierra, nada se abre, nada se toca', async () => {
     const caja = mundo(SIN_CUENTAS);
     const s = servicioCon(caja);
-    const elegibles = organizacionesConCanalIniciado(pool);
+    const elegibles = organizacionesIncorporandoCanal(pool);
     await correrTickDeHandoffs({ reanudador: s, elegibles });
     const antes = await pool.query('select id, estado, actualizado_en from external_handoff where organization_id = $1', [ORG_A]);
     const auditAntes = await auditoria(ORG_A);
@@ -208,7 +250,7 @@ describe('un proveedor caído no es una decisión de negocio', () => {
 
   it('sin poder preguntar, tampoco se crea la primera tarea: no se adivina qué falta', async () => {
     const caja = mundo(new Error('ETIMEDOUT'));
-    await correrTickDeHandoffs({ reanudador: servicioCon(caja), elegibles: organizacionesConCanalIniciado(pool) });
+    await correrTickDeHandoffs({ reanudador: servicioCon(caja), elegibles: organizacionesIncorporandoCanal(pool) });
     expect(await filas(ORG_A)).toBe(0);
     expect(await auditoria(ORG_A)).toBe(0);
   });
@@ -218,7 +260,7 @@ describe('dos a la vez no son dos veces', () => {
   it('dos ticks concurrentes dejan una sola tarea y una sola línea de historia', async () => {
     const caja = mundo(SIN_CUENTAS);
     const s = servicioCon(caja);
-    const elegibles = organizacionesConCanalIniciado(pool);
+    const elegibles = organizacionesIncorporandoCanal(pool);
     const [a, b] = await Promise.all([
       correrTickDeHandoffs({ reanudador: s, elegibles }),
       correrTickDeHandoffs({ reanudador: s, elegibles }),
@@ -234,7 +276,7 @@ describe('dos a la vez no son dos veces', () => {
     const caja = mundo(SIN_CUENTAS);
     const s = servicioCon(caja);
     await Promise.all([
-      correrTickDeHandoffs({ reanudador: s, elegibles: organizacionesConCanalIniciado(pool) }),
+      correrTickDeHandoffs({ reanudador: s, elegibles: organizacionesIncorporandoCanal(pool) }),
       s.reanudar(ORG_A, 'persona'),
     ]);
     expect(await filas(ORG_A)).toBe(1);
@@ -243,12 +285,12 @@ describe('dos a la vez no son dos veces', () => {
 
   it('tras un reinicio, el scheduler retoma la tarea existente en vez de crear otra', async () => {
     const caja = mundo(SIN_CUENTAS);
-    await correrTickDeHandoffs({ reanudador: servicioCon(caja), elegibles: organizacionesConCanalIniciado(pool) });
+    await correrTickDeHandoffs({ reanudador: servicioCon(caja), elegibles: organizacionesIncorporandoCanal(pool) });
     const original = (await new RepositorioHandoff(pool).abiertas(ORG_A))[0]!;
 
     // «Reinicio»: servicio y scheduler nuevos, misma base.
     const otro = servicioCon(mundo(SIN_CUENTAS));
-    await correrTickDeHandoffs({ reanudador: otro, elegibles: organizacionesConCanalIniciado(pool) });
+    await correrTickDeHandoffs({ reanudador: otro, elegibles: organizacionesIncorporandoCanal(pool) });
 
     const abiertas = await new RepositorioHandoff(pool).abiertas(ORG_A);
     expect(abiertas).toHaveLength(1);
@@ -258,7 +300,7 @@ describe('dos a la vez no son dos veces', () => {
   it('el tick de una empresa no toca a la otra', async () => {
     const caja = mundo(SIN_CUENTAS);
     const s = servicioCon(caja);
-    await correrTickDeHandoffs({ reanudador: s, elegibles: organizacionesConCanalIniciado(pool) });
+    await correrTickDeHandoffs({ reanudador: s, elegibles: organizacionesIncorporandoCanal(pool) });
     const deB = (await new RepositorioHandoff(pool).abiertas(ORG_B))[0]!;
 
     caja.estado = YA_ELEGIDA;
@@ -272,7 +314,7 @@ describe('reanudar solo no concede nada', () => {
   it('ni mandato, ni gasto, ni escritura, ni autonomía, ni campañas', async () => {
     const caja = mundo(SIN_CUENTAS);
     const s = servicioCon(caja);
-    const elegibles = organizacionesConCanalIniciado(pool);
+    const elegibles = organizacionesIncorporandoCanal(pool);
     await correrTickDeHandoffs({ reanudador: s, elegibles });
     caja.estado = YA_ELEGIDA;
     await correrTickDeHandoffs({ reanudador: s, elegibles });
@@ -314,7 +356,7 @@ describe('la cadena tiene tope y el scheduler se puede apagar', () => {
     const eventos: Record<string, unknown>[] = [];
     const caja = mundo(SIN_CUENTAS);
     await correrTickDeHandoffs({
-      reanudador: servicioCon(caja), elegibles: organizacionesConCanalIniciado(pool),
+      reanudador: servicioCon(caja), elegibles: organizacionesIncorporandoCanal(pool),
       log: (e) => eventos.push(e),
     });
     const texto = JSON.stringify(eventos);

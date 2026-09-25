@@ -27,7 +27,7 @@ import { HandoffService } from '../src/handoff/handoff-service';
 import { depsDeHandoff, estadoGoogleParaHandoff } from '../src/handoff/composicion';
 import { correrTickDeHandoffs } from '../src/handoff/handoff-scheduler';
 import { lectorFacturacionGoogle } from '../src/facturacion/composicion';
-import { lectorVerificacionGoogle } from '../src/verificacion/composicion';
+import { lectorVerificacionGoogle, puertoVerificacionGoogle } from '../src/verificacion/composicion';
 import { FacturacionService } from '../src/facturacion/facturacion-service';
 import { puertoFacturacionGoogle } from '../src/facturacion/composicion';
 import { cuentaElegidaDe } from '../src/facturacion/composicion';
@@ -44,6 +44,8 @@ const mundo = {
   /** Programas de verificación que la API enumera. Vacío = Google no informa de ninguno. */
   programas: [] as Array<Record<string, unknown>>,
   estadoCuenta: 'ENABLED',
+  /** Cuando no es null, la llamada de identidad responde ese estado HTTP en vez de programas. */
+  identidadHttp: null as number | null,
   llamadas: [] as string[],
 };
 
@@ -54,6 +56,9 @@ const fetchFalso: typeof fetch = (async (url: unknown, init?: { body?: string })
   mundo.llamadas.push(u.includes('searchStream') ? `GAQL:${cuerpo.includes('billing_setup') ? 'billing' : 'customer'}` : 'identidad');
 
   if (u.includes('getIdentityVerification')) {
+    if (mundo.identidadHttp !== null) {
+      return new Response(JSON.stringify({ error: { code: mundo.identidadHttp, status: 'PERMISSION_DENIED' } }), { status: mundo.identidadHttp, headers: { 'content-type': 'application/json' } });
+    }
     return new Response(JSON.stringify({ identityVerification: mundo.programas }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
   if (u.includes('searchStream')) {
@@ -138,6 +143,7 @@ beforeEach(async () => {
   mundo.configuracionAprobada = true;
   mundo.programas = [];
   mundo.estadoCuenta = 'ENABLED';
+  mundo.identidadHttp = null;
   mundo.llamadas = [];
 });
 afterAll(async () => { await pool.end(); });
@@ -159,6 +165,8 @@ describe('con las capacidades apagadas, la composición real SÍ pregunta a Goog
 
   /** La invariante que una cuenta real rompió: aprobado NO es permiso para gastar. */
   it('billing_setup APPROVED sin atestación NO deja la cuenta lista: se pide confirmar', async () => {
+    // Identidad resuelta: sólo entonces el recorrido llega al paso del pago.
+    mundo.programas = [{ verificationProgress: { programStatus: 'SUCCESS' } }];
     await correrTickDeHandoffs({ reanudador: servicioComoEnProduccion(), elegibles });
     expect(await abiertas()).toEqual(['PAYMENT_SETUP_REQUIRED']);
 
@@ -203,20 +211,70 @@ describe('el recorrido completo de CP, por la composición real', () => {
   });
 
   /** Lo que pasó de verdad: Google no enumeró nada y el sistema lo tomó por aprobado. */
-  it('si Google no informa de ninguna verificación, NO se da por verificada', async () => {
+  it('si Google no informa de ninguna verificación, NO se da por verificada ni se avanza', async () => {
     mundo.programas = [];
     await correrTickDeHandoffs({ reanudador: servicioComoEnProduccion(), elegibles });
-    // No se inventa un visto bueno; se sigue con lo que sí se sabe que falta.
-    expect(await abiertas()).toEqual(['PAYMENT_SETUP_REQUIRED']);
-    expect(await abiertas()).not.toEqual([]);
+    // Ni visto bueno ni paso siguiente: el recorrido se queda quieto hasta saber.
+    expect(await abiertas()).toEqual([]);
   });
 
-  it('nunca quedan 0 tareas mientras no haya atestación', async () => {
-    for (const programas of [[], [{ verificationProgress: { programStatus: 'SUCCESS' } }]]) {
-      await ejecutarDestructivoDePrueba(pool, 'truncate external_handoff cascade');
-      mundo.programas = programas as Array<Record<string, unknown>>;
-      await correrTickDeHandoffs({ reanudador: servicioComoEnProduccion(), elegibles });
-      expect(await abiertas(), JSON.stringify(programas)).not.toEqual([]);
+  it('con la identidad superada sí hay tarea mientras no haya atestación', async () => {
+    mundo.programas = [{ verificationProgress: { programStatus: 'SUCCESS' } }];
+    await correrTickDeHandoffs({ reanudador: servicioComoEnProduccion(), elegibles });
+    expect(await abiertas()).toEqual(['PAYMENT_SETUP_REQUIRED']);
+  });
+});
+
+describe('una observación fallida no es un avance', () => {
+  const puerto = () => puertoVerificacionGoogle(pool, { env: ENV, composicionGoogleAds: composicionGoogle(), fetchFn: fetchFalso, ttlMs: 0 });
+
+  it('lista vacía ⇒ UNKNOWN con su diagnóstico, y NO se adelanta el pago', async () => {
+    mundo.programas = [];
+    const v = await puerto().inspeccionar(ORG);
+    expect(v.estado).toBe('UNKNOWN');
+    expect(v.diagnostico).toBe('EMPTY_PROGRAM_LIST');
+    expect(v.programas).toBe(0);
+
+    await correrTickDeHandoffs({ reanudador: servicioComoEnProduccion(), elegibles });
+    expect(await abiertas(), 'con identidad indeterminada el recorrido se detiene').toEqual([]);
+  });
+
+  it('error del proveedor ⇒ RETRY_LATER con http y diagnóstico, y tampoco avanza', async () => {
+    mundo.identidadHttp = 403;
+    const v = await puerto().inspeccionar(ORG);
+    expect(v.estado).toBe('RETRY_LATER');
+    expect(v.diagnostico).toBe('PERMISSION_DENIED');
+    expect(v.httpProveedor).toBe(403);
+
+    await correrTickDeHandoffs({ reanudador: servicioComoEnProduccion(), elegibles });
+    expect(await abiertas()).toEqual([]);
+  });
+
+  it('429 se distingue de un error cualquiera', async () => {
+    mundo.identidadHttp = 429;
+    const v = await puerto().inspeccionar(ORG);
+    expect(v.diagnostico).toBe('RATE_LIMITED');
+    expect(v.estado).toBe('RETRY_LATER');
+  });
+
+  it('pendiente y superada tienen cada una su diagnóstico', async () => {
+    mundo.programas = [{ verificationProgress: { programStatus: 'PENDING_USER_ACTION' } }];
+    expect((await puerto().inspeccionar(ORG)).diagnostico).toBe('PROGRAM_PENDING_USER_ACTION');
+    mundo.programas = [{ verificationProgress: { programStatus: 'SUCCESS' } }];
+    expect((await puerto().inspeccionar(ORG)).diagnostico).toBe('PROGRAM_SUCCESS');
+  });
+
+  it('ningún registro lleva credenciales', async () => {
+    const eventos: Record<string, unknown>[] = [];
+    mundo.identidadHttp = 403;
+    await puertoVerificacionGoogle(pool, {
+      env: ENV, composicionGoogleAds: composicionGoogle(), fetchFn: fetchFalso, ttlMs: 0,
+      log: (i) => eventos.push(i),
+    }).inspeccionar(ORG);
+    const texto = JSON.stringify(eventos).toLowerCase();
+    expect(eventos.length).toBeGreaterThan(0);
+    for (const prohibido of ['token', 'bearer', 'authorization', 'developer', 'secret', 'password', 'refresh']) {
+      expect(texto, `«${prohibido}» no puede aparecer en un log`).not.toContain(prohibido);
     }
   });
 });

@@ -9,9 +9,16 @@
  * misma lógica que usa `POST /handoff/sync`. No hay una segunda derivación, ni un segundo cliente de Google,
  * ni un segundo OAuth: si algún día divergen, no será porque aquí se reimplementó nada.
  *
- * QUIÉN ES ELEGIBLE. Sólo quien ya empezó el canal —existe su ciclo de autorización— o ya tiene una tarea
- * abierta. Un negocio que jamás tocó Google no recibe la tarea de «autoriza Google»: pedirle algo que no ha
- * pedido no es proactividad, es ruido. La lista sale de los datos, no de una lista de empresas escrita a mano.
+ * QUIÉN ES ELEGIBLE. Aquí hubo un error que llegó a producción: «tiene Google conectado» se tomó por «se
+ * está incorporando», y el scheduler le abrió una tarea de incorporación a una empresa que lleva meses
+ * operando con campañas reales. Conectado y en incorporación no son lo mismo: lo primero es un hecho técnico
+ * permanente, lo segundo es una ETAPA, y las etapas se terminan.
+ *
+ * La regla correcta, expresada con lo que el sistema ya sabe: está incorporando el canal quien **empezó su
+ * autorización y todavía no opera con él**. Que SOEC ya mida, dirija u optimice esa cuenta —`MEDICION_REAL`,
+ * `DIRECTOR_REAL`, `CICLO_DIRECTOR`, `AUTONOMIA_ADS`, `ESCRITURA_ADS`— significa que esa etapa quedó atrás, y
+ * una etapa terminada no se vuelve a abrir por la espalda. Sigue saliendo de los datos: ninguna empresa está
+ * nombrada en el código.
  *
  * AISLAMIENTO. El fallo de una empresa no detiene a las demás (try/catch por empresa). Y una indisponibilidad
  * del proveedor —timeout, 429, 5xx— nunca se convierte en una decisión de negocio: el verificador responde
@@ -61,17 +68,35 @@ export const INTERVALO_POR_DEFECTO_MS = 5 * 60 * 1000;
 export const RETRASO_INICIAL_POR_DEFECTO_MS = 45 * 1000;
 
 /**
- * Empresas que pueden tener tareas externas de Google: las que ya iniciaron el ciclo de autorización —en
- * cualquier estado, incluida una autorización caducada— y las que ya tienen una tarea abierta, para que
- * ninguna se quede huérfana si el canal desaparece de la otra tabla.
+ * Capacidades que significan «esta empresa YA OPERA el canal». No son permisos de gasto: son la prueba de que
+ * el recorrido de incorporación terminó y SOEC trabaja con esa cuenta a diario.
  */
-export function organizacionesConCanalIniciado(pool: Pool): () => Promise<readonly string[]> {
+export const CAPACIDADES_DE_OPERACION: readonly string[] = [
+  'MEDICION_REAL', 'DIRECTOR_REAL', 'CICLO_DIRECTOR', 'AUTONOMIA_ADS', 'ESCRITURA_ADS',
+];
+
+/**
+ * Empresas que están INCORPORANDO el canal: empezaron su autorización —en cualquier estado, incluida una
+ * caducada— o tienen una tarea abierta, y todavía no operan con él.
+ *
+ * El filtro de madurez se aplica a las DOS ramas a propósito. Si sólo se aplicara a la primera, una empresa
+ * ya operativa con una tarea vieja abierta volvería a entrar por la puerta de atrás, que es exactamente el
+ * caso que hay que evitar: lo que ya existe se deja quieto, no se sigue removiendo.
+ */
+export function organizacionesIncorporandoCanal(pool: Pool): () => Promise<readonly string[]> {
   return async () => {
     const { rows } = await pool.query(
-      `select organization_id from google_ads_connection
+      `with operativas as (
+         select distinct organization_id from business_capability
+          where habilitada = true and capacidad = any($1::text[])
+       )
+       select organization_id from google_ads_connection
+        where organization_id not in (select organization_id from operativas)
        union
        select organization_id from external_handoff
-        where estado in ('OPEN', 'WAITING_EXTERNAL', 'BLOCKED_EXTERNAL')`,
+        where estado in ('OPEN', 'WAITING_EXTERNAL', 'BLOCKED_EXTERNAL')
+          and organization_id not in (select organization_id from operativas)`,
+      [CAPACIDADES_DE_OPERACION],
     );
     return rows.map((r: { organization_id: string }) => String(r.organization_id));
   };

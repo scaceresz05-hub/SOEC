@@ -58,7 +58,18 @@ export function puertoVerificacionGoogle(pool: Pool, o: OpcionesVerificacionGoog
       ...(o.fetchFn ? { fetchFn: o.fetchFn } : {}),
       ...(o.log ? { logger: (i: unknown) => o.log?.({ googleAdsVerificacion: i }) } : {}),
     });
-    return { ok: true, programas: programasDe(await cliente.verificacionDeIdentidad(customerId)) };
+    try {
+      return { ok: true, programas: programasDe(await cliente.verificacionDeIdentidad(customerId)) };
+    } catch (e) {
+      // El transporte ya sanitiza: de aquí sólo salen el estado HTTP y el código de error de Google.
+      const d = e as { detalle?: { httpStatus?: number; code?: string | null; status?: string | null } };
+      return {
+        ok: false,
+        motivo: d.detalle?.status ?? (e instanceof Error ? e.name : 'error'),
+        httpStatus: d.detalle?.httpStatus ?? null,
+        errorCode: d.detalle?.code ?? null,
+      };
+    }
   };
 
   const base: PuertoVerificacionAnunciante = {

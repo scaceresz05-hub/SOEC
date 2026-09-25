@@ -66,7 +66,11 @@ export function registerFacturacionRoutes(app: FastifyInstance, pool: Pool, opci
       return reply.send({ organizationId: org, estado: 'UNKNOWN', explicacion: 'Este despliegue no consulta la verificación del anunciante.' });
     }
     const v = await opciones.verificacion.inspeccionar(org);
-    return reply.send({ organizationId: org, estado: v.estado, explicacion: v.explicacion, fechaLimite: v.fechaLimite });
+    return reply.send({
+      organizationId: org, estado: v.estado, explicacion: v.explicacion, fechaLimite: v.fechaLimite,
+      // Diagnóstico TÉCNICO y sanitizado, para quien opera: nunca el cuerpo crudo del proveedor.
+      diagnostico: v.diagnostico, programas: v.programas, httpProveedor: v.httpProveedor,
+    });
   });
 
   app.post('/facturacion/confirmacion', async (req: FastifyRequest, reply: FastifyReply) => {

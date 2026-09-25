@@ -167,6 +167,15 @@ export function decidirHandoffGoogle(e: EstadoGoogleParaHandoff): DecisionGoogle
       };
     }
 
+    /**
+     * IDENTIDAD INDETERMINADA ⇒ EL RECORRIDO SE DETIENE, no avanza. Si no pudimos comprobar si Google exige
+     * verificar la empresa, pasar al paso siguiente equivaldría a tratar un fallo de observación como un
+     * visto bueno. Se deja lo que haya y se espera: nada se abre, nada se cierra.
+     */
+    if (e.verificacionAnunciante === 'RETRY_LATER' || e.verificacionAnunciante === 'UNKNOWN') {
+      return { accion: 'ESPERAR' };
+    }
+
     const f = e.facturacion;
     if (f === undefined || f === 'READY') return { accion: 'CERRAR' };
     if (f === 'PAYMENT_SETUP_REQUIRED') {

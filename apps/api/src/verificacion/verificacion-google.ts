@@ -13,14 +13,35 @@
  *    (ver la composición) y no se consulta en cada tick;
  *  · un fallo no es una respuesta: se traduce a `RETRY_LATER` y no cambia nada.
  */
-import { evaluarVerificacion, type EstadoProgramaGoogle, type LecturaVerificacion, type PuertoVerificacionAnunciante } from './verificacion-tipos';
+import { evaluarVerificacion, type DiagnosticoVerificacion, type EstadoProgramaGoogle, type LecturaVerificacion, type PuertoVerificacionAnunciante } from './verificacion-tipos';
 
 /** La llamada cruda al proveedor. Se inyecta para que las pruebas usen un doble y la red viva en un solo sitio. */
 export type ConsultaVerificacion = (customerId: string) => Promise<RespuestaVerificacion>;
 
 export type RespuestaVerificacion =
   | { readonly ok: true; readonly programas: readonly { readonly estado: EstadoProgramaGoogle; readonly fechaLimite?: string | null }[] }
-  | { readonly ok: false; readonly motivo: string };
+  | {
+    readonly ok: false;
+    readonly motivo: string;
+    /** Estado HTTP del proveedor, si llegó a haber respuesta. Nunca su cuerpo. */
+    readonly httpStatus?: number | null;
+    /** Código de error de Google, ya sanitizado por el transporte. */
+    readonly errorCode?: string | null;
+  };
+
+/**
+ * Del fallo del proveedor a un diagnóstico que se pueda leer sin abrir un depurador. Es todo lo que se
+ * publica y se registra del error: el cuerpo crudo de Google no sale de aquí, porque puede traer datos de la
+ * cuenta que nadie necesita en un log.
+ */
+export function diagnosticoDeFallo(httpStatus: number | null | undefined, errorCode: string | null | undefined): DiagnosticoVerificacion {
+  if (httpStatus === 401 || httpStatus === 403) return 'PERMISSION_DENIED';
+  if (httpStatus === 429) return 'RATE_LIMITED';
+  if (typeof errorCode === 'string' && /PERMISSION|NOT_ADS_USER|CUSTOMER_NOT_ENABLED/i.test(errorCode)) return 'PERMISSION_DENIED';
+  if (typeof errorCode === 'string' && /QUOTA|RATE/i.test(errorCode)) return 'RATE_LIMITED';
+  if (typeof httpStatus === 'number') return 'PROVIDER_HTTP_ERROR';
+  return 'UNKNOWN_PROVIDER_RESPONSE';
+}
 
 export interface DepsVerificacionGoogle {
   readonly cuenta: (org: string) => Promise<string | null>;
@@ -34,24 +55,56 @@ export class VerificacionGoogleAds implements PuertoVerificacionAnunciante {
 
   constructor(private readonly deps: DepsVerificacionGoogle) {}
 
+  /**
+   * OBSERVABILIDAD SANITIZADA. Se registra qué se preguntó, a qué cuenta, qué contestó el proveedor y cuánto
+   * tardó. Nunca el token, ni la cabecera de autorización, ni el developer token, ni el cuerpo de la
+   * respuesta: de lo que Google devuelve sólo salen el estado HTTP, su código de error y los estados
+   * normalizados de los programas.
+   */
   async inspeccionar(org: string): Promise<LecturaVerificacion> {
+    const t0 = Date.now();
     const cuenta = await this.deps.cuenta(org).catch(() => null);
-    if (cuenta === null || this.deps.consultar === undefined) {
-      // Sin cuenta elegida, o sin camino para preguntar, no se concluye: ni se pide nada ni se da por hecho.
-      return evaluarVerificacion({ programas: null });
+    if (cuenta === null) {
+      this.deps.log?.({ verificacion: 'sin-cuenta-elegida', org, operacion: 'GetIdentityVerification', duracionMs: Date.now() - t0 });
+      return evaluarVerificacion({ programas: null, fallo: { diagnostico: 'NO_ACCOUNT_SELECTED' } });
     }
+    if (this.deps.consultar === undefined) {
+      this.deps.log?.({ verificacion: 'sin-camino-al-proveedor', org, cuenta, operacion: 'GetIdentityVerification' });
+      return evaluarVerificacion({ programas: null, fallo: { diagnostico: 'NOT_QUERIED' } });
+    }
+
     let r: RespuestaVerificacion;
     try {
       r = await this.deps.consultar(cuenta);
     } catch (e) {
-      this.deps.log?.({ verificacion: 'consulta-fallida', org, error: e instanceof Error ? e.message : 'error' });
-      return evaluarVerificacion({ programas: null });
+      const d = e as { detalle?: { httpStatus?: number; code?: string | null } };
+      const httpStatus = d.detalle?.httpStatus ?? null;
+      const errorCode = d.detalle?.code ?? null;
+      const diagnostico = diagnosticoDeFallo(httpStatus, errorCode);
+      this.deps.log?.({
+        verificacion: 'consulta-fallida', org, cuenta, operacion: 'GetIdentityVerification',
+        httpStatus, errorCode, diagnostico, duracionMs: Date.now() - t0,
+      });
+      return evaluarVerificacion({ programas: null, fallo: { diagnostico, httpProveedor: httpStatus } });
     }
+
     if (!r.ok) {
-      this.deps.log?.({ verificacion: 'sin-respuesta-utilizable', org, motivo: r.motivo });
-      return evaluarVerificacion({ programas: null });
+      const diagnostico = diagnosticoDeFallo(r.httpStatus, r.errorCode);
+      this.deps.log?.({
+        verificacion: 'sin-respuesta-utilizable', org, cuenta, operacion: 'GetIdentityVerification',
+        motivo: r.motivo, httpStatus: r.httpStatus ?? null, errorCode: r.errorCode ?? null, diagnostico,
+        duracionMs: Date.now() - t0,
+      });
+      return evaluarVerificacion({ programas: null, fallo: { diagnostico, httpProveedor: r.httpStatus ?? null } });
     }
-    return evaluarVerificacion({ programas: r.programas });
+
+    const lectura = evaluarVerificacion({ programas: r.programas });
+    this.deps.log?.({
+      verificacion: 'consultada', org, cuenta, operacion: 'GetIdentityVerification', httpStatus: 200,
+      programas: r.programas.length, estados: r.programas.map((p) => p.estado),
+      diagnostico: lectura.diagnostico, estadoNormalizado: lectura.estado, duracionMs: Date.now() - t0,
+    });
+    return lectura;
   }
 }
 

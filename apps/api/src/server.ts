@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { runGoogleAdsMigrationsSeguro, PgGoogleAdsSyncLease } from './acquisition/google-ads-oauth-pg';
 import { budgetAuthorizationMigrations } from './autonomia-ads/budget-authorization-pg';
 import { crearComposicionGoogleAdsOAuth } from './acquisition/google-ads-runtime-oauth';
-import { ExternalHandoffScheduler, organizacionesConCanalIniciado } from './handoff/handoff-scheduler';
+import { ExternalHandoffScheduler, organizacionesIncorporandoCanal } from './handoff/handoff-scheduler';
 import { HandoffService } from './handoff/handoff-service';
 import { OnboardingService } from './onboarding/onboarding-service';
 import { depsDeHandoff, estadoGoogleParaHandoff } from './handoff/composicion';
@@ -259,13 +259,16 @@ async function main(): Promise<void> {
       estadoGoogle,
       // Mismo lector de facturación que usan las rutas: una sola verdad sobre si la cuenta puede pagar.
       facturacion: lectorFacturacionGoogle(pool, { env: process.env, composicionGoogleAds: compGoogleAds }),
-      verificacionAnunciante: lectorVerificacionGoogle(pool, { env: process.env, composicionGoogleAds: compGoogleAds }),
+      verificacionAnunciante: lectorVerificacionGoogle(pool, {
+        env: process.env, composicionGoogleAds: compGoogleAds,
+        log: (i) => console.log(JSON.stringify({ verificacionAnunciante: i })),
+      }),
       recalcularPreparacion: async (org) => new OnboardingService(pool, { leerModo: async () => 'PILOT' }).readiness(org),
       log: (i) => console.log(JSON.stringify({ handoff: i })),
     }));
     const handoffScheduler = new ExternalHandoffScheduler({
       reanudador: servicioHandoff,
-      elegibles: organizacionesConCanalIniciado(pool),
+      elegibles: organizacionesIncorporandoCanal(pool),
       habilitado: process.env.SOEC_HANDOFF_SCHEDULER_ENABLED !== 'false',
       retrasoInicialMs: RETRASO_SCHEDULER_HANDOFF_MS, // escalonado: no comparte segundo con las otras lecturas
       ahora: () => new Date().toISOString(),

@@ -524,14 +524,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // FACTURACIÓN (Fase I.6.1): estado del pago y la confirmación humana cuando Google no deja comprobarlo.
       registerFacturacionRoutes(target, pool, {
         composicionGoogleAds, env: process.env,
-        verificacion: puertoVerificacionGoogle(pool, { env: process.env, composicionGoogleAds }),
+        verificacion: puertoVerificacionGoogle(pool, {
+          env: process.env, composicionGoogleAds, log: (i) => console.log(JSON.stringify({ verificacionAnunciante: i })),
+        }),
       });
       registerHandoffRoutes(target, pool, {
         estadoGoogle: (org) => estadoGoogleParaHandoff(org, composicionGoogleAds),
         // Fase I.6: ¿puede esta cuenta pagar sus anuncios? Solo lectura, y sólo si ya hay cuenta elegida.
         facturacion: lectorFacturacionGoogle(pool, { env: process.env, composicionGoogleAds }),
         // Gate post-conexión: ¿Google exige verificar quién está detrás de los anuncios?
-        verificacionAnunciante: lectorVerificacionGoogle(pool, { env: process.env, composicionGoogleAds }),
+        verificacionAnunciante: lectorVerificacionGoogle(pool, {
+          env: process.env, composicionGoogleAds, log: (i) => console.log(JSON.stringify({ verificacionAnunciante: i })),
+        }),
         log: (i) => console.log(JSON.stringify(i)),
       });
     }
