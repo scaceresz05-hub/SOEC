@@ -110,7 +110,17 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
     e.canales.find((c) => c.canal === 'GOOGLE_SEARCH')?.evidenciaIds ?? [],
   );
   if (veredictoSearch === 'BLOCKED') prerequisitos.push('el negocio declaró Google como canal prohibido: hay que revisarlo antes de planificar aquí');
-  if (veredictoSearch === 'INSUFFICIENT_EVIDENCE') prerequisitos.push('conectar la cuenta de Google Ads para poder medir la demanda');
+  if (veredictoSearch === 'INSUFFICIENT_EVIDENCE') {
+    /**
+     * EL PRERREQUISITO DICE LO QUE DE VERDAD PASÓ. Antes daba por hecho que «no se pudo medir la demanda»
+     * significaba «falta conectar Google», y se lo decía a una empresa que tenía su cuenta conectada desde
+     * hacía días: pedirle a alguien que haga algo que ya hizo es peor que no decirle nada. Ahora se traslada
+     * el motivo observado del propio canal —sin conexión, consulta fallida o planificador sin términos—, que
+     * es el único que sabe cuál de los tres ocurrió.
+     */
+    const motivo = e.canales.find((c) => c.canal === 'GOOGLE_SEARCH')?.motivos[0] ?? 'no se pudo medir la demanda de búsqueda';
+    prerequisitos.push(`poder medir la demanda de búsqueda: ${motivo}`);
+  }
   if (veredictoSearch === 'NOT_SUITABLE') prerequisitos.push('la demanda observada no justifica invertir en buscador con la oferta actual');
 
   // ── OBJETIVO ──
