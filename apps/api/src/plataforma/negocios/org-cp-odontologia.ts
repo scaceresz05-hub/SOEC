@@ -139,10 +139,19 @@ export const CONFIGURACION_ORG_CP_ODONTOLOGIA: ConfiguracionOrganizacion = {
   negocio: {
     organizationId: ORG_CP_ODONTOLOGIA,
     businessKey: BUSINESS_KEY_CP_ODONTOLOGIA,
-    // Razón social EXACTA según WHOIS de NIC Chile. No se "corrige" ni se embellece.
-    legalName: 'CENTRO E SALUD ODONTOLOGICO CP SPA',
-    displayName: 'CP Odontología',
-    rut: null, // pendiente del propietario; nunca se inventa
+    /**
+     * Razón social y RUT según el **Certificado de Vigencia del Registro de Empresas y Sociedades**, que es
+     * la fuente oficial de la identidad legal de una sociedad chilena.
+     *
+     * Antes aquí vivía lo que dice el WHOIS de NIC Chile —«CENTRO E SALUD ODONTOLOGICO CP SPA»—, con una
+     * errata y sin acentos. Aquel valor era fiel a SU fuente, y por eso se copiaba tal cual; el error fue de
+     * jerarquía, no de transcripción: para saber cómo se llama legalmente una empresa manda el registro de
+     * comercio, no el registro de dominios. Un nombre legal mal escrito no es un detalle cosmético: es lo que
+     * acabaría impreso en un contrato o en una factura.
+     */
+    legalName: 'CENTRO DE SALUD ODONTOLÓGICA CP SpA',
+    displayName: 'CP Odontología', // nombre comercial: no cambia, es con el que la conocen sus pacientes
+    rut: '77.214.436-9',
     modeloDeNegocio: 'SERVICIOS',
     mercado: 'Chile',
     // Su única fuente está declarada y sin conectar: la incorporación está en curso.
@@ -153,7 +162,7 @@ export const CONFIGURACION_ORG_CP_ODONTOLOGIA: ConfiguracionOrganizacion = {
     experienciasHabilitadas: [],
     decisionPiloto: null,
     datosHumanosPendientes: [
-      'RUT / identificación tributaria',
+      // El RUT dejó de faltar: lo aporta el Certificado de Vigencia.
       'buzón de correo corporativo (contacto@dentistaclaudiapacheco.cl aún no existe)',
       'cuenta de anuncios propia, si alguna vez se abre',
       'economía del servicio (ticket, costos) desde una fuente autorizada',

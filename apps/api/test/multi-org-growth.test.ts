@@ -146,8 +146,10 @@ describe('CP Odontología · configuración registrada', () => {
     expect(n.displayName).toBe('CP Odontología');
     expect(n.modeloDeNegocio).toBe('SERVICIOS');
     expect(n.mercado).toBe('Chile');
-    // No se inventa identidad tributaria ni se habilita ninguna experiencia REAL.
-    expect(n.rut).toBeNull();
+    // La identidad tributaria ya no falta, pero tampoco se inventó: sale del Certificado de Vigencia del
+    // Registro de Empresas y Sociedades, que es la fuente oficial. Lo que sigue prohibido es rellenarla.
+    expect(n.rut).toBe('77.214.436-9');
+    expect(n.legalName).toBe('CENTRO DE SALUD ODONTOLÓGICA CP SpA');
     expect(n.experienciasHabilitadas).toEqual([]);
   });
 

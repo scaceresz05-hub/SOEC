@@ -104,6 +104,29 @@ export interface NegocioCompleto {
   readonly gobierno: GobiernoNegocio;
 }
 
+/**
+ * CORRECCIÓN DE IDENTIDAD LEGAL DE UNA EMPRESA CONCRETA.
+ *
+ * `business_profile.legal_name` es el SSOT: la proyección del runtime lo prefiere sobre el registro, así que
+ * arreglar el módulo TypeScript no bastaba —la fila persistida seguiría mandando—. Esta migración corrige
+ * ESA fila y sólo si todavía contiene exactamente el valor equivocado, que venía del WHOIS de NIC Chile con
+ * una errata. Si alguien ya lo arregló por la interfaz, no hace nada.
+ *
+ * Se hace aquí, y no con una consulta suelta, porque una corrección de identidad legal debe quedar en el
+ * historial del repositorio con su razón al lado: la fuente es el Certificado de Vigencia del Registro de
+ * Empresas y Sociedades. Ninguna otra empresa, ni ningún otro campo, entra en el alcance.
+ */
+const CORRECCION_IDENTIDAD_CP: Migration = {
+  id: '0002_identidad_legal_cp_desde_certificado_de_vigencia',
+  sql: `
+    update business_profile
+       set legal_name = 'CENTRO DE SALUD ODONTOLÓGICA CP SpA',
+           updated_at = now()
+     where organization_id = 'org-cp-odontologia'
+       and legal_name = 'CENTRO E SALUD ODONTOLOGICO CP SPA';
+  `,
+};
+
 export const negocioMigrations: ReadonlyArray<Migration> = [
   {
     id: '0001_business_as_data',
@@ -194,6 +217,7 @@ export const negocioMigrations: ReadonlyArray<Migration> = [
       create index if not exists ix_business_audit_org on business_audit (organization_id, at desc);
     `,
   },
+  CORRECCION_IDENTIDAD_CP,
 ];
 
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v ?? ''));

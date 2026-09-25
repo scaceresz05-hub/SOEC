@@ -27,7 +27,8 @@ const noEncontrado = () => ({ ok: false, status: 404, json: async () => ({}) });
 
 /** Lo que devuelve la API real para CP tras la integración (identidad comercial declarada). */
 const NEGOCIO_CP = {
-  organizationId: 'org-cp-odontologia', displayName: 'CP Odontología', legalName: 'CENTRO E SALUD ODONTOLOGICO CP SPA', rut: null,
+  organizationId: 'org-cp-odontologia', displayName: 'CP Odontología',
+  legalName: 'CENTRO DE SALUD ODONTOLÓGICA CP SpA', rut: '77.214.436-9',
   modeloDeNegocio: 'SERVICIOS', mercado: 'Chile', estado: 'SOURCES_PENDING',
   categoriasDeclaradas: ['clínica dental', 'odontología general'], fuentes: [], datosHumanosPendientes: [],
   tipoDeNegocio: 'clínica odontológica',
