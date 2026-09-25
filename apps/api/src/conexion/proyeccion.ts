@@ -197,7 +197,29 @@ function alcanceDeTerritorio(t: TerritorioNegocio | undefined): AlcanceGeografic
   };
 }
 
-/** Estado de incorporación derivado de lo persistido. Sólo se usa para empresas SIN módulo histórico. */
+/**
+ * ¿Ya tiene esta empresa una cuenta publicitaria propia conectada? Es un HECHO del mundo, no una declaración:
+ * hay conexión del canal, está CONNECTED y lleva el identificador de una cuenta.
+ */
+function tieneCuentaPublicitariaPropia(conexiones: readonly Conexion[]): boolean {
+  return conexiones.some((c) => c.provider === 'GOOGLE_ADS' && c.estado === 'CONNECTED'
+    && String((c.configuracion as { customerId?: string }).customerId ?? c.externalAccountId ?? '') !== '');
+}
+
+/**
+ * PENDIENTES HUMANOS QUE YA NO LO SON. El registro los declaró cuando eran ciertos; el mundo cambió y la
+ * lista no se enteraba. Seguir pidiendo «una cuenta de anuncios propia, si alguna vez se abre» a quien ya la
+ * abrió y la conectó no es un detalle cosmético: es el sistema afirmando que falta algo que está hecho.
+ *
+ * La regla es genérica —se aplica a cualquier empresa— y se apoya en lo único observable de cada pendiente:
+ * qué hecho lo satisface. Lo que no sabemos comprobar se conserva tal cual: no saber nunca tacha nada.
+ */
+function pendientesVigentes(declarados: readonly string[], conexiones: readonly Conexion[]): readonly string[] {
+  const cuentaPropia = tieneCuentaPublicitariaPropia(conexiones);
+  return declarados.filter((p) => !(cuentaPropia && /cuenta de anuncios|cuenta publicitaria/i.test(p)));
+}
+
+/** Estado de incorporación derivado de lo persistido. */
 function estadoDeIncorporacion(perfil: PerfilNegocio, conexiones: readonly Conexion[]): EstadoIncorporacion {
   if (perfil.status === 'DRAFT') return 'CREATED';
   if (perfil.status === 'CONFIGURING') return 'CONFIGURING';
@@ -268,6 +290,14 @@ export function proyectarNegocio(d: DatosDeNegocio): { config: ConfiguracionOrga
         // Lo que ahora es dato: nombre, objetivo, territorio, capacidades y permiso de pausa automática.
         displayName: d.perfil.displayName,
         legalName: d.perfil.legalName ?? base.negocio.legalName,
+        /**
+         * El estado de incorporación también sale de los datos, y no del módulo TypeScript. Antes se
+         * heredaba del registro y quedaba congelado: una empresa podía conectar su cuenta, verificarse y
+         * confirmar su pago, y SOEC seguía diciendo que le faltaban fuentes. Una etapa se termina cuando el
+         * mundo dice que se terminó, no cuando alguien edita una constante.
+         */
+        estado: estadoDeIncorporacion(d.perfil, conexiones),
+        datosHumanosPendientes: pendientesVigentes(base.negocio.datosHumanosPendientes, conexiones),
         experienciasHabilitadas: experiencias,
         objetivoComercial: d.perfil.primaryObjective ?? base.negocio.objetivoComercial,
         alcanceComercial: alcance ?? base.negocio.alcanceComercial ?? null,
@@ -295,7 +325,9 @@ export function proyectarNegocio(d: DatosDeNegocio): { config: ConfiguracionOrga
 
   if (base) {
     if (base.perfilComercial) delRegistro.push('perfilComercial');
-    delRegistro.push('estadoDeIncorporacion');
+    // `estadoDeIncorporacion` ya NO sale del registro: se deriva de las conexiones persistidas, igual que
+    // para una empresa creada desde la interfaz. Decirlo aquí importa: esta lista es la que declara, en el
+    // arranque, qué campos de cada empresa siguen viniendo de un módulo TypeScript.
   }
   if (base?.embudo && (d.politica?.eventos ?? []).every((e) => e.rol !== 'PRIMARY')) delRegistro.push('embudo');
 

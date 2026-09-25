@@ -154,21 +154,26 @@ export class VerificacionGoogleAds implements PuertoVerificacionAnunciante {
 }
 
 /**
- * CACHÉ CON VENCIMIENTO. Google pide explícitamente no golpear esta llamada: el scheduler pasa cada cinco
- * minutos por cada empresa, y sin esto la agotaríamos nosotros solos. Una verificación de identidad no cambia
- * en minutos; media hora de desfase no le cuesta nada a nadie.
+ * CACHÉ DE LA LLAMADA AL PROVEEDOR. Y sólo de eso.
+ *
+ * La versión anterior cacheaba la LECTURA COMPLETA durante media hora, y ahí estaba el defecto: esa lectura
+ * mezcla lo que dice Google con lo que dice nuestra propia base —si una persona ya confirmó la verificación—.
+ * Cachear nuestro propio dato no ahorra nada y cuesta caro: alguien confirmaba, el scheduler seguía viendo el
+ * estado viejo durante media hora, volvía a abrir la tarea que la persona acababa de resolver, y al vencer la
+ * caché la cerraba otra vez. Un bucle que le pedía dos veces lo mismo a quien ya lo había hecho.
+ *
+ * Ahora se cachea únicamente la respuesta del proveedor, que es lo que hay que proteger: Google limita esta
+ * llamada más que el resto y pide consultarla con calma. Lo nuestro se lee siempre fresco.
  */
-export function conCache(puerto: PuertoVerificacionAnunciante, ttlMs = 30 * 60 * 1000, ahora: () => number = Date.now): PuertoVerificacionAnunciante {
-  const memoria = new Map<string, { readonly valor: LecturaVerificacion; readonly vence: number }>();
-  return {
-    nombre: puerto.nombre,
-    inspeccionar: async (org: string): Promise<LecturaVerificacion> => {
-      const guardado = memoria.get(org);
-      if (guardado !== undefined && guardado.vence > ahora()) return guardado.valor;
-      const valor = await puerto.inspeccionar(org);
-      // Lo que no se pudo averiguar no se cachea: sería convertir un fallo pasajero en media hora de silencio.
-      if (valor.estado !== 'RETRY_LATER') memoria.set(org, { valor, vence: ahora() + ttlMs });
-      return valor;
-    },
+export function conCacheDeConsulta(consulta: ConsultaVerificacion, ttlMs = 30 * 60 * 1000, ahora: () => number = Date.now): ConsultaVerificacion {
+  const memoria = new Map<string, { readonly valor: RespuestaVerificacion; readonly vence: number }>();
+  return async (customerId: string): Promise<RespuestaVerificacion> => {
+    const guardado = memoria.get(customerId);
+    if (guardado !== undefined && guardado.vence > ahora()) return guardado.valor;
+    const valor = await consulta(customerId);
+    // Un fallo pasajero no se cachea: sería convertir un 429 de un segundo en media hora de ceguera.
+    const pasajero = !valor.ok && !esNoObservable(valor.errorCode);
+    if (!pasajero) memoria.set(customerId, { valor, vence: ahora() + ttlMs });
+    return valor;
   };
 }

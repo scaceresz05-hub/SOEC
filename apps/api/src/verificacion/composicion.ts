@@ -10,7 +10,7 @@ import { RepositorioConexiones } from '../conexion/conexion-pg';
 import { GoogleAdsMutateHttpClient } from '../campana/google-ads-mutate-http';
 import { obtenerAccessTokenDeOrg } from '../acquisition/google-ads-oauth-flow';
 import type { ComponentesFlujoGoogleAds } from '../acquisition/google-ads-oauth-flow';
-import { conCache, VerificacionGoogleAds, type RespuestaVerificacion } from './verificacion-google';
+import { conCacheDeConsulta, VerificacionGoogleAds, type RespuestaVerificacion } from './verificacion-google';
 import { RepositorioConfirmacionDeVerificacion, RepositorioObservabilidadVerificacion } from './verificacion-pg';
 import type { EstadoProgramaGoogle, EstadoVerificacionAnunciante, PuertoVerificacionAnunciante } from './verificacion-tipos';
 
@@ -75,12 +75,25 @@ export function puertoVerificacionGoogle(pool: Pool, o: OpcionesVerificacionGoog
 
   const observabilidad = new RepositorioObservabilidadVerificacion(pool);
   const confirmaciones = new RepositorioConfirmacionDeVerificacion(pool);
+  /**
+   * La caché vive AQUÍ, sobre la llamada al proveedor y compartida entre organizaciones por cuenta. Lo que
+   * sale de nuestra base —la confirmación de la persona, la observabilidad ya anotada— se lee fresco en cada
+   * inspección: cachearlo fue lo que hizo que el sistema volviera a pedir algo ya resuelto.
+   */
+  const consultarConCache = new Map<string, ReturnType<typeof conCacheDeConsulta>>();
+  const consultaDe = (org: string): ReturnType<typeof conCacheDeConsulta> => {
+    const guardada = consultarConCache.get(org);
+    if (guardada !== undefined) return guardada;
+    const nueva = conCacheDeConsulta(consultarPara(org), o.ttlMs);
+    consultarConCache.set(org, nueva);
+    return nueva;
+  };
 
   const base: PuertoVerificacionAnunciante = {
     nombre: 'google-ads',
     inspeccionar: async (org: string) => new VerificacionGoogleAds({
       cuenta: async () => (await cuentaYManager(pool, org))?.cuenta ?? null,
-      consultar: consultarPara(org),
+      consultar: consultaDe(org),
       // Lo que Google ya dijo sobre ESTA cuenta se recuerda: no se le vuelve a preguntar cada tick.
       observabilidadConocida: (o2, customerId) => observabilidad.de(o2, customerId),
       recordarNoObservable: async (o2, customerId, detalle) => {
@@ -90,7 +103,7 @@ export function puertoVerificacionGoogle(pool: Pool, o: OpcionesVerificacionGoog
       ...(o.log ? { log: o.log } : {}),
     }).inspeccionar(org),
   };
-  return conCache(base, o.ttlMs);
+  return base;
 }
 
 /** Lector listo para el módulo de handoff: sólo el estado, que es lo único que necesita para decidir. */
