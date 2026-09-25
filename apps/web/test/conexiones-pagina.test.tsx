@@ -52,8 +52,22 @@ const TAREA_GOOGLE = {
   esperando: false, bloqueadaFuera: false,
 };
 
+/** Presupuesto ya autorizado tal como lo devuelve la API: en pesos, sin una palabra del mecanismo. */
+const PRESUPUESTO = {
+  organizationId: 'org-qa-conexiones',
+  canal: 'GOOGLE_ADS',
+  monedaDelNegocio: 'CLP',
+  presupuesto: {
+    moneda: 'CLP', totalMaximo: 30_000, maximoDiario: 2_500, gastado: 0, disponible: 30_000, vigente: true,
+    autorizadoPor: 'duena', autorizadoEn: '2026-09-25T12:00:00.000Z',
+    desde: '2026-09-25T12:00:00.000Z', hasta: '2026-10-25T12:00:00.000Z',
+  },
+};
+/** Empresa que todavía no autorizó nada: hay moneda declarada, pero ningún presupuesto. */
+const SIN_PRESUPUESTO = { organizationId: 'org-qa-conexiones', canal: null, monedaDelNegocio: 'CLP', presupuesto: null };
+
 /** Devuelve también las llamadas hechas, para poder exigir que MIRAR no escriba nada. */
-function servidor(tarea: unknown = null): { llamadas: string[]; cuerpos: string[] } {
+function servidor(tarea: unknown = null, presupuesto: unknown = SIN_PRESUPUESTO): { llamadas: string[]; cuerpos: string[] } {
   const llamadas: string[] = [];
   const cuerpos: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { method?: string; body?: string }) => {
@@ -62,6 +76,9 @@ function servidor(tarea: unknown = null): { llamadas: string[]; cuerpos: string[
     if (init?.body !== undefined) cuerpos.push(init.body);
     if (u.includes('/facturacion/confirmacion')) {
       return new Response(JSON.stringify({ confirmadoEn: '2026-09-24T15:00:00.000Z', estado: 'READY' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (u.includes('/mandato-financiero')) {
+      return new Response(JSON.stringify(presupuesto), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     const cuerpo = u.includes('/api/google-ads/connection') ? CONEXION_GOOGLE
       : u.includes('/api/google-ads/accounts') ? { datos: { cuentas: [] } }
@@ -197,5 +214,68 @@ describe('Conexiones y permisos', () => {
     expect(texto).toMatch(/Autorización financiera/i);
     expect(texto).toMatch(/Operación autónoma/i);
     expect(texto).toMatch(/Conectar no autoriza cambios; permitir cambios no autoriza gasto/i);
+  });
+  /**
+   * FASE I.8 · el presupuesto autorizado, EN LA RUTA REAL. La lección del gate anterior vale igual aquí:
+   * probar el componente por su cuenta no demuestra que alguien pueda llegar a él. Lo que importa es que la
+   * pantalla que la persona abre lo monte, lo pinte, y lo pinte en su idioma.
+   */
+  it('una empresa sin presupuesto autorizado lo dice, y ofrece autorizarlo', async () => {
+    servidor(null, SIN_PRESUPUESTO);
+    render(h(ConexionesPage));
+    await waitFor(() => { expect(screen.getByText(/Presupuesto autorizado/i)).toBeTruthy(); });
+    expect(document.body.textContent).toMatch(/Todavía no has autorizado ningún presupuesto/i);
+    expect(screen.getByRole('button', { name: /Autorizar un presupuesto/i })).toBeTruthy();
+  });
+
+  it('el presupuesto se lee en pesos: total máximo y máximo diario', async () => {
+    servidor(null, PRESUPUESTO);
+    render(h(ConexionesPage));
+    await waitFor(() => { expect(document.body.textContent).toMatch(/Total máximo/i); });
+    const texto = (document.body.textContent ?? '').replace(/\u00a0/g, ' ');
+    expect(texto).toMatch(/Total máximo:\s*\$?30[.,]000/);
+    expect(texto).toMatch(/Máximo diario:\s*\$?2[.,]500/);
+  });
+
+  /**
+   * EL VOCABULARIO. Quien firma dinero no tiene que aprenderse el nombre interno de nada. Si alguna de estas
+   * palabras vuelve a la pantalla, esta prueba lo dice antes que la persona.
+   */
+  it('la caja del presupuesto no habla de sobres, micros, MCC ni Customer ID', async () => {
+    servidor(null, PRESUPUESTO);
+    render(h(ConexionesPage));
+    const caja = await waitFor(() => {
+      const el = document.getElementById('presupuesto-autorizado');
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    const texto = caja.textContent ?? '';
+    for (const prohibido of ['micros', 'MCC', 'Customer ID', 'customerId', 'envelope', 'sobre de ejecución', 'AUTONOMIA_ADS', 'mandato']) {
+      expect(texto, `«${prohibido}» no puede aparecer donde se autoriza dinero`).not.toContain(prohibido);
+    }
+    // Y tampoco se pide un solo dato de pago.
+    for (const prohibido of ['tarjeta', 'PAN', 'CVV', 'cuenta bancaria']) {
+      expect(texto, `«${prohibido}» no se pide para autorizar un límite`).not.toContain(prohibido);
+    }
+  });
+
+  it('autorizar dinero se ve como una decisión aparte de los permisos', async () => {
+    servidor(null, PRESUPUESTO);
+    render(h(ConexionesPage));
+    await waitFor(() => { expect(document.body.textContent).toMatch(/Total máximo/i); });
+    // La caja del dinero y la lista de permisos son dos secciones distintas del documento.
+    const caja = document.getElementById('presupuesto-autorizado');
+    expect(caja).toBeTruthy();
+    expect(caja!.textContent).toMatch(/no enciende ningún permiso/i);
+    expect(screen.getByText(/Permiso para hacer cambios y operar/i)).toBeTruthy();
+    expect(caja!.textContent).not.toMatch(/Permiso para hacer cambios y operar/i);
+  });
+
+  it('mirar el presupuesto no lo cambia: ninguna escritura', async () => {
+    const s = servidor(null, PRESUPUESTO);
+    render(h(ConexionesPage));
+    await waitFor(() => { expect(document.body.textContent).toMatch(/Total máximo/i); });
+    expect(s.llamadas.filter((l) => /^(POST|PATCH|PUT|DELETE)\s/.test(l))).toEqual([]);
+    expect(s.llamadas.some((l) => l.startsWith('GET') && l.includes('/mandato-financiero'))).toBe(true);
   });
 });

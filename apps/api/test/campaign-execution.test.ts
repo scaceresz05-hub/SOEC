@@ -83,7 +83,7 @@ const geoEjecutable = (over: Partial<GeoEjecutable> = {}): GeoEjecutable => ({
 
 const mandato = (over: Partial<Mandato> = {}): Mandato => ({
   id: 'mandato-1', organizationId: ORG, objective: 'captar pacientes', currency: 'CLP',
-  authorizedBudgetMinor: 300_000, spentMinor: 0, periodStart: '2026-09-01T00:00:00.000Z',
+  authorizedBudgetMinor: 300_000, dailyCapMinor: null, provider: 'GOOGLE_ADS', spentMinor: 0, periodStart: '2026-09-01T00:00:00.000Z',
   periodEnd: '2026-10-01T00:00:00.000Z', allowedMetaAssets: [], allowedActionTypes: ['CREATE_CAMPAIGN'],
   status: 'AUTHORIZED', killSwitch: false, authorizedBy: 'duena@clinica.cl', authorizedAt: AHORA,
   createdAt: AHORA, version: 1, ...over,

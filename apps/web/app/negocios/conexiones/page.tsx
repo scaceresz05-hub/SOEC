@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { GoogleAdsConexion } from '../../../components/google-ads-conexion';
 import { TareaPendiente } from '../../../components/tarea-pendiente';
+import { PresupuestoAutorizado } from '../../../components/presupuesto-autorizado';
 import Link from 'next/link';
 import { orgActiva } from '../../../lib/org-activa';
 import {
@@ -241,8 +242,15 @@ export default function ConexionesPage() {
         </p>
       </section>
 
+      {/*
+        EL DINERO, APARTE. La autorización financiera no es un permiso más de la lista de abajo: es una
+        decisión distinta, con su propia caja y su propio lenguaje. Mezclarlas es exactamente cómo alguien
+        termina creyendo que encender un permiso ya fijaba un límite de gasto, o al revés.
+      */}
+      <PresupuestoAutorizado org={org} />
+
       <section>
-        <h2 style={{ fontSize: 18, marginBottom: 8 }}>Qué puede hacer SOEC</h2>
+        <h2 style={{ fontSize: 18, marginBottom: 8 }}>Permiso para hacer cambios y operar</h2>
         <p style={{ color: 'var(--muted, #666)', marginBottom: 12 }}>
           Cada permiso se enciende por separado y puedes apagarlo cuando quieras. Ninguno autoriza gastar
           dinero: eso se decide aparte, y por ti.

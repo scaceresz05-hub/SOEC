@@ -125,9 +125,18 @@ export function diasDelMandato(m: Mandato): number {
 /**
  * Presupuesto diario que se materializa: el MENOR entre lo que propone el plan y lo que el mandato permite
  * gastar por día. Si el plan no propone nada, manda el mandato; jamás al revés.
+ *
+ * DOS LÍMITES DEL MANDATO, no uno. El reparto del total entre los días del período es una consecuencia
+ * aritmética; el TOPE DIARIO, cuando la persona lo escribió, es una decisión suya. Manda el menor de los dos:
+ * autorizar 30.000 en total y 2.500 al día significa que ningún día se gastan 3.000, aunque el total lo
+ * aguantara. Un tope que se pudiera superar «porque queda saldo» no era un tope.
  */
 export function presupuestoDiarioDe(plan: PlanCampania, mandato: Mandato): { clp: number; micros: number; origen: 'PLAN' | 'MANDATO' } {
-  const delMandato = Math.floor(mandato.authorizedBudgetMinor / diasDelMandato(mandato));
+  const porReparto = Math.floor(mandato.authorizedBudgetMinor / diasDelMandato(mandato));
+  // Un tope diario sólo cuenta si es un número utilizable: un mandato antiguo, o uno leído a medias, no fija
+  // ninguno, y ausencia no puede convertirse en un NaN que luego viaje como presupuesto a la plataforma.
+  const topeDiario = typeof mandato.dailyCapMinor === 'number' && Number.isFinite(mandato.dailyCapMinor) ? mandato.dailyCapMinor : null;
+  const delMandato = topeDiario === null ? porReparto : Math.min(porReparto, topeDiario);
   const delPlan = plan.presupuesto.propuestoDiarioClp;
   const elegido = delPlan === null ? delMandato : Math.min(delPlan, delMandato);
   if (elegido <= 0) throw new EjecucionInvalidaError('el presupuesto autorizado no alcanza para un día de campaña');

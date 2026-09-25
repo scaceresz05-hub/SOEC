@@ -30,6 +30,8 @@ import { retirarKeywordsDenegadasDelPlan, esKeywordDenegadaPorPoliticaGoogle, KE
 import { DiagnosisEvidenceService } from './campana/diagnosis-evidence-service';
 import { normalizarReadinessInput } from './campana/diagnosis-evidence';
 import { EnvelopeService } from './campana/envelope-service';
+import { crearReposAccion } from './accion/accion-pg';
+import { verificarContraMandato, type MotivoFinanciero } from './accion/mandato-financiero';
 import { derivarFlagsDeModo, type ProviderState, type FinancialState } from './campana/authorized-execution-envelope';
 import { providerStateDeConexion } from './campana/provider-readiness';
 import { connectionIdDe } from './acquisition/google-ads-connection';
@@ -414,9 +416,13 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     // MATERIALIZACIÓN SERVER-SIDE del sobre: si el draft está listo para revisión humana, se persiste el
     // AuthorizedExecutionEnvelope (idempotente por planHash) para que GET /medicion/envelope lo devuelva.
     let envelope = null;
+    let presupuesto: MotivoFinanciero | null = null;
     if (resultado.plan.campaignDraftStatus === 'READY_FOR_APPROVAL') {
-      envelope = await envelopeSvc.crearDesdePlan(org, resultado.plan, `plan:${org}:${resultado.at}`, new Date().toISOString());
+      // El plan se puede simular sin autorización financiera; el SOBRE no se materializa sin ella.
+      presupuesto = await gateDelMandato(org, resultado.plan);
+      if (presupuesto === null) envelope = await envelopeSvc.crearDesdePlan(org, resultado.plan, `plan:${org}:${resultado.at}`, new Date().toISOString());
     }
+    if (presupuesto !== null) return reply.code(201).send({ organizationId: org, ...resultado, envelope: null, presupuestoNoAutorizado: rechazoFinanciero(presupuesto) });
     return reply.code(201).send({ organizationId: org, ...resultado, envelope });
   });
 
@@ -438,6 +444,27 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
   // AUTHORIZED EXECUTION ENVELOPE (soberanía financiera humana). Crear/leer/aprobar(HUMANO)/revocar. NADA se
   // ejecuta: SOEC_SUPERVISED_REAL y SOEC_AUTONOMOUS_REAL en false ⇒ validateAuthorizedExecution DENIEGA siempre.
   const envelopeSvc = new EnvelopeService(store);
+  /**
+   * PRECEDENCIA DEL MANDATO SOBRE EL SOBRE. El sobre restringe UNA ejecución; el mandato dice cuánto dinero
+   * autorizó una persona. Por eso se comprueba aquí, antes de crear o aprobar un sobre: sin autorización
+   * financiera vigente no hay sobre, y un sobre nunca puede pedir más de lo autorizado.
+   *
+   * Fail-closed y explícito: no se recorta el sobre en silencio hasta que quepa. Ajustarlo sería SOEC
+   * decidiendo cuánto quiso gastar la persona, y eso no lo decide SOEC.
+   */
+  const mandatoRepoMed = pool ? crearReposAccion(pool).mandatoRepo : null;
+  const gateDelMandato = async (org: string, plan: { currency: string; totalAuthorizedBudget: number }): Promise<MotivoFinanciero | null> => {
+    if (mandatoRepoMed === null) return 'SIN_MANDATO';
+    const m = await mandatoRepoMed.actual(org);
+    const v = verificarContraMandato(m, { currency: plan.currency, totalMayor: plan.totalAuthorizedBudget, canal: 'GOOGLE_ADS' }, new Date().toISOString());
+    return v.ok ? null : v.motivo;
+  };
+  const rechazoFinanciero = (motivo: MotivoFinanciero): { ok: false; error: string; motivo: MotivoFinanciero; mensaje: string } => ({
+    ok: false, error: 'PRESUPUESTO_NO_AUTORIZADO', motivo,
+    mensaje: motivo === 'SIN_MANDATO' || motivo === 'MANDATO_NO_VIGENTE'
+      ? 'falta el presupuesto autorizado del negocio: autorízalo en Conexiones y permisos antes de preparar una campaña'
+      : 'el plan pide más de lo autorizado (o en otra moneda o canal): revisa el presupuesto autorizado',
+  });
   // GATE EXTERNO desde la CONEXIÓN OAuth REAL (CONNECTED + cuenta seleccionada + sin re-auth), NO de una env var
   // estática ni del interruptor de autonomía. `autonomousReal=false` no bloquea la ejecución SUPERVISADA (su gate
   // es `supervisedReal`, evaluado aparte). Fail-closed: sin composición/conexión ⇒ no listo ⇒ EXTERNAL_GATE_BLOCKED.
@@ -474,6 +501,8 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const { org } = real(req, 'autonomia-ads');
     const ultimo = await campaignOperator.leerUltimo(org);
     if (!ultimo?.plan) return reply.code(409).send({ ok: false, error: 'no hay plan de campaña; generá el plan primero' });
+    const motivoCrear = await gateDelMandato(org, ultimo.plan);
+    if (motivoCrear !== null) return reply.code(409).send(rechazoFinanciero(motivoCrear));
     const envelope = await envelopeSvc.crearDesdePlan(org, ultimo.plan, `plan:${org}:${ultimo.at}`, new Date().toISOString());
     return reply.code(201).send({ organizationId: org, envelope });
   });
@@ -482,6 +511,10 @@ export function registerMeasurementRoutes(app: FastifyInstance, store: EventStor
     const { org } = real(req, 'autonomia-ads');
     const plan = (await campaignOperator.leerUltimo(org))?.plan;
     if (!plan) return reply.code(409).send({ ok: false, error: 'no hay plan vigente' });
+    // Se revalida al aprobar: entre la creación del sobre y este momento el mandato pudo vencer, revocarse o
+    // reducirse. Una aprobación no puede apoyarse en una autorización que ya no existe.
+    const motivoAprobar = await gateDelMandato(org, plan);
+    if (motivoAprobar !== null) return reply.code(409).send(rechazoFinanciero(motivoAprobar));
     const actor = String((req as unknown as { user?: { sub?: string } }).user?.sub ?? 'humano');
     const { prov } = await providerYFinancieroDe(org);
     try {

@@ -1,6 +1,12 @@
 /**
  * apps/api · SAFE ACTION PLANE (V2-A) · CAMPAIGN MANDATE.
  *
+ * AQUÍ VIVE EL MANDATO FINANCIERO, y no hay otro. La Fase I.8 añadió el tope DIARIO a este mismo recurso en
+ * vez de crear una tabla nueva: dos autorizaciones financieras humanas conviviendo son dos cifras que un día
+ * se contradicen en silencio, y entonces nadie sabe cuál manda sobre el dinero de alguien. El sobre de
+ * ejecución (`authorized-execution-envelope`) es otra cosa: restringe UNA ejecución concreta y jamás puede
+ * ampliar lo que esta autorización permite.
+ *
  * REGLA CONSTITUCIONAL — HUMAN_FINANCIAL_SOVEREIGNTY = ABSOLUTE:
  * un Mandato es un TOPE DURO de gasto que SÓLO un humano puede crear/autorizar/ampliar. SOEC opera DENTRO
  * y NUNCA puede: elevar `authorizedBudget`, extender el período, cambiar la moneda, renovar al agotarse,
@@ -8,6 +14,13 @@
  * Toda ampliación exige una NUEVA autorización humana explícita. Esto NO depende de LLM/Director/prompt:
  * el dinero se representa en ENTEROS (minor units) y los invariantes viven en código determinista.
  */
+
+/**
+ * CANAL SOBRE EL QUE MANDA ESTA AUTORIZACIÓN. Una autorización de gasto es siempre para algo concreto: quien
+ * autoriza 30.000 pesos en Google Ads no ha autorizado 30.000 pesos en Meta. `null` en un mandato antiguo
+ * significa que nadie lo dejó por escrito, y entonces no habilita gasto en ningún canal (fail-closed).
+ */
+export type ProveedorDeGasto = 'GOOGLE_ADS' | 'META_ADS';
 
 export type EstadoMandato = 'DRAFT' | 'AUTHORIZED' | 'ACTIVE' | 'PAUSED' | 'EXHAUSTED' | 'EXPIRED' | 'REVOKED';
 
@@ -23,7 +36,14 @@ export interface Mandato {
   readonly organizationId: string;
   readonly objective: string;
   readonly currency: string; // ISO 4217 (p.ej. CLP)
-  readonly authorizedBudgetMinor: number; // TOPE DURO, entero, minor units. Inmutable salvo reautorización humana.
+  readonly provider: ProveedorDeGasto | null; // canal autorizado; null ⇒ no autoriza gasto en ninguno
+  readonly authorizedBudgetMinor: number; // TOPE DURO TOTAL, entero, minor units. Inmutable salvo reautorización humana.
+  /**
+   * TOPE DURO DIARIO, en minor units de la MISMA moneda. `null` ⇒ la autorización no fijó un máximo por día.
+   * No son micros de Google ni el presupuesto diario de una campaña: es cuánto autoriza gastar una persona
+   * en un día, y nadie puede subirlo sin otra autorización suya.
+   */
+  readonly dailyCapMinor: number | null;
   readonly spentMinor: number; // acumulado comprometido; nunca supera authorizedBudgetMinor.
   readonly periodStart: string; // ISO
   readonly periodEnd: string; // ISO
@@ -41,7 +61,9 @@ export interface EntradaMandato {
   readonly organizationId: string;
   readonly objective: string;
   readonly currency: string;
+  readonly provider?: ProveedorDeGasto | null;
   readonly authorizedBudgetMinor: number;
+  readonly dailyCapMinor?: number | null;
   readonly periodStart: string;
   readonly periodEnd: string;
   readonly allowedMetaAssets: readonly string[];
@@ -54,7 +76,19 @@ function validarEntrada(e: EntradaMandato): void {
   if (!e.organizationId.trim()) throw new AutorizacionInvalidaError('organización requerida');
   if (!Number.isInteger(e.authorizedBudgetMinor) || e.authorizedBudgetMinor <= 0) throw new AutorizacionInvalidaError('presupuesto debe ser entero positivo (minor units)');
   if (!/^[A-Z]{3}$/.test(e.currency)) throw new AutorizacionInvalidaError('moneda ISO-4217 inválida');
+  if (e.provider !== undefined && e.provider !== null && e.provider !== 'GOOGLE_ADS' && e.provider !== 'META_ADS') {
+    throw new AutorizacionInvalidaError('canal de gasto desconocido');
+  }
   if (Date.parse(e.periodEnd) <= Date.parse(e.periodStart)) throw new AutorizacionInvalidaError('período inválido (fin ≤ inicio)');
+  if (e.dailyCapMinor !== undefined && e.dailyCapMinor !== null) {
+    if (!Number.isInteger(e.dailyCapMinor) || e.dailyCapMinor <= 0) {
+      throw new AutorizacionInvalidaError('el tope diario debe ser un entero positivo (minor units)');
+    }
+    // Un diario mayor que el total no es un tope: es una contradicción que alguien acabaría cobrando.
+    if (e.dailyCapMinor > e.authorizedBudgetMinor) {
+      throw new AutorizacionInvalidaError('el tope diario no puede superar el total autorizado');
+    }
+  }
   if (e.allowedActionTypes.length === 0) throw new AutorizacionInvalidaError('debe autorizar al menos un tipo de acción');
 }
 
@@ -71,7 +105,9 @@ export function crearMandatoAutorizado(entrada: EntradaMandato, authorizedBy: st
     organizationId: entrada.organizationId,
     objective: entrada.objective,
     currency: entrada.currency,
+    provider: entrada.provider ?? null,
     authorizedBudgetMinor: entrada.authorizedBudgetMinor,
+    dailyCapMinor: entrada.dailyCapMinor ?? null,
     spentMinor: 0,
     periodStart: entrada.periodStart,
     periodEnd: entrada.periodEnd,

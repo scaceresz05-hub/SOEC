@@ -62,7 +62,7 @@ const contexto = (over: Partial<ContextoDecision> = {}): ContextoDecision => ({
 });
 
 const mandato = (over: Partial<Mandato> = {}): Mandato => ({
-  id: 'm1', organizationId: ORG, objective: 'captar', currency: 'CLP', authorizedBudgetMinor: 300_000,
+  id: 'm1', organizationId: ORG, objective: 'captar', currency: 'CLP', authorizedBudgetMinor: 300_000, dailyCapMinor: null, provider: 'GOOGLE_ADS',
   spentMinor: 0, periodStart: '2026-09-01T00:00:00.000Z', periodEnd: '2026-12-01T00:00:00.000Z',
   allowedMetaAssets: [], allowedActionTypes: ['CREATE_CAMPAIGN'], status: 'AUTHORIZED', killSwitch: false,
   authorizedBy: 'duena@clinica.cl', authorizedAt: AHORA, createdAt: AHORA, version: 1, ...over,

@@ -52,6 +52,18 @@ export const accionMigrations: ReadonlyArray<Migration> = [
       create index if not exists accion_ledger_mandato_idx on accion_ledger (organization_id, mandato_id, decided_at);
     `,
   },
+  {
+    /**
+     * TOPE DIARIO en el mismo mandato, no en una tabla aparte. Dos autorizaciones financieras humanas
+     * conviviendo son dos cifras que un día se contradicen en silencio; el dinero de alguien no puede
+     * depender de cuál de las dos consultó el código.
+     */
+    id: '0002_tope_diario_y_canal_del_mandato',
+    sql: `
+      alter table accion_mandato add column if not exists daily_cap_minor bigint;
+      alter table accion_mandato add column if not exists provider text;
+    `,
+  },
 ];
 
 export interface MandatoRepo {
@@ -69,6 +81,8 @@ function mapMandato(r: Record<string, unknown>): Mandato {
     objective: String(r['objective']),
     currency: String(r['currency']),
     authorizedBudgetMinor: Number(r['authorized_budget_minor']),
+    provider: r['provider'] === 'GOOGLE_ADS' || r['provider'] === 'META_ADS' ? r['provider'] : null,
+    dailyCapMinor: r['daily_cap_minor'] === null || r['daily_cap_minor'] === undefined ? null : Number(r['daily_cap_minor']),
     spentMinor: Number(r['spent_minor']),
     periodStart: (r['period_start'] as Date).toISOString(),
     periodEnd: (r['period_end'] as Date).toISOString(),
@@ -87,12 +101,12 @@ export class PgMandatoRepo implements MandatoRepo {
   constructor(private readonly pool: Pool) {}
   async guardar(m: Mandato): Promise<void> {
     await this.pool.query(
-      `insert into accion_mandato (id, organization_id, objective, currency, authorized_budget_minor, spent_minor, period_start, period_end, allowed_meta_assets, allowed_action_types, status, kill_switch, authorized_by, authorized_at, created_at, version)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-       on conflict (id) do update set spent_minor=excluded.spent_minor, authorized_budget_minor=excluded.authorized_budget_minor, period_end=excluded.period_end,
+      `insert into accion_mandato (id, organization_id, objective, currency, authorized_budget_minor, spent_minor, period_start, period_end, allowed_meta_assets, allowed_action_types, status, kill_switch, authorized_by, authorized_at, created_at, version, daily_cap_minor, provider)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+       on conflict (id) do update set spent_minor=excluded.spent_minor, authorized_budget_minor=excluded.authorized_budget_minor, daily_cap_minor=excluded.daily_cap_minor, provider=excluded.provider, period_end=excluded.period_end,
          allowed_meta_assets=excluded.allowed_meta_assets, allowed_action_types=excluded.allowed_action_types, status=excluded.status, kill_switch=excluded.kill_switch,
          authorized_by=excluded.authorized_by, authorized_at=excluded.authorized_at, version=excluded.version`,
-      [m.id, m.organizationId, m.objective, m.currency, m.authorizedBudgetMinor, m.spentMinor, m.periodStart, m.periodEnd, JSON.stringify(m.allowedMetaAssets), JSON.stringify(m.allowedActionTypes), m.status, m.killSwitch, m.authorizedBy, m.authorizedAt, m.createdAt, m.version],
+      [m.id, m.organizationId, m.objective, m.currency, m.authorizedBudgetMinor, m.spentMinor, m.periodStart, m.periodEnd, JSON.stringify(m.allowedMetaAssets), JSON.stringify(m.allowedActionTypes), m.status, m.killSwitch, m.authorizedBy, m.authorizedAt, m.createdAt, m.version, m.dailyCapMinor, m.provider],
     );
   }
   async obtener(org: string, id: string): Promise<Mandato | null> {
