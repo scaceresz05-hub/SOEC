@@ -48,6 +48,12 @@ export interface RespuestaDemanda {
   readonly observadoEn: string;
   /** Período de los datos históricos, tal como lo declara la fuente. `null` si no lo declara. */
   readonly periodo: string | null;
+  /**
+   * CON QUÉ se preguntó: las palabras que declaró el negocio, o su propio sitio. Importa decirlo porque no
+   * son lo mismo — unos términos sacados del sitio describen lo que la página ya dice, y eso hay que poder
+   * leerlo en la evidencia en vez de deducirlo.
+   */
+  readonly semilla?: 'PALABRAS' | 'SITIO';
 }
 
 /** Demanda de búsqueda. Hoy la sirve Google Ads; mañana puede servirla otra fuente sin cambiar el dominio. */

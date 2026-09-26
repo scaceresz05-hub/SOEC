@@ -104,13 +104,18 @@ export async function sondasDeDemandaDeOrganizacion(
   let geoRegionId: string | null = null;
   let geoRegionNombre: string | null = null;
   try {
-    const nombres = [o.perfil.country === 'CL' ? 'Chile' : o.perfil.country, ...(o.region !== null ? [o.region] : [])];
+    const nombres = [o.perfil.country === 'CL' ? 'Chile' : o.perfil.country, ...(o.region !== null && o.region.trim() !== '' ? [o.region] : [])];
     const sugeridos = await cliente.sugerirGeoTargets(nombres, o.perfil.country, o.perfil.language);
     const pais = sugeridos.find((g) => g.targetType === 'Country');
     geoPaisId = pais?.criterionId ?? null;
-    const region = sugeridos.find((g) => g.targetType === 'Region' || g.targetType === 'Province' || g.targetType === 'State');
-    geoRegionId = region?.criterionId ?? null;
-    geoRegionNombre = region?.name ?? o.region;
+    // SÓLO la región QUE SE PIDIÓ. La plataforma puede devolver cualquier región al preguntar por un país, y
+    // sondar «Región Metropolitana» para una clínica de Curicó no diagnostica nada: confunde.
+    if (o.region !== null && o.region.trim() !== '') {
+      const pedida = o.region.trim().toLowerCase();
+      const region = sugeridos.find((g) => g.name.toLowerCase() === pedida || g.canonicalName.toLowerCase().includes(pedida));
+      geoRegionId = region?.criterionId ?? null;
+      geoRegionNombre = region?.name ?? null;
+    }
   } catch {
     // Si la resolución geográfica falla, las sondas que no dependen de ella siguen valiendo.
   }

@@ -101,7 +101,7 @@ describe('leer las sondas sin inventar la causa', () => {
     const r = leerSondas([
       sonda({ modo: 'SEMILLAS_SIN_GEO', ideas: 0 }),
       sonda({ modo: 'SEMILLAS_PAIS', geoTargetIds: ['2152'], ideas: 0 }),
-      sonda({ modo: 'SOLO_URL', conUrl: true, ideas: 0 }),
+      sonda({ modo: 'SOLO_URL', conUrl: true, semillas: 0, ideas: 0 }),
     ]);
     expect(r.causa).toBe('CUENTA_O_ACCESO');
     expect(r.explicacion).toMatch(/no está entregando datos/i);
@@ -110,7 +110,7 @@ describe('leer las sondas sin inventar la causa', () => {
   it('si las palabras traen y el sitio solo no, la causa es el sitio como semilla', () => {
     const r = leerSondas([
       sonda({ modo: 'SEMILLAS_SIN_GEO', ideas: 90 }),
-      sonda({ modo: 'SOLO_URL', conUrl: true, ideas: 0 }),
+      sonda({ modo: 'SOLO_URL', conUrl: true, semillas: 0, ideas: 0 }),
     ]);
     expect(r.causa).toBe('SITIO_COMO_SEMILLA');
   });
@@ -123,6 +123,32 @@ describe('leer las sondas sin inventar la causa', () => {
   it('si todas traen términos, no hay silencio que explicar', () => {
     const r = leerSondas([sonda({ ideas: 10 }), sonda({ modo: 'SEMILLAS_PAIS', ideas: 5 })]);
     expect(r.causa).toBe('NINGUN_SILENCIO');
+  });
+
+  /**
+   * EL CASO REAL DE CP, tal como lo devolvieron las sondas en producción: las tres palabras declaradas no
+   * traen nada —ni sueltas, ni con país, ni con comunas— y el sitio como semilla trae 200 términos. Lo que
+   * no produce resultados son esas semillas. La primera versión de esta lectura culpó al territorio.
+   */
+  it('si las palabras callan siempre y el sitio trae, la causa son las semillas', () => {
+    const r = leerSondas([
+      sonda({ modo: 'SEMILLAS_SIN_GEO', ideas: 0 }),
+      sonda({ modo: 'SEMILLAS_PAIS', geoTargetIds: ['2152'], ideas: 0 }),
+      sonda({ modo: 'SEMILLAS_COMUNAS', geoTargetIds: ['9246355'], ideas: 0 }),
+      sonda({ modo: 'SOLO_URL', conUrl: true, semillas: 0, ideas: 200 }),
+      sonda({ modo: 'SEMILLAS_Y_URL', conUrl: true, ideas: 0 }),
+    ]);
+    expect(r.causa).toBe('SEMILLAS_SIN_RESULTADO');
+    expect(r.explicacion).toMatch(/no la cuenta ni el territorio/i);
+  });
+
+  it('no se culpa al territorio comparando sondas con semillas distintas', () => {
+    // Sin geo pero con el SITIO trae; con comunas y con PALABRAS no trae. Cambió la semilla, no el territorio.
+    const r = leerSondas([
+      sonda({ modo: 'SOLO_URL', conUrl: true, semillas: 0, ideas: 200 }),
+      sonda({ modo: 'SEMILLAS_COMUNAS', geoTargetIds: ['9246355'], ideas: 0 }),
+    ]);
+    expect(r.causa).not.toBe('GEO_DEMASIADO_RESTRICTIVA');
   });
 
   it('si los resultados están mezclados, la respuesta es DESCONOCIDA', () => {

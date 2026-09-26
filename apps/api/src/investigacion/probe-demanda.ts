@@ -131,6 +131,7 @@ export async function correrSondasDeDemanda(e: EntradaSondas): Promise<readonly 
 
 export type CausaDelSilencio =
   | 'GEO_DEMASIADO_RESTRICTIVA'
+  | 'SEMILLAS_SIN_RESULTADO'
   | 'SITIO_COMO_SEMILLA'
   | 'CUENTA_O_ACCESO'
   | 'NINGUN_SILENCIO'
@@ -164,17 +165,37 @@ export function leerSondas(sondas: readonly ResultadoSonda[]): LecturaDeSondas {
       explicacion: 'la cuenta responde correctamente a todas las variantes —con y sin territorio, con y sin sitio— y ninguna trae términos: el planificador no está entregando datos a esta cuenta',
     };
   }
-  const sinGeoTrae = conIdeas.some((s) => s.geoTargetIds.length === 0);
-  const conComunasCalla = ok.some((s) => s.modo === 'SEMILLAS_COMUNAS' && (s.ideas ?? 0) === 0);
-  if (sinGeoTrae && conComunasCalla) {
+
+  /**
+   * SE COMPARA LO COMPARABLE. Dos sondas sólo dicen algo sobre la geografía si se diferencian ÚNICAMENTE en
+   * la geografía; si una usaba el sitio como semilla y la otra palabras, lo que cambió fue la semilla. Esta
+   * distinción no es quisquillosa: sin ella, la primera lectura de las sondas reales culpó al territorio
+   * cuando lo que fallaba eran las semillas, que es justo el error que estas sondas existen para no cometer.
+   */
+  const mismaForma = (a: ResultadoSonda, b: ResultadoSonda): boolean => a.conUrl === b.conUrl && (a.semillas > 0) === (b.semillas > 0);
+  const geoExplica = ok.some((sinGeo) =>
+    sinGeo.geoTargetIds.length === 0 && (sinGeo.ideas ?? 0) > 0
+    && ok.some((conGeo) => conGeo.geoTargetIds.length > 0 && (conGeo.ideas ?? 0) === 0 && mismaForma(sinGeo, conGeo)));
+  if (geoExplica) {
     return {
       causa: 'GEO_DEMASIADO_RESTRICTIVA',
-      explicacion: 'las mismas semillas traen términos sin restricción geográfica y no traen ninguno restringidas a las comunas declaradas: el territorio es demasiado estrecho para que el planificador dé datos',
+      explicacion: 'con la misma semilla, la consulta sin territorio trae términos y la restringida no: el territorio es demasiado estrecho para que el planificador dé datos',
     };
   }
-  const soloUrlCalla = ok.some((s) => s.modo === 'SOLO_URL' && (s.ideas ?? 0) === 0);
-  const semillasSolasTraen = conIdeas.some((s) => s.modo === 'SEMILLAS_SIN_GEO');
-  if (soloUrlCalla && semillasSolasTraen) {
+
+  const conSemillas = ok.filter((s) => s.semillas > 0 && !s.conUrl);
+  const soloUrl = ok.filter((s) => s.semillas === 0 && s.conUrl);
+  const semillasCallan = conSemillas.length > 0 && conSemillas.every((s) => (s.ideas ?? 0) === 0);
+  const urlTrae = soloUrl.some((s) => (s.ideas ?? 0) > 0);
+  if (semillasCallan && urlTrae) {
+    return {
+      causa: 'SEMILLAS_SIN_RESULTADO',
+      explicacion: 'el sitio del negocio como semilla SÍ trae términos y las palabras declaradas no traen ninguna, con o sin territorio: lo que no produce resultados son esas semillas, no la cuenta ni el territorio',
+    };
+  }
+  const urlCalla = soloUrl.some((s) => (s.ideas ?? 0) === 0);
+  const semillasTraen = conSemillas.some((s) => (s.ideas ?? 0) > 0);
+  if (urlCalla && semillasTraen) {
     return {
       causa: 'SITIO_COMO_SEMILLA',
       explicacion: 'las palabras del negocio sí traen términos y el sitio por sí solo no: el planificador no está sacando nada de esa página',

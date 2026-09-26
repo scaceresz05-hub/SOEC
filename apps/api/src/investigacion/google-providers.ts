@@ -86,19 +86,39 @@ export function crearProveedorDemandaGoogle(deps: DepsGoogleInvestigacion): Sear
     nombre: 'google-ads-keyword-ideas',
     fuente: 'GOOGLE_ADS_KEYWORD_DATA',
     async demanda(p: PeticionDemanda): Promise<RespuestaDemanda | null> {
-      if (p.semillas.length === 0) return null;
+      if (p.semillas.length === 0 && (p.urlSitio ?? '') === '') return null;
+      const idioma = p.idioma.startsWith('es') ? '1003' : '1000';
       const clave = `demanda:${deps.org}:${deps.customerId}:${[...p.semillas].sort().join('|')}:${[...p.geoTargetIds].sort().join(',')}:${p.idioma}`;
       try {
-        const ideas = await coordinador.una(clave, async () =>
-          deps.cliente.generarIdeasDePalabras(deps.customerId, {
+        /**
+         * DOS FORMAS DE PREGUNTAR, Y LA SEGUNDA NO ES UN CAPRICHO. Las sondas sobre una cuenta real lo
+         * enseñaron: las palabras que declara un negocio pueden no devolver ni un término mientras su propio
+         * sitio, como semilla, devuelve doscientos. Así que si lo primero no trae nada, se pregunta por el
+         * sitio antes de dar el silencio por bueno — y se deja dicho con cuál de las dos se obtuvo.
+         *
+         * Lo que NO se hace es mezclar: si las palabras trajeron términos, mandan ésas.
+         */
+        const { ideas, semilla } = await coordinador.una(clave, async () => {
+          const porPalabras = p.semillas.length === 0 ? [] : await deps.cliente.generarIdeasDePalabras(deps.customerId, {
             semillas: p.semillas,
             url: p.urlSitio,
             geoTargetIds: p.geoTargetIds,
-            languageId: p.idioma.startsWith('es') ? '1003' : '1000',
-          }),
-        );
-        deps.log?.({ investigacion: 'demanda', org: deps.org, ideas: ideas.length, cacheados: coordinador.tamanoCache });
+            languageId: idioma,
+          });
+          if (porPalabras.length > 0 || (p.urlSitio ?? '') === '') {
+            return { ideas: porPalabras, semilla: 'PALABRAS' as const };
+          }
+          const porSitio = await deps.cliente.generarIdeasDePalabras(deps.customerId, {
+            semillas: [],
+            url: p.urlSitio,
+            geoTargetIds: p.geoTargetIds,
+            languageId: idioma,
+          });
+          return { ideas: porSitio, semilla: 'SITIO' as const };
+        });
+        deps.log?.({ investigacion: 'demanda', org: deps.org, ideas: ideas.length, semilla, cacheados: coordinador.tamanoCache });
         return {
+          semilla,
           ideas: ideas.map((i) => ({
             termino: i.texto,
             semilla: null,

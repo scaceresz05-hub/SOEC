@@ -420,7 +420,13 @@ export class InvestigacionService {
         fuentes.push({
           fuente: 'GOOGLE_ADS_KEYWORD_DATA',
           disponibilidad: 'USED',
-          motivo: demanda === 'SIN_IDEAS' ? 'la consulta respondió sin ningún término: no hay con qué medir la demanda' : null,
+          motivo: demanda === 'SIN_IDEAS'
+            ? 'la consulta respondió sin ningún término: no hay con qué medir la demanda'
+            // Con qué se preguntó es parte del dato: unos términos sacados del sitio no son lo mismo que unos
+            // sacados de las palabras que el negocio declaró, y quien lea la evidencia tiene que poder verlo.
+            : respuesta.semilla === 'SITIO'
+              ? 'las palabras declaradas no devolvieron términos; estos salen de consultar el sitio del negocio'
+              : null,
           versionDatos: respuesta.periodo ?? respuesta.observadoEn,
         });
         const ctxClasificacion = {
