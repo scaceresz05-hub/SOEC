@@ -126,7 +126,39 @@ export type Confianza = 'HIGH' | 'MEDIUM' | 'LOW';
 export type AreaImpacto = 'DEMAND' | 'OFFER' | 'GEOGRAPHY' | 'LANDING' | 'MEASUREMENT' | 'BUDGET' | 'COMPLIANCE';
 
 /** Estado de un plan. `NON_EXECUTABLE` es la situación normal mientras falte algo. */
-export type EstadoPlan = 'DRAFT' | 'NON_EXECUTABLE' | 'STALE' | 'SUPERSEDED';
+/**
+ * ESTADO DE UN PLAN, dicho en los términos en que se decide sobre él:
+ *
+ *  · EXECUTABLE      — no falta nada material: se podría ejecutar (hoy nunca, porque faltan anuncios escritos
+ *                      y una conversión verificada, y eso se dice en voz alta).
+ *  · REVIEW_REQUIRED — hay un plan coherente, con territorio, páginas y dinero autorizado, pero falta algo que
+ *                      decide una persona o falta evidencia cuantitativa. NO es un bloqueo: es un plan que se
+ *                      puede leer, discutir y corregir.
+ *  · BLOCKED         — falta una pieza sin la cual no hay plan posible: sin presupuesto autorizado, sin
+ *                      territorio segmentable, sin página de destino o sin ninguna oferta con material.
+ *
+ * `DRAFT` y `NON_EXECUTABLE` son los nombres anteriores: se conservan para poder leer los planes ya guardados,
+ * y ningún plan nuevo los usa. Un estado no se borra de un sistema que ya escribió historia con él.
+ */
+export type EstadoPlan = 'EXECUTABLE' | 'REVIEW_REQUIRED' | 'BLOCKED' | 'DRAFT' | 'NON_EXECUTABLE' | 'STALE' | 'SUPERSEDED';
+
+/** Estados de un plan vigente (no superado ni envejecido). Se usa en las consultas que versionan. */
+export const ESTADOS_PLAN_VIGENTE: readonly EstadoPlan[] = ['EXECUTABLE', 'REVIEW_REQUIRED', 'BLOCKED', 'DRAFT', 'NON_EXECUTABLE'];
+
+/**
+ * QUÉ SOSTIENE ESTE PLAN. Separar la evidencia del veredicto es lo que impide que un silencio del proveedor
+ * se lea como una medición: un plan construido con semillas verificadas del sitio es perfectamente discutible,
+ * pero su demanda es UNKNOWN y hay que decirlo en la misma pantalla donde se propone gastar.
+ */
+export interface EvidenciaDelPlan {
+  /** KNOWN sólo si hay métricas del proveedor. UNKNOWN si se armó con material verificado del negocio. */
+  readonly demanda: 'KNOWN' | 'UNKNOWN';
+  readonly investigacion: 'READY' | 'PARTIAL' | 'MISSING';
+  readonly confianza: 'FULL' | 'LIMITED';
+  readonly origenKeywords: 'PROVIDER_DATA' | 'VERIFIED_SITE_SEEDS' | 'NONE';
+  /** Limitaciones que hay que leer antes de aprobar nada. Vacío si el plan se apoya en datos medidos. */
+  readonly limitaciones: readonly string[];
+}
 
 /** Dimensiones de preparación de un plan. Cada una se responde por separado. */
 export type DimensionPlan = 'RESEARCH_READY' | 'LANDING_READY' | 'MEASUREMENT_READY' | 'BUDGET_READY' | 'CREATIVE_READY' | 'EXECUTION_READY';

@@ -16,10 +16,12 @@ import type {
   DimensionPlan,
   EstadoPlan,
   EstrategiaPuja,
+  EvidenciaDelPlan,
   RequisitoConversion,
   RequisitoCreativo,
   TipoConcordancia,
 } from './investigacion-tipos';
+import { ESTADOS_PLAN_VIGENTE } from './investigacion-tipos';
 
 export type Queryable = Pool | PoolClient;
 
@@ -39,7 +41,15 @@ export interface PropuestaPresupuesto {
   /** Lo que costaría capturar toda la demanda observada. Es una DERIVACIÓN, no una recomendación. */
   readonly oportunidadDiariaClp: number | null;
   readonly costoPorClicEstimadoClp: number | null;
-  readonly base: 'USER_CEILING' | 'NONE';
+  /**
+   * De dónde sale el importe propuesto:
+   *  · HUMAN_MANDATE — lo limita el presupuesto que una persona autorizó (manda sobre todo lo demás);
+   *  · USER_CEILING  — lo limita el techo que declaró el dueño en el alta, y cabe dentro del mandato;
+   *  · NONE          — no hay ninguno de los dos, así que no se propone gasto.
+   */
+  readonly base: 'HUMAN_MANDATE' | 'USER_CEILING' | 'NONE';
+  /** Tope diario autorizado por la persona, si existe. Ningún plan puede proponer más que esto. */
+  readonly topeMandatoDiarioClp: number | null;
   readonly explicacion: string;
 }
 
@@ -58,7 +68,18 @@ export interface PalabraDelPlan {
   readonly termino: string;
   readonly concordancia: TipoConcordancia;
   readonly justificacion: string;
+  /** Volumen observado. `null` = NO SE SABE. Nunca 0 por ausencia de datos: cero es una medición. */
   readonly volumenMensual: number | null;
+  readonly origen: 'PROVIDER_DATA' | 'VERIFIED_SITE_SEEDS';
+  readonly evidenciaDemanda: 'KNOWN' | 'UNKNOWN';
+}
+
+/** Borrador de anuncio de búsqueda. Sólo texto respaldado por el sitio; no se genera nada nuevo aquí. */
+export interface AnuncioDelPlan {
+  readonly ofertaSlug: string;
+  readonly titulares: readonly string[];
+  readonly descripciones: readonly string[];
+  readonly respaldo: readonly string[];
 }
 
 export interface NegativaDelPlan {
@@ -100,6 +121,10 @@ export interface PlanCampania {
   readonly prerequisitos: readonly string[];
   readonly readiness: Readonly<Record<DimensionPlan, boolean>>;
   readonly explicacion: readonly ExplicacionPlan[];
+  /** Qué sostiene este plan y con qué límites. Se guarda con él: un plan sin su evidencia no se puede juzgar. */
+  readonly evidencia: EvidenciaDelPlan;
+  /** Borradores de anuncio respaldados por el sitio. Vacío si no hubo material verificado. */
+  readonly anuncios: readonly AnuncioDelPlan[];
   readonly creadoEn: string;
   readonly staleDesde: string | null;
   readonly motivoStale: string | null;
@@ -148,6 +173,17 @@ export const planMigrations: ReadonlyArray<Migration> = [
       );
     `,
   },
+  {
+    /**
+     * EVIDENCIA Y ANUNCIOS del plan. La evidencia va al lado del plan y no en un informe aparte: si mañana
+     * alguien lee «proponemos gastar 2.500 al día», tiene que ver en la misma fila con qué se construyó eso.
+     */
+    id: '0002_plan_evidencia_y_anuncios',
+    sql: `
+      alter table campaign_plan add column if not exists evidencia jsonb not null default '{}'::jsonb;
+      alter table campaign_plan add column if not exists anuncios  jsonb not null default '[]'::jsonb;
+    `,
+  },
 ];
 
 const iso = (v: unknown): string | null => (v instanceof Date ? v.toISOString() : v === null || v === undefined ? null : String(v));
@@ -173,6 +209,10 @@ function aPlan(r: Record<string, unknown>): PlanCampania {
     prerequisitos: lista(r.prerequisitos),
     readiness: (r.readiness ?? {}) as Readonly<Record<DimensionPlan, boolean>>,
     explicacion: (Array.isArray(r.explicacion) ? r.explicacion : []) as readonly ExplicacionPlan[],
+    evidencia: (r.evidencia !== null && typeof r.evidencia === 'object' && Object.keys(r.evidencia as object).length > 0
+      ? r.evidencia
+      : { demanda: 'UNKNOWN', investigacion: 'MISSING', confianza: 'LIMITED', origenKeywords: 'NONE', limitaciones: [] }) as EvidenciaDelPlan,
+    anuncios: (Array.isArray(r.anuncios) ? r.anuncios : []) as readonly AnuncioDelPlan[],
     creadoEn: iso(r.creado_en) ?? '',
     staleDesde: iso(r.stale_desde),
     motivoStale: texto(r.motivo_stale),
@@ -200,14 +240,16 @@ export class RepositorioPlan {
     await q.query(
       `insert into campaign_plan (organization_id, id, version, research_run_id, estado, canal, objetivo, ofertas,
          geografia, presupuesto, puja, estructura, requisitos_creativos, requisito_conversion, prerequisitos,
-         readiness, explicacion, creado_en, stale_desde, motivo_stale)
-       values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19,$20)
+         readiness, explicacion, creado_en, stale_desde, motivo_stale, evidencia, anuncios)
+       values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19,$20,$21::jsonb,$22::jsonb)
        on conflict (organization_id, id) do update set estado = excluded.estado, readiness = excluded.readiness,
-         prerequisitos = excluded.prerequisitos, stale_desde = excluded.stale_desde, motivo_stale = excluded.motivo_stale`,
+         prerequisitos = excluded.prerequisitos, stale_desde = excluded.stale_desde, motivo_stale = excluded.motivo_stale,
+         evidencia = excluded.evidencia, anuncios = excluded.anuncios`,
       [p.organizationId, p.id, p.version, p.researchRunId, p.estado, p.canal, p.objetivo, JSON.stringify(p.ofertas),
         JSON.stringify(p.geografia), JSON.stringify(p.presupuesto), JSON.stringify(p.puja), JSON.stringify(p.estructura),
         JSON.stringify(p.requisitosCreativos), p.requisitoConversion, JSON.stringify(p.prerequisitos),
-        JSON.stringify(p.readiness), JSON.stringify(p.explicacion), p.creadoEn, p.staleDesde, p.motivoStale],
+        JSON.stringify(p.readiness), JSON.stringify(p.explicacion), p.creadoEn, p.staleDesde, p.motivoStale,
+        JSON.stringify(p.evidencia), JSON.stringify(p.anuncios)],
     );
   }
 
@@ -246,8 +288,8 @@ export class RepositorioPlan {
   async marcarStale(q: Queryable, org: string, motivo: string, ahora: string): Promise<number> {
     const { rowCount } = await q.query(
       `update campaign_plan set estado = 'STALE', motivo_stale = $2, stale_desde = $3
-       where organization_id = $1 and estado in ('DRAFT','NON_EXECUTABLE')`,
-      [org, motivo, ahora],
+       where organization_id = $1 and estado = any($4::text[])`,
+      [org, motivo, ahora, [...ESTADOS_PLAN_VIGENTE]],
     );
     return rowCount ?? 0;
   }

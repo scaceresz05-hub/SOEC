@@ -151,7 +151,9 @@ import { registerConexionRoutes } from './conexion/conexion-routes';
 import { registerPoliticaRoutes } from './politica/politica-routes';
 import { registerOnboardingRoutes } from './onboarding/onboarding-routes';
 import { registerInvestigacionRoutes } from './investigacion/investigacion-routes';
-import { proveedoresDeOrganizacion } from './investigacion/composicion';
+import { proveedoresDeOrganizacion, sondasDeDemandaDeOrganizacion } from './investigacion/composicion';
+import { RepositorioInvestigacion } from './investigacion/investigacion-pg';
+import { RepositorioNegocios } from './negocio/negocio-pg';
 import { registerEjecucionRoutes } from './ejecucion/ejecucion-routes';
 import { clienteDeEscrituraGoogle, clienteDeLecturaGoogle, crearObservadorDeEventos } from './ejecucion/composicion';
 import { registerOptimizacionRoutes } from './optimizacion/optimizacion-routes';
@@ -495,6 +497,31 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           composicionGoogleAds: composicionGoogleAds,
           log: (i) => console.log(JSON.stringify(i)),
         })),
+        /**
+         * SONDAS DEL PLANIFICADOR: consultas de lectura para diagnosticar un silencio. Las semillas y el
+         * territorio salen de lo PERSISTIDO del negocio —sus ofertas activas y las comunas que la plataforma
+         * ya confirmó como segmentables—, nunca de una lista escrita a mano aquí.
+         */
+        sondasDeDemanda: async (org) => {
+          const repoNegocios = new RepositorioNegocios(pool);
+          const perfil = await repoNegocios.perfil(org);
+          if (perfil === null) return null;
+          const [ofertas, territorios] = await Promise.all([repoNegocios.oferta(org), repoNegocios.territorios(org)]);
+          const corrida = await new RepositorioInvestigacion(pool).ultimaAprovechable(org);
+          const geos = corrida === null ? [] : await new RepositorioInvestigacion(pool).geos(org, corrida.id);
+          const region = territorios.find((t) => t.ambito === 'BUSINESS')?.region ?? null;
+          return sondasDeDemandaDeOrganizacion(org, {
+            pool,
+            env: process.env,
+            composicionGoogleAds: composicionGoogleAds,
+            log: (i) => console.log(JSON.stringify(i)),
+            perfil: { website: perfil.website, language: perfil.language, country: perfil.country },
+            semillas: ofertas.filter((o) => o.status === 'ACTIVE').map((o) => o.name),
+            geoComunas: geos.filter((g) => g.disponible && g.targetId !== null).map((g) => g.targetId!),
+            region,
+          });
+        },
+        log: (i) => console.log(JSON.stringify(i)),
       });
       // EJECUCIÓN (Autonomy Fase F): del plan aprobado a una campaña REAL… que nace EN PAUSA y no gasta.
       // Ninguna de estas rutas puede activar una campaña: el verbo no existe en el servicio.

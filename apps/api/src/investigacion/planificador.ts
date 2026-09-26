@@ -6,25 +6,33 @@
  *
  * LAS CUATRO REGLAS QUE MÁS IMPORTAN AQUÍ:
  *
- *  1. NO SE INVENTA PRESUPUESTO. Lo que se propone gastar sale del TECHO QUE DECLARÓ EL DUEÑO. Aparte, y
- *     etiquetado como derivación, se muestra lo que costaría capturar toda la demanda observada. Sin techo
- *     declarado no hay propuesta de gasto: el plan queda `NON_EXECUTABLE`.
+ *  1. EL DINERO LO MANDA EL MANDATO. La precedencia es: presupuesto AUTORIZADO por una persona > techo
+ *     declarado en el alta > nada. Un plan no propone una cifra mayor a la autorizada para después recortarla
+ *     al ejecutar: proponer 3.000 sabiendo que sólo hay 2.500 autorizados es enseñarle a alguien un plan que
+ *     no es el suyo. Si aun así una cifra superara el mandato, el plan es INVÁLIDO —no se ajusta en silencio—.
+ *     Aparte, y etiquetado como derivación, se muestra lo que costaría capturar toda la demanda observada.
  *  2. UNA OFERTA NO ES UNA CAMPAÑA. La estructura se decide con volumen, presupuesto, separación de intención y
  *     de landing: repartir un presupuesto pequeño entre varias campañas deja a todas sin datos suficientes.
  *  3. CONCORDANCIA AMPLIA SÓLO CON JUSTIFICACIÓN. Sin historial de conversiones y sin cobertura de negativas,
  *     `BROAD` gasta el presupuesto en búsquedas que nadie controla, así que no se propone.
  *  4. SIN MEDICIÓN NO HAY EJECUCIÓN. Si falta la conversión, se dice `CONVERSION_SETUP_REQUIRED` y
  *     `EXECUTION_READY = false`. Ese bloqueo no se esconde para que el plan parezca terminado.
+ *  5. UN SILENCIO NO ES UN NO. Si el proveedor no trajo métricas de demanda pero el negocio tiene sitio
+ *     auditado, ofertas declaradas, territorio segmentable y páginas verificadas, se construye el plan con
+ *     SEMILLAS VERIFICADAS DEL SITIO y se marca `REVIEW_REQUIRED` con la demanda en UNKNOWN. Lo que no se
+ *     sabe se dice; lo que no se sabe no se convierte en un bloqueo eterno ni en un cero inventado.
  */
 import type { OfertaNegocio, PerfilNegocio } from '../negocio/negocio-pg';
 import type { PoliticaCompleta } from '../politica/politica-pg';
 import type { CompatibilidadLanding, EvaluacionCanal, GeoEjecutable, TerminoInvestigado } from './investigacion-pg';
-import type { ExplicacionPlan, GrupoDelPlan, PalabraDelPlan, PlanCampania, PropuestaPresupuesto, PropuestaPuja } from './plan-pg';
+import type { AnuncioDelPlan, ExplicacionPlan, GrupoDelPlan, PalabraDelPlan, PlanCampania, PropuestaPresupuesto, PropuestaPuja } from './plan-pg';
 import { veredictoDe } from './analisis';
+import type { SemillasDeSitio } from './semillas-sitio';
 import {
   INTENCIONES_DE_PAGO,
   type DimensionPlan,
   type EstadoPlan,
+  type EvidenciaDelPlan,
   type RequisitoConversion,
   type RequisitoCreativo,
   type TipoConcordancia,
@@ -41,12 +49,26 @@ export interface EntradaPlanificador {
   readonly canales: readonly EvaluacionCanal[];
   readonly landings: readonly CompatibilidadLanding[];
   readonly techoDeclarado: { readonly modalidad: string; readonly montoMinor: number | null } | null;
+  /**
+   * PRESUPUESTO AUTORIZADO por una persona, si existe y está vigente. Manda sobre el techo del alta. Los
+   * importes van en unidades menores de la moneda del mandato, igual que el resto del plan.
+   */
+  readonly mandato: TopeAutorizado | null;
+  /** Material verificado del sitio para cuando el proveedor de demanda no trae nada. */
+  readonly semillasSitio: SemillasDeSitio | null;
   /** `true` sólo si existe una acción de conversión verificada en la plataforma. Hoy nunca: no se crean. */
   readonly conversionExternaVerificada: boolean;
   /** Historial fiable de conversiones observado. Sin él, la puja no puede optimizar a conversiones. */
   readonly historialDeConversiones: number;
   readonly version: number;
   readonly ahora: string;
+}
+
+/** Lo que una persona autorizó gastar, ya resuelto a un tope DIARIO. */
+export interface TopeAutorizado {
+  readonly diarioMinor: number;
+  readonly totalMinor: number;
+  readonly currency: string;
 }
 
 export interface ResultadoPlanificacion {
@@ -174,27 +196,44 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
   const cpcEstimado = mediana(candidatos.map((t) => pujaAltaDe(t) ?? pujaBajaDe(t) ?? 0).filter((v): v is number => v !== null));
   const volumenTotal = candidatos.reduce((a, t) => a + volumenDe(t), 0);
   const oportunidadDiaria = cpcEstimado !== null && volumenTotal > 0 ? Math.round((volumenTotal / 30) * cpcEstimado) : null;
-  const techoDiario = e.techoDeclarado === null || e.techoDeclarado.montoMinor === null
+  /**
+   * PRECEDENCIA DEL DINERO: mandato autorizado > techo declarado en el alta > nada.
+   *
+   * El techo del alta es una intención dicha una vez, quizá hace meses; el mandato es una autorización
+   * explícita y vigente. Cuando existe, es el que manda — y si la intención pide más, se propone lo
+   * autorizado, no lo deseado. Aquí no se recorta en silencio: se dice qué cifra limita y por qué.
+   */
+  const declaradoDiario = e.techoDeclarado === null || e.techoDeclarado.montoMinor === null
     ? null
     : e.techoDeclarado.modalidad === 'DAILY'
       ? e.techoDeclarado.montoMinor
       : e.techoDeclarado.modalidad === 'MONTHLY'
         ? Math.round(e.techoDeclarado.montoMinor / 30)
         : null;
+  const topeMandato = e.mandato?.diarioMinor ?? null;
+  const techoDiario = topeMandato === null
+    ? declaradoDiario
+    : declaradoDiario === null
+      ? topeMandato
+      : Math.min(declaradoDiario, topeMandato);
+  const mandaMandato = topeMandato !== null && (declaradoDiario === null || topeMandato <= declaradoDiario);
 
   const presupuesto: PropuestaPresupuesto = {
     techoDeclaradoClp: e.techoDeclarado?.montoMinor ?? null,
     modalidadTecho: e.techoDeclarado?.modalidad ?? null,
     propuestoDiarioClp: techoDiario,
+    topeMandatoDiarioClp: topeMandato,
     oportunidadDiariaClp: oportunidadDiaria,
     costoPorClicEstimadoClp: cpcEstimado,
-    base: techoDiario === null ? 'NONE' : 'USER_CEILING',
+    base: techoDiario === null ? 'NONE' : mandaMandato ? 'HUMAN_MANDATE' : 'USER_CEILING',
     explicacion: techoDiario === null
-      ? 'No hay techo declarado por el dueño, así que no se propone ningún gasto: proponerlo sería inventar dinero ajeno.'
-      : `Se propone gastar hasta ${techoDiario} CLP al día, que es el techo que declaró el dueño.${cpcEstimado !== null ? ` Con un costo por clic observado de ~${cpcEstimado} CLP, eso permite del orden de ${Math.max(0, Math.floor(techoDiario / cpcEstimado))} clics diarios.` : ''}${oportunidadDiaria !== null ? ` Capturar toda la demanda observada costaría ~${oportunidadDiaria} CLP al día (derivado, no una recomendación).` : ''}`,
+      ? 'Nadie ha autorizado un presupuesto ni declarado un techo, así que no se propone ningún gasto: proponerlo sería inventar dinero ajeno.'
+      : `${mandaMandato
+        ? `Se propone gastar hasta ${techoDiario} al día, que es el máximo diario que autorizaste.${declaradoDiario !== null && declaradoDiario > topeMandato! ? ` En el alta se había declarado un techo de ${declaradoDiario} al día; manda la autorización, no la intención anterior.` : ''}`
+        : `Se propone gastar hasta ${techoDiario} al día, que es el techo que declaró el dueño${topeMandato !== null ? ` y cabe dentro del máximo diario autorizado (${topeMandato})` : ''}.`}${cpcEstimado !== null ? ` Con un costo por clic observado de ~${cpcEstimado}, eso permite del orden de ${Math.max(0, Math.floor(techoDiario / cpcEstimado))} clics diarios.` : ''}${oportunidadDiaria !== null ? ` Capturar toda la demanda observada costaría ~${oportunidadDiaria} al día (derivado, no una recomendación).` : ''}`,
   };
   if (techoDiario === null) {
-    prerequisitos.push('declarar cuánto se está dispuesto a invertir como máximo');
+    prerequisitos.push('autorizar un presupuesto: sin un máximo tuyo no hay nada que proponer');
   } else if (cpcEstimado !== null && techoDiario < cpcEstimado) {
     prerequisitos.push(`el techo declarado (${techoDiario} CLP/día) no alcanza para un solo clic al costo observado (~${cpcEstimado} CLP)`);
   }
@@ -214,6 +253,26 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
       };
   anotar(`Estrategia de puja propuesta: ${puja.estrategia === 'MAXIMIZE_CONVERSIONS' ? 'optimizar a conversiones' : 'comprar clics con techo de costo'}`, puja.justificacion);
 
+  /**
+   * ── DE DÓNDE SALEN LAS PALABRAS ──
+   *
+   * Si el proveedor trajo demanda medida, manda esa. Si calló, y el negocio tiene sitio auditado, ofertas
+   * declaradas y páginas verificadas, se planifica con SEMILLAS VERIFICADAS DEL SITIO: candidatos para que
+   * una persona revise, con la demanda marcada como desconocida. Lo que no se hace, ni aquí ni en ninguna
+   * rama, es rellenar el hueco con un cero y llamarlo medición.
+   */
+  const usarSemillasDeSitio = ofertasPlanificables.length === 0 && e.semillasSitio?.utilizable === true;
+  const slugsDelPlan = usarSemillasDeSitio
+    ? (e.semillasSitio?.grupos ?? []).map((g) => g.ofertaSlug)
+    : ofertasPlanificables.map((o) => o.slug);
+  const ofertasDelPlan = slugsDelPlan.length;
+  if (usarSemillasDeSitio) {
+    anotar(
+      'Las palabras salen del sitio verificado, no de datos de demanda',
+      'el planificador de la plataforma no devolvió términos, así que los candidatos se construyen con lo que SÍ está comprobado: las páginas que SOEC auditó, las ofertas declaradas y el territorio. No hay volumen observado, y por eso este plan necesita revisión humana antes de nada.',
+    );
+  }
+
   // ── ESTRUCTURA ──
   const suficienteParaVarias = techoDiario !== null && cpcEstimado !== null && techoDiario >= cpcEstimado * 10 && ofertasPlanificables.length >= 2;
   const landingsDistintas = new Set(ofertasPlanificables.map((o) => landingPorOferta.get(o.slug)?.url ?? o.slug)).size === ofertasPlanificables.length;
@@ -224,25 +283,28 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
       }
     : {
         tipo: 'UNA_CAMPANA_VARIOS_GRUPOS' as const,
-        justificacion: ofertasPlanificables.length <= 1
-          ? 'sólo hay una oferta con demanda observada: una campaña con un grupo'
-          : `con ${techoDiario ?? 0} CLP al día repartidos entre ${ofertasPlanificables.length} ofertas, varias campañas quedarían sin datos suficientes cada una; una campaña con un grupo por oferta mantiene la medición separada sin dividir el presupuesto`,
+        justificacion: ofertasDelPlan <= 1
+          ? (usarSemillasDeSitio ? 'sólo hay una oferta con material verificado: una campaña con un grupo' : 'sólo hay una oferta con demanda observada: una campaña con un grupo')
+          : `con ${techoDiario ?? 0} al día repartidos entre ${ofertasDelPlan} ofertas, varias campañas quedarían sin datos suficientes cada una; una campaña con un grupo por oferta mantiene la medición separada sin dividir el presupuesto`,
       };
   anotar(
     estructura.tipo === 'UNA_CAMPANA_VARIOS_GRUPOS'
-      ? `Se propone UNA campaña con ${Math.max(1, ofertasPlanificables.length)} grupo(s)`
+      ? `Se propone UNA campaña con ${Math.max(1, ofertasDelPlan)} grupo(s)`
       : `Se propone una campaña por oferta (${ofertasPlanificables.length})`,
     estructura.justificacion,
   );
 
   // ── GRUPOS ──
   const cobertura = { negativas: negativas.length, historial: e.historialDeConversiones };
-  const grupos: GrupoDelPlan[] = ofertasPlanificables.map((o) => {
+  const gruposDeProveedor: GrupoDelPlan[] = ofertasPlanificables.map((o) => {
     const suyos = conVolumen(o.slug).slice(0, 15);
     const landing = landingPorOferta.get(o.slug) ?? null;
     const palabras: PalabraDelPlan[] = suyos.map((t) => {
       const c = concordanciaDe(t, cobertura);
-      return { termino: t.termino, concordancia: c.tipo, justificacion: c.justificacion, volumenMensual: volumenDe(t) || null };
+      return {
+        termino: t.termino, concordancia: c.tipo, justificacion: c.justificacion,
+        volumenMensual: volumenDe(t) || null, origen: 'PROVIDER_DATA' as const, evidenciaDemanda: 'KNOWN' as const,
+      };
     });
     return {
       organizationId: e.organizationId,
@@ -256,6 +318,32 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
       justificacion: `${palabras.length} término(s) con demanda observada para «${o.name}»; la página de destino está ${landing?.estado ?? 'sin revisar'}`,
     };
   });
+
+  /**
+   * Grupos construidos con el sitio. Toda palabra sale con `volumenMensual: null` —no se sabe— y en
+   * concordancia de FRASE: sin volumen ni historial, abrir la concordancia sería gastar el dinero de alguien
+   * en búsquedas que nadie ha comprobado que existan.
+   */
+  const gruposDeSitio: GrupoDelPlan[] = (usarSemillasDeSitio ? e.semillasSitio?.grupos ?? [] : []).map((g) => ({
+    organizationId: e.organizationId,
+    planId: '',
+    id: g.ofertaSlug,
+    nombre: g.nombre,
+    ofertaSlug: g.ofertaSlug,
+    landing: g.landing,
+    palabras: g.candidatos.map((c) => ({
+      termino: c.termino,
+      concordancia: 'PHRASE' as const,
+      justificacion: `candidato construido con ${c.respaldo}; no hay volumen observado, así que se propone en frase y queda por revisar`,
+      volumenMensual: null,
+      origen: 'VERIFIED_SITE_SEEDS' as const,
+      evidenciaDemanda: 'UNKNOWN' as const,
+    })),
+    negativas: (e.semillasSitio?.negativas ?? []).map((n) => ({ termino: n.termino, motivo: n.motivo })),
+    justificacion: `${g.candidatos.length} candidato(s) construidos con el sitio verificado y la oferta declarada para «${g.nombre}»; la demanda de estos términos NO está medida`,
+  }));
+
+  const grupos: GrupoDelPlan[] = usarSemillasDeSitio ? gruposDeSitio : gruposDeProveedor;
 
   if (negativas.length > 0) {
     anotar(
@@ -271,9 +359,22 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
     );
   }
 
-  // ── REQUISITOS DE CREATIVIDADES Y MEDICIÓN ──
+  // ── ANUNCIOS Y MEDICIÓN ──
+  /**
+   * BORRADORES DE ANUNCIO, sólo de las ofertas que están en el plan y sólo con texto del propio sitio. Son
+   * propuestas para que una persona las apruebe o las reescriba: nadie ha comprobado que digan lo que el
+   * negocio quiere decir, y un anuncio lo firma el negocio, no SOEC.
+   */
+  const anuncios: readonly AnuncioDelPlan[] = (e.semillasSitio?.anuncios ?? []).filter((a) => slugsDelPlan.includes(a.ofertaSlug));
   const requisitosCreativos: readonly RequisitoCreativo[] = ['RSA_REQUIRED'];
-  anotar('Hará falta escribir anuncios de búsqueda', 'un plan de buscador necesita titulares y descripciones; esta fase no los genera, sólo declara que faltan.');
+  if (anuncios.length > 0) {
+    anotar(
+      `Se preparan borradores de anuncio para ${anuncios.length} oferta(s)`,
+      'los titulares y descripciones se recortan de lo que ya dice el sitio del negocio; no se inventan precios, convenios, promesas ni experiencia. Siguen siendo borradores: los aprueba una persona.',
+    );
+  } else {
+    anotar('Hará falta escribir anuncios de búsqueda', 'un plan de buscador necesita titulares y descripciones; no hubo material del sitio con el que proponerlos.');
+  }
 
   const eventos = e.politica.eventos.map((x) => x.eventKey);
   const requisitoConversion: RequisitoConversion = eventos.length === 0
@@ -289,19 +390,68 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
 
   // ── PREPARACIÓN POR DIMENSIONES ──
   const hayDemanda = candidatos.some((t) => volumenDe(t) > 0);
-  const landingLista = ofertasPlanificables.length > 0 && ofertasPlanificables.every((o) => landingPorOferta.get(o.slug)?.estado === 'READY');
+  const landingLista = usarSemillasDeSitio
+    // Un grupo de sitio SÓLO existe si su página fue verificada: si hay grupos, hay páginas.
+    ? gruposDeSitio.length > 0 && gruposDeSitio.every((g) => g.landing !== null)
+    : ofertasPlanificables.length > 0 && ofertasPlanificables.every((o) => landingPorOferta.get(o.slug)?.estado === 'READY');
   const readiness: Record<DimensionPlan, boolean> = {
-    RESEARCH_READY: hayDemanda && ejecutables.length > 0,
+    // INVESTIGACIÓN SUFICIENTE PARA PLANIFICAR no es lo mismo que demanda medida: con material verificado del
+    // sitio y territorio segmentable hay con qué armar un plan revisable. Lo que falta se declara aparte.
+    RESEARCH_READY: (hayDemanda || usarSemillasDeSitio) && ejecutables.length > 0,
     LANDING_READY: landingLista,
     MEASUREMENT_READY: requisitoConversion === 'CONVERSION_READY',
     BUDGET_READY: techoDiario !== null && (cpcEstimado === null || techoDiario >= cpcEstimado),
-    CREATIVE_READY: false, // no hay anuncios escritos: esta fase no los genera
+    CREATIVE_READY: false, // hay borradores, no anuncios aprobados: aprobarlos es de una persona
     EXECUTION_READY: false, // se calcula abajo y NUNCA es true en esta fase
   };
   readiness.EXECUTION_READY = readiness.RESEARCH_READY && readiness.LANDING_READY && readiness.MEASUREMENT_READY && readiness.BUDGET_READY && readiness.CREATIVE_READY;
-  if (!readiness.CREATIVE_READY) prerequisitos.push('escribir los anuncios (títulos y descripciones)');
+  if (!readiness.CREATIVE_READY) {
+    prerequisitos.push(anuncios.length > 0 ? 'revisar y aprobar los textos de los anuncios propuestos' : 'escribir los anuncios (títulos y descripciones)');
+  }
 
-  const estado: EstadoPlan = readiness.EXECUTION_READY ? 'DRAFT' : 'NON_EXECUTABLE';
+  /**
+   * ── ESTADO DEL PLAN ──
+   *
+   * BLOCKED es para lo que impide que exista un plan: sin dinero autorizado, sin territorio segmentable, sin
+   * página verificada o sin una sola oferta con material. REVIEW_REQUIRED es un plan que se puede leer y
+   * discutir aunque le falte evidencia cuantitativa o una decisión humana — que es distinto, y mucho.
+   */
+  const limitaciones: string[] = [];
+  const bloqueos: string[] = [];
+  if (techoDiario === null) bloqueos.push('no hay presupuesto autorizado');
+  if (ejecutables.length === 0) bloqueos.push('la plataforma no ofrece ningún territorio segmentable de los declarados');
+  if (grupos.length === 0) bloqueos.push('no hay ninguna oferta con demanda medida ni material verificado del sitio');
+  /**
+   * Que a UNA oferta le falte página no bloquea el plan entero: bloquea esa oferta, y eso ya se dice en los
+   * prerrequisitos. Sólo es un bloqueo si NINGÚN grupo tiene a dónde mandar a la gente — pagar por clics que
+   * no aterrizan en ninguna parte sí es imposible de defender.
+   */
+  if (grupos.length > 0 && grupos.every((g) => g.landing === null)) {
+    bloqueos.push('ninguna oferta del plan tiene página de destino verificada');
+  }
+
+  // Un tope que supera lo autorizado no se recorta en silencio: el plan no vale.
+  const violaMandato = topeMandato !== null && techoDiario !== null && techoDiario > topeMandato;
+  if (violaMandato) bloqueos.push(`el presupuesto propuesto (${techoDiario}) supera el máximo diario autorizado (${topeMandato})`);
+
+  if (!hayDemanda) {
+    limitaciones.push(usarSemillasDeSitio
+      ? 'no hay volumen de búsqueda observado: los términos son candidatos construidos con el sitio y las ofertas declaradas, y su demanda está sin medir'
+      : 'no hay volumen de búsqueda observado');
+  }
+  if (anuncios.length > 0) limitaciones.push('los textos de anuncio son borradores recortados del propio sitio: nadie los ha aprobado');
+  if (noEjecutables.length > 0) limitaciones.push(`${noEjecutables.join(', ')} queda(n) fuera: la plataforma no los ofrece como territorio`);
+
+  const estado: EstadoPlan = bloqueos.length > 0 ? 'BLOCKED' : readiness.EXECUTION_READY ? 'EXECUTABLE' : 'REVIEW_REQUIRED';
+  for (const b of bloqueos) prerequisitos.push(b);
+
+  const evidencia: EvidenciaDelPlan = {
+    demanda: hayDemanda ? 'KNOWN' : 'UNKNOWN',
+    investigacion: hayDemanda ? 'READY' : usarSemillasDeSitio ? 'PARTIAL' : 'MISSING',
+    confianza: hayDemanda ? 'FULL' : 'LIMITED',
+    origenKeywords: hayDemanda ? 'PROVIDER_DATA' : usarSemillasDeSitio ? 'VERIFIED_SITE_SEEDS' : 'NONE',
+    limitaciones,
+  };
 
   const plan: PlanCampania = {
     organizationId: e.organizationId,
@@ -311,7 +461,7 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
     estado,
     canal,
     objetivo,
-    ofertas: ofertasPlanificables.map((o) => o.slug),
+    ofertas: slugsDelPlan,
     geografia: {
       targets: ejecutables.map((g) => ({ nombre: g.solicitado, targetId: g.targetId, tipo: g.targetTipo })),
       noEjecutables,
@@ -325,6 +475,8 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
     prerequisitos: [...new Set(prerequisitos)],
     readiness,
     explicacion,
+    evidencia,
+    anuncios,
     creadoEn: e.ahora,
     staleDesde: null,
     motivoStale: null,

@@ -31,6 +31,7 @@ import { CoordinadorDeConsultas, crearProveedorDemandaGoogle, crearProveedorGeoG
 import { crearProveedorSitio } from './sitio-auditoria';
 import { competidoresSinFuente } from './proveedores';
 import type { DepsInvestigacion } from './investigacion-service';
+import type { EntradaSondas } from './probe-demanda';
 
 /** Un único coordinador por proceso: es la defensa de cuota, y compartirla es justamente el objetivo. */
 export const coordinadorGlobal = new CoordinadorDeConsultas();
@@ -74,6 +75,58 @@ async function cuentaDeGoogle(pool: Pool, org: string): Promise<{ customerId: st
     // El esquema OAuth puede no existir en un despliegue mínimo: no es un fallo del negocio.
   }
   return null;
+}
+
+/**
+ * MATERIALES PARA SONDAR EL PLANIFICADOR de una organización: su cliente, su cuenta y los territorios ya
+ * resueltos. Devuelve `null` si no hay con qué preguntar — y entonces la ruta lo dice en vez de diagnosticar
+ * a ciegas. Resuelve además los ids de país y región CONSULTANDO a la plataforma: no se fijan constantes
+ * geográficas en el código, que es justo lo que después nadie sabe si sigue siendo cierto.
+ */
+export async function sondasDeDemandaDeOrganizacion(
+  org: string,
+  o: OpcionesComposicion & { readonly perfil: { readonly website: string | null; readonly language: string; readonly country: string }; readonly semillas: readonly string[]; readonly geoComunas: readonly string[]; readonly region: string | null },
+): Promise<EntradaSondas | null> {
+  const developerToken = o.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  if (!o.composicionGoogleAds || !developerToken) return null;
+  const cuenta = await cuentaDeGoogle(o.pool, org);
+  if (cuenta === null) return null;
+
+  const cliente = new GoogleAdsMutateHttpClient({
+    resolverAccessToken: () => obtenerAccessTokenDeOrg(o.composicionGoogleAds!, org),
+    developerToken,
+    loginCustomerId: cuenta.loginCustomerId,
+    ...(o.log ? { logger: (i: unknown) => o.log?.({ googleAdsSondas: i }) } : {}),
+  });
+
+  // País y región se PREGUNTAN a la plataforma, igual que las comunas del negocio.
+  let geoPaisId: string | null = null;
+  let geoRegionId: string | null = null;
+  let geoRegionNombre: string | null = null;
+  try {
+    const nombres = [o.perfil.country === 'CL' ? 'Chile' : o.perfil.country, ...(o.region !== null ? [o.region] : [])];
+    const sugeridos = await cliente.sugerirGeoTargets(nombres, o.perfil.country, o.perfil.language);
+    const pais = sugeridos.find((g) => g.targetType === 'Country');
+    geoPaisId = pais?.criterionId ?? null;
+    const region = sugeridos.find((g) => g.targetType === 'Region' || g.targetType === 'Province' || g.targetType === 'State');
+    geoRegionId = region?.criterionId ?? null;
+    geoRegionNombre = region?.name ?? o.region;
+  } catch {
+    // Si la resolución geográfica falla, las sondas que no dependen de ella siguen valiendo.
+  }
+
+  return {
+    cliente,
+    customerId: cuenta.customerId,
+    semillas: o.semillas,
+    urlSitio: o.perfil.website,
+    idioma: o.perfil.language,
+    pais: o.perfil.country,
+    geoComunas: o.geoComunas,
+    geoPaisId,
+    geoRegionId,
+    geoRegionNombre,
+  };
 }
 
 /**

@@ -57,20 +57,21 @@ const plan = (over: Partial<PlanCampania> = {}): PlanCampania => ({
   organizationId: ORG, id: 'plan-v1-run1', version: 1, researchRunId: 'run1', estado: 'NON_EXECUTABLE',
   canal: 'GOOGLE_SEARCH', objetivo: 'conseguir pacientes', ofertas: ['implantes'],
   geografia: { targets: [{ nombre: 'Curicó', targetId: '1000341', tipo: 'CITY' }], noEjecutables: [], aproximaciones: [] },
-  presupuesto: { techoDeclaradoClp: 300_000, modalidadTecho: 'MONTHLY', propuestoDiarioClp: 10_000, oportunidadDiariaClp: 20_000, costoPorClicEstimadoClp: 2_000, base: 'USER_CEILING', explicacion: 'tope del dueño' },
+  presupuesto: { techoDeclaradoClp: 300_000, modalidadTecho: 'MONTHLY', propuestoDiarioClp: 10_000, oportunidadDiariaClp: 20_000, costoPorClicEstimadoClp: 2_000, base: 'USER_CEILING', topeMandatoDiarioClp: null, explicacion: 'tope del dueño' },
   puja: { estrategia: 'MAXIMIZE_CLICKS_WITH_CPC_CEILING', techoCpcClp: 2_000, justificacion: 'sin historial' },
   estructura: { tipo: 'UNA_CAMPANA_VARIOS_GRUPOS', justificacion: 'una oferta' },
   requisitosCreativos: ['RSA_REQUIRED'], requisitoConversion: 'CONVERSION_TRACKING_UNVERIFIED',
   prerequisitos: [], readiness: { RESEARCH_READY: true, LANDING_READY: true, MEASUREMENT_READY: false, BUDGET_READY: true, CREATIVE_READY: false, EXECUTION_READY: false },
-  explicacion: [], creadoEn: AHORA, staleDesde: null, motivoStale: null, ...over,
+  explicacion: [], evidencia: { demanda: 'KNOWN', investigacion: 'READY', confianza: 'FULL', origenKeywords: 'PROVIDER_DATA', limitaciones: [] },
+  anuncios: [], creadoEn: AHORA, staleDesde: null, motivoStale: null, ...over,
 });
 
 const grupo = (over: Partial<GrupoDelPlan> = {}): GrupoDelPlan => ({
   organizationId: ORG, planId: 'plan-v1-run1', id: 'implantes', nombre: 'Implantes dentales', ofertaSlug: 'implantes',
   landing: 'https://clinica-qa.example/implantes',
   palabras: [
-    { termino: 'implante dental curico', concordancia: 'EXACT', justificacion: 'intención local', volumenMensual: 320 },
-    { termino: 'precio implante dental', concordancia: 'PHRASE', justificacion: 'intención comercial', volumenMensual: 210 },
+    { termino: 'implante dental curico', concordancia: 'EXACT', justificacion: 'intención local', volumenMensual: 320, origen: 'PROVIDER_DATA', evidenciaDemanda: 'KNOWN' },
+    { termino: 'precio implante dental', concordancia: 'PHRASE', justificacion: 'intención comercial', volumenMensual: 210, origen: 'PROVIDER_DATA', evidenciaDemanda: 'KNOWN' },
   ],
   negativas: [{ termino: 'trabajo dentista', motivo: 'busca empleo' }],
   justificacion: '2 términos', ...over,

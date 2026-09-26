@@ -58,8 +58,14 @@ export interface VistaPlan {
     geografia: { targets: { nombre: string; targetId: string | null; tipo: string | null }[]; noEjecutables: string[]; aproximaciones: string[] };
     presupuesto: {
       techoDeclaradoClp: number | null; modalidadTecho: string | null; propuestoDiarioClp: number | null;
+      topeMandatoDiarioClp: number | null;
       oportunidadDiariaClp: number | null; costoPorClicEstimadoClp: number | null; base: string; explicacion: string;
     };
+    /** Qué sostiene el plan y qué no se pudo medir. Se pinta junto a la propuesta, no en letra pequeña. */
+    evidencia: {
+      demanda: string; investigacion: string; confianza: string; origenKeywords: string; limitaciones: string[];
+    };
+    anuncios: { ofertaSlug: string; titulares: string[]; descripciones: string[]; respaldo: string[] }[];
     puja: { estrategia: string; techoCpcClp: number | null; justificacion: string };
     estructura: { tipo: string; justificacion: string };
     requisitosCreativos: string[];
@@ -72,7 +78,7 @@ export interface VistaPlan {
   } | null;
   grupos: {
     id: string; nombre: string; ofertaSlug: string; landing: string | null;
-    palabras: { termino: string; concordancia: string; justificacion: string; volumenMensual: number | null }[];
+    palabras: { termino: string; concordancia: string; justificacion: string; volumenMensual: number | null; origen?: string; evidenciaDemanda?: string }[];
     negativas: { termino: string; motivo: string }[];
     justificacion: string;
   }[];

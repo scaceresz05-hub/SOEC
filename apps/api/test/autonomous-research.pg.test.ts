@@ -31,6 +31,8 @@ import { migrarPoliticasDelRegistro } from '../src/politica/migracion-politica';
 import { onboardingMigrations } from '../src/onboarding/onboarding-pg';
 import { investigacionMigrations } from '../src/investigacion/investigacion-pg';
 import { planMigrations } from '../src/investigacion/plan-pg';
+import { accionMigrations, crearReposAccion } from '../src/accion/accion-pg';
+import { crearMandatoAutorizado, revocar } from '../src/accion/mandato';
 import type { DepsInvestigacion } from '../src/investigacion/investigacion-service';
 import type { AuditoriaSitio, GeoTargetResuelto, IdeaDeTermino, PaginaObservada } from '../src/investigacion/proveedores';
 import { restablecerNegociosDelRuntime } from '../src/plataforma';
@@ -48,7 +50,8 @@ beforeEach(async () => {
   await runMigrations(pool, onboardingMigrations);
   await runMigrations(pool, investigacionMigrations);
   await runMigrations(pool, planMigrations);
-  await ejecutarDestructivoDePrueba(pool, 'truncate campaign_plan_group, campaign_plan, research_competitor, research_landing, research_channel, research_geo_target, research_keyword, research_finding, research_evidence, research_run, business_budget_intent, business_website_insight, business_onboarding_answer, business_onboarding, business_channel_rule, business_autonomy_limits, business_evaluation_rule, business_conversion_event, business_kpi, business_evaluation_policy, business_connection_ciphertext, business_capability, business_connection, business_audit, business_restriction, business_geo_scope, business_offering, business_objective, business_governance, business_profile restart identity cascade');
+  await runMigrations(pool, accionMigrations);
+  await ejecutarDestructivoDePrueba(pool, 'truncate accion_ledger, accion_mandato, campaign_plan_group, campaign_plan, research_competitor, research_landing, research_channel, research_geo_target, research_keyword, research_finding, research_evidence, research_run, business_budget_intent, business_website_insight, business_onboarding_answer, business_onboarding, business_channel_rule, business_autonomy_limits, business_evaluation_rule, business_conversion_event, business_kpi, business_evaluation_policy, business_connection_ciphertext, business_capability, business_connection, business_audit, business_restriction, business_geo_scope, business_offering, business_objective, business_governance, business_profile restart identity cascade');
   await ejecutarDestructivoDePrueba(
     pool,
     'truncate identity_password_resets, identity_audit_events, identity_invitations, identity_sessions, identity_memberships, identity_organizations, identity_users cascade',
@@ -322,7 +325,8 @@ describe('Empresa QA Research · de preparada a plan de campaña, sin intervenci
     const plan = p.plan as Vista;
     expect(plan.version).toBe(1);
     expect(plan.canal).toBe('GOOGLE_SEARCH');
-    expect(plan.estado).toBe('NON_EXECUTABLE');
+    // Hay plan que leer y discutir; lo que falta (anuncios, conversión, una página) se dice aparte.
+    expect(plan.estado).toBe('REVIEW_REQUIRED');
 
     // Presupuesto: sale del techo del dueño; la oportunidad del mercado va aparte y etiquetada.
     expect(plan.presupuesto.techoDeclaradoClp).toBe(300_000);
@@ -349,7 +353,8 @@ describe('Empresa QA Research · de preparada a plan de campaña, sin intervenci
     const faltas = (plan.prerequisitos as string[]).join(' | ');
     expect(faltas).toContain('Sagrada Familia');
     expect(faltas).toContain('Rauco');
-    expect(faltas).toContain('escribir los anuncios');
+    // Los anuncios siguen siendo cosa de una persona: o faltan por escribir, o hay borradores por aprobar.
+    expect(faltas).toMatch(/escribir los anuncios|aprobar los textos/);
     expect(faltas).toContain('página de destino');
 
     // EXPLICABILIDAD: cada decisión con su porqué; nunca «lo recomienda la IA».
@@ -394,7 +399,7 @@ describe('Empresa QA Research · de preparada a plan de campaña, sin intervenci
     expect((segundo.plan as Vista).version).toBe(2);
     expect((segundo.historial as Vista[])).toHaveLength(2);
     const { rows } = await pool.query('select version, estado from campaign_plan where organization_id = $1 order by version', [org]);
-    expect(rows).toEqual([{ version: 1, estado: 'SUPERSEDED' }, { version: 2, estado: 'NON_EXECUTABLE' }]);
+    expect(rows).toEqual([{ version: 1, estado: 'SUPERSEDED' }, { version: 2, estado: 'REVIEW_REQUIRED' }]);
     await a.close();
   });
 });
@@ -419,8 +424,18 @@ describe('evidencia ausente y bloqueos, dichos en voz alta', () => {
     expect(canal.veredicto).toBe('INSUFFICIENT_EVIDENCE');
 
     const plan = (await generarPlan(a, cookie, org)).plan as Vista;
-    expect(plan.estado).toBe('NON_EXECUTABLE');
-    expect(plan.readiness.RESEARCH_READY).toBe(false);
+    /**
+     * SIN MÉTRICAS, PERO CON SITIO: el plan se puede armar y revisar con material verificado, y la falta de
+     * demanda medida queda declarada en la evidencia. Lo que NO ocurre —y es lo que esta prueba protege— es
+     * que aparezca un volumen inventado o un veredicto de mercado que nadie observó.
+     */
+    expect(plan.estado).toBe('REVIEW_REQUIRED');
+    expect(plan.evidencia.demanda).toBe('UNKNOWN');
+    expect(plan.evidencia.investigacion).toBe('PARTIAL');
+    expect(plan.evidencia.confianza).toBe('LIMITED');
+    expect(plan.evidencia.origenKeywords).toBe('VERIFIED_SITE_SEEDS');
+    const palabrasDelPlan = ((await generarPlan(a, cookie, org)).grupos as Vista[]).flatMap((g) => g.palabras as Vista[]);
+    for (const w of palabrasDelPlan) expect(w.volumenMensual, `«${w.termino}» no puede declarar volumen`).toBeNull();
     // El prerrequisito nombra el MOTIVO observado. Aquí no hay cuenta conectada, y eso es lo que dice; no
     // se da por supuesto que ésa sea siempre la causa de no poder medir la demanda.
     expect((plan.prerequisitos as string[]).join(' ')).toContain('falta conectar la cuenta de Google');
@@ -469,7 +484,7 @@ describe('evidencia ausente y bloqueos, dichos en voz alta', () => {
     expect(plan.presupuesto.propuestoDiarioClp).toBeNull();
     expect(plan.presupuesto.base).toBe('NONE');
     expect(plan.readiness.BUDGET_READY).toBe(false);
-    expect((plan.prerequisitos as string[]).join(' ')).toContain('declarar cuánto');
+    expect((plan.prerequisitos as string[]).join(' ')).toContain('autorizar un presupuesto');
     await a.close();
   });
 
@@ -652,6 +667,112 @@ describe('empresas que ya existían', () => {
     // Ninguna campaña suya cambia: esta fase no crea, no pausa y no reanuda nada.
     const { rows: mutaciones } = await pool.query("select count(*)::int as n from business_audit where organization_id = 'org-cp-odontologia' and action ilike '%CAMPAIGN%'");
     expect(mutaciones[0].n).toBe(0);
+    await a.close();
+  });
+});
+
+/**
+ * ── EL DINERO DEL PLAN LO MANDA EL MANDATO ──
+ *
+ * El caso es literal: en el alta se declaró un techo, y después una persona autorizó un máximo diario menor.
+ * Un plan que siguiera proponiendo la cifra vieja estaría enseñándole a alguien un plan que no es el suyo, y
+ * dejando el recorte para el momento de gastar — que es justo cuando ya no se está mirando.
+ */
+describe('precedencia del presupuesto autorizado sobre la intención del alta', () => {
+  /** Autoriza un presupuesto por la vía canónica del sistema (el mismo recurso que usa la pantalla). */
+  async function autorizar(org: string, diario: number, total: number): Promise<void> {
+    const desde = new Date(Date.now() - 86_400_000).toISOString();
+    const hasta = new Date(Date.now() + 29 * 86_400_000).toISOString();
+    const m = crearMandatoAutorizado(
+      {
+        organizationId: org, objective: 'presupuesto autorizado por la persona responsable del negocio',
+        currency: 'CLP', provider: 'GOOGLE_ADS', authorizedBudgetMinor: total, dailyCapMinor: diario,
+        periodStart: desde, periodEnd: hasta, allowedMetaAssets: [], allowedActionTypes: ['CREATE_CAMPAIGN'],
+      },
+      'duena@clinica.cl', `mandato:${org}`, desde,
+    );
+    await crearReposAccion(pool).mandatoRepo.guardar(m);
+  }
+
+  it('con 300.000/mes declarados y 2.500/día autorizados, el plan propone 2.500', async () => {
+    const a = app(proveedoresSimulados());
+    const { cookie, org } = await empresaPreparada(a, 'duena-mandato@soec.cl', 'Empresa QA Research Mandato');
+    await investigar(a, cookie, org);
+    await autorizar(org, 2_500, 30_000);
+
+    const plan = (await generarPlan(a, cookie, org)).plan as Vista;
+    expect(plan.presupuesto.propuestoDiarioClp).toBe(2_500);
+    expect(plan.presupuesto.base).toBe('HUMAN_MANDATE');
+    expect(plan.presupuesto.topeMandatoDiarioClp).toBe(2_500);
+    // La intención anterior no desaparece: se conserva y se explica cuál manda.
+    expect(plan.presupuesto.techoDeclaradoClp).toBe(300_000);
+    expect(plan.presupuesto.explicacion).toMatch(/manda la autorización/i);
+    await a.close();
+  });
+
+  it('sin mandato sigue mandando lo declarado en el alta', async () => {
+    const a = app(proveedoresSimulados());
+    const { cookie, org } = await empresaPreparada(a, 'duena-sin-mandato@soec.cl', 'Empresa QA Research SinMandato');
+    await investigar(a, cookie, org);
+
+    const plan = (await generarPlan(a, cookie, org)).plan as Vista;
+    expect(plan.presupuesto.propuestoDiarioClp).toBe(10_000);
+    expect(plan.presupuesto.base).toBe('USER_CEILING');
+    expect(plan.presupuesto.topeMandatoDiarioClp).toBeNull();
+    await a.close();
+  });
+
+  it('un mandato en otra moneda que la del negocio NO se aplica ni se convierte', async () => {
+    const a = app(proveedoresSimulados());
+    const { cookie, org } = await empresaPreparada(a, 'duena-moneda@soec.cl', 'Empresa QA Research Moneda');
+    await investigar(a, cookie, org);
+    const desde = new Date(Date.now() - 86_400_000).toISOString();
+    const hasta = new Date(Date.now() + 29 * 86_400_000).toISOString();
+    await crearReposAccion(pool).mandatoRepo.guardar(crearMandatoAutorizado(
+      {
+        organizationId: org, objective: 'x', currency: 'USD', provider: 'GOOGLE_ADS',
+        authorizedBudgetMinor: 30_000, dailyCapMinor: 2_500, periodStart: desde, periodEnd: hasta,
+        allowedMetaAssets: [], allowedActionTypes: ['CREATE_CAMPAIGN'],
+      },
+      'duena@clinica.cl', `mandato:${org}`, desde,
+    ));
+
+    const plan = (await generarPlan(a, cookie, org)).plan as Vista;
+    // Dos monedas distintas no se comparan: el mandato en USD no limita un plan en CLP, y no se finge que sí.
+    expect(plan.presupuesto.topeMandatoDiarioClp).toBeNull();
+    expect(plan.presupuesto.base).toBe('USER_CEILING');
+    await a.close();
+  });
+
+  it('un mandato REVOCADO deja de mandar', async () => {
+    const a = app(proveedoresSimulados());
+    const { cookie, org } = await empresaPreparada(a, 'duena-revocado@soec.cl', 'Empresa QA Research Revocado');
+    await investigar(a, cookie, org);
+    await autorizar(org, 2_500, 30_000);
+    // Se revoca por la vía del dominio, no a mano: revocar es una acción de gobierno con su propia regla.
+    const repo = crearReposAccion(pool).mandatoRepo;
+    const vigente = await repo.actual(org);
+    await repo.guardar(revocar(vigente!));
+
+    const plan = (await generarPlan(a, cookie, org)).plan as Vista;
+    expect(plan.presupuesto.topeMandatoDiarioClp).toBeNull();
+    expect(plan.presupuesto.propuestoDiarioClp).toBe(10_000);
+    await a.close();
+  });
+
+  it('el plan de una empresa no se limita con el mandato de otra', async () => {
+    const a = app(proveedoresSimulados());
+    const uno = await empresaPreparada(a, 'duena-aisl-1@soec.cl', 'Empresa QA Research Aisl Uno');
+    const dos = await empresaPreparada(a, 'duena-aisl-2@soec.cl', 'Empresa QA Research Aisl Dos');
+    await investigar(a, uno.cookie, uno.org);
+    await investigar(a, dos.cookie, dos.org);
+    await autorizar(uno.org, 1_200, 30_000);
+
+    const planUno = (await generarPlan(a, uno.cookie, uno.org)).plan as Vista;
+    const planDos = (await generarPlan(a, dos.cookie, dos.org)).plan as Vista;
+    expect(planUno.presupuesto.propuestoDiarioClp).toBe(1_200);
+    expect(planDos.presupuesto.propuestoDiarioClp).toBe(10_000);
+    expect(planDos.presupuesto.topeMandatoDiarioClp).toBeNull();
     await a.close();
   });
 });

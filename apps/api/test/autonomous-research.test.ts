@@ -363,6 +363,7 @@ const entradaPlan = (over: Partial<EntradaPlanificador> = {}): EntradaPlanificad
     terminos: [termino('implante dental curico', { intencion: 'LOCAL' }), termino('precio implante dental')],
     geos: [geo('Curicó')], canales: evaluarCanales(ctx), landings: evaluarLandings(ctx),
     techoDeclarado: { modalidad: 'MONTHLY', montoMinor: 300_000 }, conversionExternaVerificada: false,
+    mandato: null, semillasSitio: null,
     historialDeConversiones: 0, version: 1, ahora: AHORA, ...over,
   };
 };
@@ -376,7 +377,8 @@ describe('planificador de campañas', () => {
 
   it('el plan NUNCA es ejecutable en esta fase, y el bloqueo se dice en primer plano', () => {
     const { plan } = planificar(entradaPlan());
-    expect(plan.estado).toBe('NON_EXECUTABLE');
+    // Hay plan que leer y discutir —territorio, páginas, presupuesto—, pero falta lo que decide una persona.
+    expect(plan.estado).toBe('REVIEW_REQUIRED');
     expect(plan.readiness.EXECUTION_READY).toBe(false);
     expect(plan.readiness.CREATIVE_READY).toBe(false);
     expect(plan.requisitosCreativos).toContain('RSA_REQUIRED');
@@ -388,7 +390,7 @@ describe('planificador de campañas', () => {
     expect(plan.presupuesto.propuestoDiarioClp).toBeNull();
     expect(plan.presupuesto.base).toBe('NONE');
     expect(plan.presupuesto.explicacion).toContain('inventar dinero ajeno');
-    expect(plan.prerequisitos.join(' ')).toContain('declarar cuánto');
+    expect(plan.prerequisitos.join(' ')).toContain('autorizar un presupuesto');
     expect(plan.readiness.BUDGET_READY).toBe(false);
   });
 

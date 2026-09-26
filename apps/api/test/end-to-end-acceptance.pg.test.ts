@@ -60,8 +60,6 @@ const fechaDeMetricas = (): string => iso(Date.now() - DIA_MS).slice(0, 10);
 /** Mandato vigente: empezó la semana pasada y termina en dos meses, siempre relativo a hoy. */
 const MANDATO_DESDE = iso(AHORA_MS - 7 * DIA_MS);
 const MANDATO_HASTA = iso(AHORA_MS + 60 * DIA_MS);
-/** Mandato ya vencido, para probar el rechazo por fuera de ventana. */
-const MANDATO_VENCIDO = iso(AHORA_MS - DIA_MS);
 
 beforeEach(async () => {
   await runMigrations(pool);
@@ -368,7 +366,8 @@ describe('Empresa QA Full Autonomy · de crear la empresa a optimizar la campañ
     expect(planResp.statusCode, planResp.body).toBe(200);
     const plan = (planResp.json() as Vista).plan;
     expect(plan.researchRunId).toBe(investigacion.corrida.id); // el plan apunta a SU investigación
-    expect(plan.estado).toBe('NON_EXECUTABLE'); // todavía faltan anuncios y medición
+    // Hay plan que revisar; lo que falta —anuncios aprobados, conversión verificada— se dice aparte.
+    expect(plan.estado).toBe('REVIEW_REQUIRED');
 
     // ── ETAPAS 17-19 · ANUNCIOS APROBADOS, CONVERSIÓN EXTERNA Y MEDICIÓN VERIFICADA ──
     expect((await a.inject({ method: 'POST', url: '/campana/material', headers: h(cookie, org), payload: MATERIAL })).statusCode).toBe(200);
@@ -458,7 +457,7 @@ describe('Empresa QA Full Autonomy · de crear la empresa a optimizar la campañ
     // Un término NUEVO (no estaba en la investigación, así que el plan no lo excluyó todavía).
     const g = googleSimulado({ terminos: [{ termino: 'curso de implantes dentales', metricas: { costMicros: 3_000_000_000, impressions: 200, clicks: 8, conversions: 0 } }] });
     const a = app(g);
-    const { cookie, org } = await recorridoCompleto(a, g, 'duena-linaje@soec.cl', 'Empresa QA Linaje');
+    const { org } = await recorridoCompleto(a, g, 'duena-linaje@soec.cl', 'Empresa QA Linaje');
 
     // Punto de partida: la acción aplicada.
     const { rows: acciones } = await pool.query('select * from optimization_action_log where organization_id = $1 order by aplicado_en desc limit 1', [org]);

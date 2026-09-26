@@ -344,11 +344,15 @@ export class GoogleAdsMutateHttpClient implements GoogleAdsApiClient {
     if (url === null) throw new Error('HOST_NO_AUTORIZADO');
 
     const semillas = peticion.semillas.map((s) => s.trim()).filter((s) => s.length > 0).slice(0, 20);
-    if (semillas.length === 0) return [];
+    // Sin palabras y sin sitio no hay nada que preguntar. Con sitio y sin palabras, SÍ: `urlSeed` es una
+    // consulta legítima del planificador, y hace falta para poder diagnosticar de dónde viene un silencio.
+    if (semillas.length === 0 && !peticion.url) return [];
     // Semilla: palabras del negocio y —cuando existe— su propio sitio. Nunca términos inventados aquí.
-    const seed = peticion.url
-      ? { keywordAndUrlSeed: { url: peticion.url, keywords: semillas } }
-      : { keywordSeed: { keywords: semillas } };
+    const seed = semillas.length === 0
+      ? { urlSeed: { url: peticion.url } }
+      : peticion.url
+        ? { keywordAndUrlSeed: { url: peticion.url, keywords: semillas } }
+        : { keywordSeed: { keywords: semillas } };
     const body = {
       ...seed,
       ...(peticion.geoTargetIds && peticion.geoTargetIds.length > 0

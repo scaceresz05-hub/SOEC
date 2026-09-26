@@ -22,7 +22,14 @@ import {
   type VistaPlan,
 } from '../../../lib/investigacion-client';
 
+/**
+ * El estado del plan, dicho para quien lo va a leer. «Falta revisarlo» y «no se puede armar» no son lo mismo,
+ * y confundirlos deja a alguien esperando a que se arregle solo algo que sólo puede decidir él.
+ */
 const ESTADO_PLAN: Record<string, string> = {
+  EXECUTABLE: 'listo para ejecutar',
+  REVIEW_REQUIRED: 'listo para que lo revises',
+  BLOCKED: 'falta algo para poder armarlo',
   DRAFT: 'borrador',
   NON_EXECUTABLE: 'borrador · todavía no publicable',
   STALE: 'quedó viejo',
@@ -163,6 +170,18 @@ export default function PlanPage() {
             <p style={{ marginBottom: 8 }}>
               Versión {plan.version} · <strong>{ESTADO_PLAN[plan.estado] ?? plan.estado}</strong> · preparado el {fecha(plan.creadoEn)}
             </p>
+            {/*
+              DE QUÉ ESTÁ HECHO ESTE PLAN. Va aquí arriba y no al final: si los términos no tienen volumen
+              medido, quien lo lee tiene que saberlo ANTES de mirar la cifra que se propone gastar.
+            */}
+            {plan.evidencia?.demanda === 'UNKNOWN' && (
+              <p style={{ background: 'var(--aviso, #fff8e1)', padding: 10, borderRadius: 6, marginBottom: 8 }}>
+                <strong>Este plan está hecho con lo que se pudo verificar de tu negocio</strong> —tu sitio, tus
+                servicios y tu territorio—, porque no hay datos de cuánta gente busca estos términos. No
+                significa que no te busquen: significa que hoy no lo sabemos.
+                {plan.evidencia.limitaciones.length > 0 && ` ${plan.evidencia.limitaciones.join('. ')}.`}
+              </p>
+            )}
             {plan.motivoStale !== null && (
               <p style={{ color: '#b58900', marginBottom: 8 }}>
                 Este plan quedó viejo: {plan.motivoStale}. Vuelve a prepararlo antes de usarlo para decidir.
@@ -248,7 +267,9 @@ export default function PlanPage() {
                     {g.palabras.map((p) => (
                       <li key={p.termino}>
                         <strong>{p.termino}</strong> — {CONCORDANCIA[p.concordancia] ?? p.concordancia}
-                        {p.volumenMensual !== null ? `, ${p.volumenMensual.toLocaleString()} búsquedas al mes` : ''}
+                        {p.volumenMensual !== null
+                          ? `, ${p.volumenMensual.toLocaleString()} búsquedas al mes`
+                          : p.evidenciaDemanda === 'UNKNOWN' ? ', sin datos de cuánta gente lo busca' : ''}
                         <span style={{ ...apagado, fontSize: 13 }}> · {p.justificacion}</span>
                       </li>
                     ))}
@@ -258,6 +279,26 @@ export default function PlanPage() {
                       Se dejarían fuera: {g.negativas.map((n) => n.termino).join(', ')}.
                     </p>
                   )}
+                </div>
+              ))}
+            </section>
+          )}
+
+          {plan.anuncios?.length > 0 && (
+            <section style={seccion}>
+              <h2 style={titulo}>Textos propuestos para los anuncios</h2>
+              <p style={{ ...apagado, marginBottom: 8 }}>
+                Salen de lo que ya dice tu sitio. No se inventan precios, convenios ni promesas: revísalos y
+                cámbialos si no dicen lo que quieres decir.
+              </p>
+              {plan.anuncios.map((a) => (
+                <div key={a.ofertaSlug} style={{ marginBottom: 12 }}>
+                  <h3 style={{ fontSize: 16, marginBottom: 4 }}>{a.ofertaSlug}</h3>
+                  <ul style={{ paddingLeft: 18, marginBottom: 4 }}>
+                    {a.titulares.map((t) => <li key={t}>{t}</li>)}
+                  </ul>
+                  {a.descripciones.map((d) => <p key={d} style={{ fontSize: 14, marginBottom: 2 }}>{d}</p>)}
+                  <p style={{ ...apagado, fontSize: 13 }}>Tomado de: {a.respaldo.join(', ')}.</p>
                 </div>
               ))}
             </section>
