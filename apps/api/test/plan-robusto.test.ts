@@ -262,6 +262,33 @@ describe('anuncios: sólo lo que el sitio ya dice', () => {
     }
   });
 
+  /**
+   * SALIÓ DEL PLAN REAL DE CP. Los primeros borradores traían «rehabilitación oral en» y «Dra. Claudia
+   * Pacheco R. —»: frases cortadas a treinta caracteres que ningún humano escribiría. Un titular a medias no
+   * es un borrador, es basura que alguien tendría que limpiar a mano.
+   */
+  it('ningún texto propuesto queda colgando de un conector o un guión', () => {
+    const s = semillasDeSitio({
+      oferta: [oferta('rehabilitacion-oral', 'rehabilitación oral')],
+      paginas: [{
+        ruta: '/dra', httpStatus: 200,
+        titulo: 'Dra. Claudia Pacheco R. — Especialista en Rehabilitación Oral | Clínica CP',
+        metaDescription: 'Conoce a la Dra. Claudia Pacheco R., especialista en Rehabilitación Oral en Curicó. Trato cercano y evaluación completa.',
+        h1: ['Dra. Claudia Pacheco R.'], indexable: true,
+      }],
+      localidades: ['Curicó', 'Sagrada Familia'],
+      marca: 'CP Odontología',
+      landingPorOferta: new Map([['rehabilitacion-oral', '/dra']]),
+    });
+    const textos = s.anuncios.flatMap((a) => [...a.titulares, ...a.descripciones]);
+    expect(textos.length).toBeGreaterThan(0);
+    for (const t of textos) {
+      expect(t, `«${t}» termina colgando`).not.toMatch(/\s(en|de|del|la|el|los|las|y|o|con|para|por|a|al|un|una|que|su|sus)$/i);
+      expect(t, `«${t}» termina en puntuación suelta`).not.toMatch(/[-—–|,;:]$/);
+      expect(t.length).toBeGreaterThanOrEqual(10);
+    }
+  });
+
   it('un plan con borradores sigue exigiendo que alguien los apruebe', () => {
     const { plan } = planificar(entrada());
     expect(plan.readiness.CREATIVE_READY).toBe(false);

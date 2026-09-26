@@ -122,14 +122,39 @@ const PATRONES_NO_VERIFICABLES: readonly RegExp[] = [
 
 const esAfirmacionSegura = (texto: string): boolean => !PATRONES_NO_VERIFICABLES.some((p) => p.test(texto));
 
-/** Recorta sin partir palabras. Devuelve `null` si no cabe nada legible. */
+/**
+ * Palabras con las que una frase no puede terminar. Cortar «rehabilitación oral en Licantén» a treinta
+ * caracteres deja «rehabilitación oral en», que no es un titular: es una frase a medias que nadie escribiría.
+ */
+const CONECTORES_FINALES = new Set(['en', 'de', 'del', 'la', 'el', 'los', 'las', 'y', 'o', 'con', 'para', 'por', 'a', 'al', 'un', 'una', 'que', 'su', 'sus']);
+
+/**
+ * Recorta sin partir palabras NI dejar frases colgando. Si el texto no cabe, se prefiere una frase completa
+ * —hasta el último punto— y, si no la hay, se corta por palabras y se retiran los conectores finales. Devuelve
+ * `null` cuando lo que queda ya no dice nada: es mejor proponer un titular menos que uno roto.
+ */
 function recortar(texto: string, max: number): string | null {
   const t = limpio(texto);
   if (t === '') return null;
-  if (t.length <= max) return t;
+  if (t.length <= max) return sinColgar(t);
+  // Una frase entera dentro del límite se lee mucho mejor que una cortada por la mitad.
+  const frase = t.slice(0, max + 1).match(/^.*[.!?](?=\s|$)/);
+  if (frase !== null && frase[0].length >= Math.min(30, max)) return limpio(frase[0]);
   const corte = t.slice(0, max + 1).lastIndexOf(' ');
-  const r = corte > 8 ? t.slice(0, corte) : '';
-  return r.length >= 8 ? r.replace(/[\s,;:.-]+$/, '') : null;
+  return corte > 8 ? sinColgar(t.slice(0, corte)) : null;
+}
+
+/** Quita puntuación y conectores finales; `null` si lo que queda es demasiado corto para significar algo. */
+function sinColgar(texto: string): string | null {
+  let r = texto.replace(/[\s,;:.\-—–|]+$/, '');
+  for (let i = 0; i < 3; i += 1) {
+    const partes = r.split(' ');
+    const ultima = (partes[partes.length - 1] ?? '').toLowerCase().replace(/[.,;:]/g, '');
+    if (partes.length > 1 && CONECTORES_FINALES.has(ultima)) {
+      r = partes.slice(0, -1).join(' ').replace(/[\s,;:.\-—–|]+$/, '');
+    } else break;
+  }
+  return r.length >= 10 ? r : null;
 }
 
 /**
