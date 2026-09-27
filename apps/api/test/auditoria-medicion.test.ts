@@ -25,8 +25,22 @@ const accionGoogle = (over: Record<string, unknown> = {}) => ({
   },
 });
 
+/** La cuenta tal como la declara la plataforma: auto-etiquetado encendido y seguimiento propio. */
+const filaCuenta = (over: Record<string, unknown> = {}) => ({
+  customer: {
+    id: CUSTOMER, autoTaggingEnabled: true, timeZone: 'America/Santiago', currencyCode: 'CLP',
+    conversionTrackingSetting: { conversionTrackingId: '123456789', conversionTrackingStatus: 'CONVERSION_TRACKING_MANAGED_BY_SELF' },
+    ...over,
+  },
+});
+
+/** Responde según la consulta: los ajustes de cuenta y las acciones son dos lecturas distintas. */
+const clienteQueResponde = (acciones: unknown[], cuenta: unknown[] = [filaCuenta()]) => ({
+  buscar: vi.fn(async (_cid: string, q: string) => (q.includes('from customer') ? cuenta : acciones)),
+});
+
 const deps = (over: Partial<DepsAuditoriaMedicion> = {}): DepsAuditoriaMedicion => ({
-  cliente: { buscar: vi.fn(async () => [accionGoogle()]) },
+  cliente: clienteQueResponde([accionGoogle()]),
   customerId: CUSTOMER,
   eventoDeclarado: 'whatsapp_intent',
   nombreEstableEsperado: NOMBRE,
@@ -45,7 +59,7 @@ describe('las dos mitades de la medición', () => {
   });
 
   it('conexión sin acción de conversión NO está lista, y lo dice con su causa', async () => {
-    const r = await auditarMedicion(ORG, deps({ cliente: { buscar: vi.fn(async () => []) } }));
+    const r = await auditarMedicion(ORG, deps({ cliente: clienteQueResponde([]) }));
     expect(r.estado).toBe('ACTION_MISSING');
     expect(r.causa).toBe('CONVERSION_ACTION_MISSING');
     expect(r.loQueFalta.join(' ')).toMatch(/crear en la plataforma/i);
@@ -59,18 +73,18 @@ describe('las dos mitades de la medición', () => {
   });
 
   it('evento del sitio sin acción en la plataforma: falta el otro lado', async () => {
-    const r = await auditarMedicion(ORG, deps({ cliente: { buscar: vi.fn(async () => []) }, observarEventosDelSitio: async () => ({ observados: 40, desde: '2026-08-01T00:00:00.000Z' }) }));
+    const r = await auditarMedicion(ORG, deps({ cliente: clienteQueResponde([]), observarEventosDelSitio: async () => ({ observados: 40, desde: '2026-08-01T00:00:00.000Z' }) }));
     expect(r.causa).toBe('CONVERSION_ACTION_MISSING');
     expect(r.explicacion).toMatch(/el sitio ya emite/i);
   });
 
   it('ni acción ni evento observado: se nombra la ausencia del sitio, que es lo primero que hay que resolver', async () => {
-    const r = await auditarMedicion(ORG, deps({ cliente: { buscar: vi.fn(async () => []) }, observarEventosDelSitio: async () => ({ observados: 0, desde: null }) }));
+    const r = await auditarMedicion(ORG, deps({ cliente: clienteQueResponde([]), observarEventosDelSitio: async () => ({ observados: 0, desde: null }) }));
     expect(r.causa).toBe('SITE_EVENT_MISSING');
   });
 
   it('acción sin etiqueta instalable: el sitio no tendría con qué dispararla', async () => {
-    const r = await auditarMedicion(ORG, deps({ cliente: { buscar: vi.fn(async () => [accionGoogle({ tagSnippets: [] })]) } }));
+    const r = await auditarMedicion(ORG, deps({ cliente: clienteQueResponde([accionGoogle({ tagSnippets: [] })]) }));
     expect(r.causa).toBe('TAG_MISSING');
     expect(r.estado).toBe('TRACKING_MISSING');
   });
@@ -133,7 +147,7 @@ describe('un fallo NO es una ausencia', () => {
 describe('aislamiento entre negocios', () => {
   it('cada auditoría consulta la cuenta de SU organización', async () => {
     const llamadas: string[] = [];
-    const cliente = { buscar: vi.fn(async (cid: string) => { llamadas.push(cid); return []; }) };
+    const cliente = { buscar: vi.fn(async (cid: string, q: string) => { if (!q.includes('from customer')) llamadas.push(cid); return []; }) };
     await auditarMedicion('org-a', deps({ cliente, customerId: '1111111111' }));
     await auditarMedicion('org-b', deps({ cliente, customerId: '2222222222' }));
     expect(llamadas).toEqual(['1111111111', '2222222222']);
@@ -141,7 +155,7 @@ describe('aislamiento entre negocios', () => {
 
   it('la acción relevante se reconoce por el nombre estable del propio negocio', async () => {
     const deOtro = accionGoogle({ name: 'SOEC · Otra Clínica · whatsapp_intent' });
-    const r = await auditarMedicion(ORG, deps({ cliente: { buscar: vi.fn(async () => [deOtro]) } }));
+    const r = await auditarMedicion(ORG, deps({ cliente: clienteQueResponde([deOtro]) }));
     // La acción existe en la cuenta, pero no es la de este negocio: no se adopta por parecido.
     expect(r.acciones).toHaveLength(1);
     expect(r.accionRelevante).toBeNull();
@@ -189,5 +203,36 @@ describe('riesgo de contar dos veces la misma intención', () => {
   it('el mismo camino declarado dos veces no es duplicación: es el mismo camino', () => {
     const r = riesgoDeDuplicacion(['GOOGLE_ADS_TAG', 'GOOGLE_ADS_TAG']);
     expect(r.riesgo).toBe('NONE');
+  });
+});
+
+describe('ajustes de la cuenta que deciden qué arquitectura es posible', () => {
+  it('lee el auto-etiquetado y el seguimiento declarados por la plataforma', async () => {
+    const r = await auditarMedicion(ORG, deps());
+    expect(r.ajustes?.autoTagging).toBe(true);
+    expect(r.ajustes?.conversionTrackingId).toBe('123456789');
+    expect(r.ajustes?.moneda).toBe('CLP');
+  });
+
+  /**
+   * Sin auto-etiquetado un clic de anuncio llega al sitio SIN su identificador, y entonces importar la
+   * conversión desde fuera es imposible. Es el dato que decide entre dos arquitecturas, así que no puede
+   * suponerse: si no se lee, se dice `null`.
+   */
+  it('si la plataforma no declara el auto-etiquetado, queda en NULL y no en falso', async () => {
+    const r = await auditarMedicion(ORG, deps({ cliente: clienteQueResponde([accionGoogle()], [{ customer: { id: CUSTOMER } }]) }));
+    expect(r.ajustes?.autoTagging).toBeNull();
+  });
+
+  it('si la lectura de los ajustes falla, la auditoría de conversiones sigue valiendo', async () => {
+    const cliente = {
+      buscar: vi.fn(async (_cid: string, q: string) => {
+        if (q.includes('from customer')) throw new Error('fallo al leer la cuenta');
+        return [accionGoogle()];
+      }),
+    };
+    const r = await auditarMedicion(ORG, deps({ cliente }));
+    expect(r.ajustes).toBeNull();
+    expect(r.causa).toBe('READY');
   });
 });

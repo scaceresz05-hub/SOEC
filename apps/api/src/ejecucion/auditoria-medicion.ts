@@ -94,9 +94,27 @@ export type CausaSinMedicion =
   | 'READY_FOR_INSTALL'
   | 'READY';
 
+/**
+ * Ajustes de la CUENTA que deciden qué arquitectura de medición es siquiera posible:
+ *
+ *  · `autoTagging` — sin él, un clic de anuncio no llega al sitio con su identificador (`gclid`), y entonces
+ *    NO se puede importar la conversión desde fuera: sólo queda la etiqueta en el navegador.
+ *  · `conversionTrackingId` — a qué cuenta pertenecen las conversiones de este cliente (puede ser la del
+ *    manager). Saberlo evita instalar una etiqueta que apunte al sitio equivocado.
+ */
+export interface AjustesDeCuenta {
+  readonly autoTagging: boolean | null;
+  readonly conversionTrackingId: string | null;
+  readonly estadoSeguimiento: string | null;
+  readonly zonaHoraria: string | null;
+  readonly moneda: string | null;
+}
+
 export interface AuditoriaDeMedicion {
   readonly organizationId: string;
   readonly customerId: string | null;
+  /** Ajustes de la cuenta. `null` si no se pudieron leer (y entonces no se supone ninguno). */
+  readonly ajustes: AjustesDeCuenta | null;
   /** Evento que el negocio declaró como resultado. `null` ⇒ no declaró ninguno. */
   readonly eventoDeclarado: string | null;
   readonly acciones: readonly AccionDeConversionObservada[];
@@ -133,6 +151,12 @@ const CONSULTA = `select conversion_action.id, conversion_action.name, conversio
 from conversion_action
 where conversion_action.status != 'REMOVED'`;
 
+const CONSULTA_CUENTA = `select customer.id, customer.auto_tagging_enabled, customer.time_zone, customer.currency_code,
+       customer.conversion_tracking_setting.conversion_tracking_id,
+       customer.conversion_tracking_setting.conversion_tracking_status
+from customer
+limit 1`;
+
 const texto = (v: unknown): string => (v === null || v === undefined ? '' : String(v));
 
 function mapear(fila: Record<string, unknown>): AccionDeConversionObservada {
@@ -161,11 +185,12 @@ function mapear(fila: Record<string, unknown>): AccionDeConversionObservada {
  */
 export async function auditarMedicion(org: string, deps: DepsAuditoriaMedicion): Promise<AuditoriaDeMedicion> {
   const eventosDelSitio = await deps.observarEventosDelSitio().catch(() => ({ observados: 0, desde: null }));
-  const base = {
+  const base: { organizationId: string; customerId: string | null; eventoDeclarado: string | null; eventosDelSitio: { observados: number; desde: string | null }; ajustes: AjustesDeCuenta | null } = {
     organizationId: org,
     customerId: deps.customerId,
     eventoDeclarado: deps.eventoDeclarado,
     eventosDelSitio,
+    ajustes: null,
   };
 
   if (deps.cliente === null || deps.customerId === null) {
@@ -180,6 +205,31 @@ export async function auditarMedicion(org: string, deps: DepsAuditoriaMedicion):
       loQueFalta: ['conectar la cuenta de publicidad del negocio'],
     };
   }
+
+  /**
+   * Los ajustes se leen APARTE y su fallo no tumba la auditoría: que no se pueda leer si el auto-etiquetado
+   * está encendido no significa que no haya conversiones, y mezclando ambas lecturas se perdería esa
+   * distinción. Ausencia de dato ⇒ `null`, nunca `false`.
+   */
+  let ajustes: AjustesDeCuenta | null = null;
+  try {
+    const filas = await deps.cliente.buscar(deps.customerId, CONSULTA_CUENTA);
+    const c = (filas[0]?.customer ?? null) as Record<string, unknown> | null;
+    if (c !== null) {
+      const cts = (c.conversionTrackingSetting ?? {}) as Record<string, unknown>;
+      ajustes = {
+        autoTagging: c.autoTaggingEnabled === undefined ? null : c.autoTaggingEnabled === true,
+        conversionTrackingId: cts.conversionTrackingId === undefined ? null : String(cts.conversionTrackingId),
+        estadoSeguimiento: cts.conversionTrackingStatus === undefined ? null : String(cts.conversionTrackingStatus),
+        zonaHoraria: c.timeZone === undefined ? null : String(c.timeZone),
+        moneda: c.currencyCode === undefined ? null : String(c.currencyCode),
+      };
+    }
+  } catch {
+    ajustes = null; // no se pudo leer: se dice con un null, no con un false
+  }
+
+  base.ajustes = ajustes;
 
   let acciones: readonly AccionDeConversionObservada[];
   try {
