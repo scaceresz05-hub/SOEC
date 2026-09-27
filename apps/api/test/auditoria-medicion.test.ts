@@ -35,7 +35,7 @@ const filaCuenta = (over: Record<string, unknown> = {}) => ({
 });
 
 /** Responde según la consulta: los ajustes de cuenta y las acciones son dos lecturas distintas. */
-const clienteQueResponde = (acciones: unknown[], cuenta: unknown[] = [filaCuenta()]) => ({
+const clienteQueResponde = (acciones: Array<Record<string, unknown>>, cuenta: Array<Record<string, unknown>> = [filaCuenta()]) => ({
   buscar: vi.fn(async (_cid: string, q: string) => (q.includes('from customer') ? cuenta : acciones)),
 });
 

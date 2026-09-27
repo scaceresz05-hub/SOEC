@@ -28,6 +28,7 @@ import type { CompatibilidadLanding, EvaluacionCanal, GeoEjecutable, TerminoInve
 import type { AnuncioDelPlan, ExplicacionPlan, GrupoDelPlan, PalabraDelPlan, PlanCampania, PropuestaPresupuesto, PropuestaPuja } from './plan-pg';
 import { veredictoDe } from './analisis';
 import type { SemillasDeSitio } from './semillas-sitio';
+import type { EstadoDeMedicionParaCampana } from '../atribucion/atribucion-tipos';
 import {
   INTENCIONES_DE_PAGO,
   type DimensionPlan,
@@ -58,6 +59,12 @@ export interface EntradaPlanificador {
   readonly semillasSitio: SemillasDeSitio | null;
   /** `true` sólo si existe una acción de conversión verificada en la plataforma. Hoy nunca: no se crean. */
   readonly conversionExternaVerificada: boolean;
+  /**
+   * QUÉ MEDICIÓN HAY DE VERDAD. Decide qué campaña se puede proponer: con conversión en Google se puede
+   * pujar por conversiones; con atribución sólo nuestra, por clics; sin ninguna de las dos, no se propone
+   * gasto. Es el dato que impide vender como automático algo que todavía hace una persona mirando una tabla.
+   */
+  readonly medicionEnGoogle: EstadoDeMedicionParaCampana;
   /** Historial fiable de conversiones observado. Sin él, la puja no puede optimizar a conversiones. */
   readonly historialDeConversiones: number;
   readonly version: number;
@@ -218,11 +225,23 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
       : Math.min(declaradoDiario, topeMandato);
   const mandaMandato = topeMandato !== null && (declaradoDiario === null || topeMandato <= declaradoDiario);
 
+  /**
+   * EL LÍMITE DIARIO DE GOOGLE NO ES UN LÍMITE. Google trata el presupuesto diario como un PROMEDIO y puede
+   * gastar hasta el doble en un día concreto (lo compensa en el resto del ciclo). Declararle 2.500 cuando una
+   * persona autorizó 2.500 al día significa autorizarle, de hecho, 5.000 en un día. Así que se le declara la
+   * MITAD: el doble de la mitad es exactamente lo que la persona dijo.
+   */
+  const presupuestoMedioGoogle = techoDiario === null ? null : Math.floor(techoDiario / 2);
+  const limiteDiarioGoogle = presupuestoMedioGoogle === null ? null : presupuestoMedioGoogle * 2;
+
   const presupuesto: PropuestaPresupuesto = {
     techoDeclaradoClp: e.techoDeclarado?.montoMinor ?? null,
     modalidadTecho: e.techoDeclarado?.modalidad ?? null,
     propuestoDiarioClp: techoDiario,
     topeMandatoDiarioClp: topeMandato,
+    topeDuroDiarioClp: techoDiario,
+    presupuestoMedioGoogleClp: presupuestoMedioGoogle,
+    limiteDiarioGoogleClp: limiteDiarioGoogle,
     oportunidadDiariaClp: oportunidadDiaria,
     costoPorClicEstimadoClp: cpcEstimado,
     base: techoDiario === null ? 'NONE' : mandaMandato ? 'HUMAN_MANDATE' : 'USER_CEILING',
@@ -230,7 +249,7 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
       ? 'Nadie ha autorizado un presupuesto ni declarado un techo, así que no se propone ningún gasto: proponerlo sería inventar dinero ajeno.'
       : `${mandaMandato
         ? `Se propone gastar hasta ${techoDiario} al día, que es el máximo diario que autorizaste.${declaradoDiario !== null && declaradoDiario > topeMandato! ? ` En el alta se había declarado un techo de ${declaradoDiario} al día; manda la autorización, no la intención anterior.` : ''}`
-        : `Se propone gastar hasta ${techoDiario} al día, que es el techo que declaró el dueño${topeMandato !== null ? ` y cabe dentro del máximo diario autorizado (${topeMandato})` : ''}.`}${cpcEstimado !== null ? ` Con un costo por clic observado de ~${cpcEstimado}, eso permite del orden de ${Math.max(0, Math.floor(techoDiario / cpcEstimado))} clics diarios.` : ''}${oportunidadDiaria !== null ? ` Capturar toda la demanda observada costaría ~${oportunidadDiaria} al día (derivado, no una recomendación).` : ''}`,
+        : `Se propone gastar hasta ${techoDiario} al día, que es el techo que declaró el dueño${topeMandato !== null ? ` y cabe dentro del máximo diario autorizado (${topeMandato})` : ''}.`}${presupuestoMedioGoogle !== null ? ` A Google se le declararán ${presupuestoMedioGoogle} al día, no ${techoDiario}: lo trata como un promedio y puede gastar hasta el doble en un día suelto, así que declarando la mitad ningún día puede pasar de ${techoDiario}.` : ''}${cpcEstimado !== null ? ` Con un costo por clic observado de ~${cpcEstimado}, eso permite del orden de ${Math.max(0, Math.floor((presupuestoMedioGoogle ?? techoDiario) / cpcEstimado))} clics diarios de media.` : ''}${oportunidadDiaria !== null ? ` Capturar toda la demanda observada costaría ~${oportunidadDiaria} al día (derivado, no una recomendación).` : ''}`,
   };
   if (techoDiario === null) {
     prerequisitos.push('autorizar un presupuesto: sin un máximo tuyo no hay nada que proponer');
@@ -239,17 +258,28 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
   }
   anotar('Presupuesto propuesto', presupuesto.explicacion, candidatos.slice(0, 5).map((t) => `ev-kw-${t.terminoNormalizado.replace(/\s/g, '-')}`));
 
-  // ── PUJA ──
-  const puja: PropuestaPuja = e.historialDeConversiones >= 30
+  /**
+   * ── PUJA ──
+   *
+   * OPTIMIZAR A CONVERSIONES EXIGE QUE GOOGLE RECIBA LAS CONVERSIONES. No basta con que SOEC sepa quién
+   * escribió por WhatsApp: si Google no tiene esa señal, pedirle «maximiza conversiones» es pedirle que
+   * optimice a ciegas, y gastará el presupuesto aprendiendo de una columna vacía. Mientras la medición sea
+   * sólo nuestra, se compran CLICS —que es lo que Google sí puede optimizar— y la eficacia la evalúa SOEC
+   * por su cuenta.
+   */
+  const puedeOptimizarAConversiones = e.medicionEnGoogle === 'GOOGLE_CONVERSION_READY' && e.historialDeConversiones >= 30;
+  const puja: PropuestaPuja = puedeOptimizarAConversiones
     ? {
         estrategia: 'MAXIMIZE_CONVERSIONS',
         techoCpcClp: null,
-        justificacion: `hay historial de ${e.historialDeConversiones} conversiones observadas: optimizar a conversiones tiene datos con los que aprender`,
+        justificacion: `hay historial de ${e.historialDeConversiones} conversiones observadas y Google las recibe: optimizar a conversiones tiene datos con los que aprender`,
       }
     : {
         estrategia: 'MAXIMIZE_CLICKS_WITH_CPC_CEILING',
         techoCpcClp: cpcEstimado,
-        justificacion: `sin historial fiable de conversiones (${e.historialDeConversiones} observadas) optimizar a conversiones no tendría con qué aprender; se propone comprar clics con techo de costo${cpcEstimado !== null ? ` (~${cpcEstimado} CLP)` : ''} para obtener las primeras señales`,
+        justificacion: e.medicionEnGoogle === 'GOOGLE_CONVERSION_READY'
+          ? `sin historial fiable de conversiones (${e.historialDeConversiones} observadas) optimizar a conversiones no tendría con qué aprender; se propone comprar clics con techo de costo${cpcEstimado !== null ? ` (~${cpcEstimado})` : ''} para obtener las primeras señales`
+          : `Google todavía no recibe ninguna acción como conversión, así que no puede optimizar por ellas; se propone comprar clics con techo de costo${cpcEstimado !== null ? ` (~${cpcEstimado})` : ''} y SOEC medirá por su cuenta cuántos de esos clics terminan en intención de contacto`,
       };
   anotar(`Estrategia de puja propuesta: ${puja.estrategia === 'MAXIMIZE_CONVERSIONS' ? 'optimizar a conversiones' : 'comprar clics con techo de costo'}`, puja.justificacion);
 
@@ -419,6 +449,9 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
   const limitaciones: string[] = [];
   const bloqueos: string[] = [];
   if (techoDiario === null) bloqueos.push('no hay presupuesto autorizado');
+  if (e.medicionEnGoogle === 'MEASUREMENT_BLOCKED') {
+    bloqueos.push('no hay forma de medir si la inversión sirve: ni Google recibe la acción como conversión, ni SOEC puede atribuir los contactos a los clics');
+  }
   if (ejecutables.length === 0) bloqueos.push('la plataforma no ofrece ningún territorio segmentable de los declarados');
   if (grupos.length === 0) bloqueos.push('no hay ninguna oferta con demanda medida ni material verificado del sitio');
   /**
@@ -438,6 +471,9 @@ export function planificar(e: EntradaPlanificador): ResultadoPlanificacion {
     limitaciones.push(usarSemillasDeSitio
       ? 'no hay volumen de búsqueda observado: los términos son candidatos construidos con el sitio y las ofertas declaradas, y su demanda está sin medir'
       : 'no hay volumen de búsqueda observado');
+  }
+  if (e.medicionEnGoogle === 'FIRST_PARTY_ATTRIBUTION_READY') {
+    limitaciones.push('Google todavía no recibe la intención de contacto como conversión: optimizará por clics, y SOEC medirá por su cuenta cuántos de esos clics terminan en un WhatsApp');
   }
   if (anuncios.length > 0) limitaciones.push('los textos de anuncio son borradores recortados del propio sitio: nadie los ha aprobado');
   if (noEjecutables.length > 0) limitaciones.push(`${noEjecutables.join(', ')} queda(n) fuera: la plataforma no los ofrece como territorio`);

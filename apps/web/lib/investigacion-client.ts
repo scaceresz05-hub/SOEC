@@ -59,6 +59,7 @@ export interface VistaPlan {
     presupuesto: {
       techoDeclaradoClp: number | null; modalidadTecho: string | null; propuestoDiarioClp: number | null;
       topeMandatoDiarioClp: number | null;
+      topeDuroDiarioClp: number | null; presupuestoMedioGoogleClp: number | null; limiteDiarioGoogleClp: number | null;
       oportunidadDiariaClp: number | null; costoPorClicEstimadoClp: number | null; base: string; explicacion: string;
     };
     /** Qué sostiene el plan y qué no se pudo medir. Se pinta junto a la propuesta, no en letra pequeña. */

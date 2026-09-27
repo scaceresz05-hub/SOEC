@@ -57,7 +57,7 @@ const plan = (over: Partial<PlanCampania> = {}): PlanCampania => ({
   organizationId: ORG, id: 'plan-v1-run1', version: 1, researchRunId: 'run1', estado: 'NON_EXECUTABLE',
   canal: 'GOOGLE_SEARCH', objetivo: 'conseguir pacientes', ofertas: ['implantes'],
   geografia: { targets: [{ nombre: 'Curicó', targetId: '1000341', tipo: 'CITY' }], noEjecutables: [], aproximaciones: [] },
-  presupuesto: { techoDeclaradoClp: 300_000, modalidadTecho: 'MONTHLY', propuestoDiarioClp: 10_000, oportunidadDiariaClp: 20_000, costoPorClicEstimadoClp: 2_000, base: 'USER_CEILING', topeMandatoDiarioClp: null, explicacion: 'tope del dueño' },
+  presupuesto: { techoDeclaradoClp: 300_000, modalidadTecho: 'MONTHLY', propuestoDiarioClp: 10_000, oportunidadDiariaClp: 20_000, costoPorClicEstimadoClp: 2_000, base: 'USER_CEILING', topeMandatoDiarioClp: null, topeDuroDiarioClp: 10_000, presupuestoMedioGoogleClp: 5_000, limiteDiarioGoogleClp: 10_000, explicacion: 'tope del dueño' },
   puja: { estrategia: 'MAXIMIZE_CLICKS_WITH_CPC_CEILING', techoCpcClp: 2_000, justificacion: 'sin historial' },
   estructura: { tipo: 'UNA_CAMPANA_VARIOS_GRUPOS', justificacion: 'una oferta' },
   requisitosCreativos: ['RSA_REQUIRED'], requisitoConversion: 'CONVERSION_TRACKING_UNVERIFIED',

@@ -182,6 +182,18 @@ export default function PlanPage() {
                 {plan.evidencia.limitaciones.length > 0 && ` ${plan.evidencia.limitaciones.join('. ')}.`}
               </p>
             )}
+            {/*
+              QUÉ MIDE CADA UNO. Mientras Google no reciba la intención de contacto como conversión, decir
+              «optimizamos por contactos» sería vender como automático algo que hace una persona mirando una
+              tabla. Se dice la verdad entera, y en el mismo sitio donde se propone gastar.
+            */}
+            {plan.puja?.estrategia === 'MAXIMIZE_CLICKS_WITH_CPC_CEILING' && (
+              <p style={{ background: 'var(--aviso, #fff8e1)', padding: 10, borderRadius: 6, marginBottom: 8 }}>
+                <strong>SOEC medirá internamente qué clics terminan en intención de WhatsApp.</strong>{' '}
+                Google todavía no recibe esa acción como conversión: va a optimizar por <em>clics</em>, y quien
+                relacione esos clics con los mensajes que te llegan será SOEC, no Google.
+              </p>
+            )}
             {plan.motivoStale !== null && (
               <p style={{ color: '#b58900', marginBottom: 8 }}>
                 Este plan quedó viejo: {plan.motivoStale}. Vuelve a prepararlo antes de usarlo para decidir.
@@ -217,6 +229,14 @@ export default function PlanPage() {
 
           <section style={seccion}>
             <h2 style={titulo}>Cuánto propone invertir</h2>
+            {plan.presupuesto.limiteDiarioGoogleClp !== null && plan.presupuesto.presupuestoMedioGoogleClp !== null && (
+              <p style={{ ...apagado, marginBottom: 8 }}>
+                A Google se le declaran {plan.presupuesto.presupuestoMedioGoogleClp.toLocaleString()} al día, no{' '}
+                {plan.presupuesto.limiteDiarioGoogleClp.toLocaleString()}: Google trata esa cifra como un promedio y
+                puede gastar hasta el doble en un día suelto. Declarando la mitad, ningún día puede pasar de{' '}
+                {plan.presupuesto.limiteDiarioGoogleClp.toLocaleString()}, que es tu máximo.
+              </p>
+            )}
             <ul style={{ paddingLeft: 18 }}>
               <li>Tu tope declarado: <strong>{dinero(plan.presupuesto.techoDeclaradoClp, moneda)}</strong>
                 {plan.presupuesto.modalidadTecho !== null ? ` (${plan.presupuesto.modalidadTecho === 'MENSUAL' ? 'al mes' : 'al día'})` : ''}</li>

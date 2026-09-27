@@ -158,6 +158,8 @@ import { RepositorioPolitica } from './politica/politica-pg';
 import { registerEjecucionRoutes } from './ejecucion/ejecucion-routes';
 import { clienteDeAuditoriaDeCuenta, clienteDeEscrituraGoogle, clienteDeLecturaGoogle, crearObservadorDeEventos } from './ejecucion/composicion';
 import { auditarMedicion } from './ejecucion/auditoria-medicion';
+import { registerAtribucionRoutes } from './atribucion/atribucion-routes';
+import { atribuirIntencionDeOrganizacion } from './atribucion/atribucion-composicion';
 import { nombreExternoDe } from './ejecucion/conversiones';
 import { registerOptimizacionRoutes } from './optimizacion/optimizacion-routes';
 import { registerAceptacionRoutes } from './aceptacion/aceptacion-routes';
@@ -568,6 +570,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return (await clienteDeEscrituraGoogle(org, opciones)) ?? (await clienteDeLecturaGoogle(org, opciones));
         }),
         log: (i) => console.log(JSON.stringify(i)),
+      });
+      /**
+       * ATRIBUCIÓN FIRST-PARTY (Fase I.9.2): de qué clic de anuncio venía cada intención de contacto. Se
+       * consulta `click_view` (lectura) y se guarda en la base de SOEC. Google NO recibe nada.
+       */
+      registerAtribucionRoutes(target, pool, {
+        atribuir: (org, intencion) => atribuirIntencionDeOrganizacion(pool, org, intencion, {
+          pool, env: process.env, composicionGoogleAds, log: (i) => console.log(JSON.stringify(i)),
+        }),
       });
       // PREPARACIÓN COMERCIAL (Autonomy Fase H): un informe de SOLO LECTURA que reúne lo persistido por las
       // fases A–G y dice qué falta, quién lo resuelve y qué puede hacer SOEC solo. No escribe nada.

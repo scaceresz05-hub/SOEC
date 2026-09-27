@@ -363,7 +363,7 @@ const entradaPlan = (over: Partial<EntradaPlanificador> = {}): EntradaPlanificad
     terminos: [termino('implante dental curico', { intencion: 'LOCAL' }), termino('precio implante dental')],
     geos: [geo('Curicó')], canales: evaluarCanales(ctx), landings: evaluarLandings(ctx),
     techoDeclarado: { modalidad: 'MONTHLY', montoMinor: 300_000 }, conversionExternaVerificada: false,
-    mandato: null, semillasSitio: null,
+    mandato: null, semillasSitio: null, medicionEnGoogle: 'FIRST_PARTY_ATTRIBUTION_READY',
     historialDeConversiones: 0, version: 1, ahora: AHORA, ...over,
   };
 };
@@ -438,11 +438,21 @@ describe('planificador de campañas', () => {
     expect(palabras.find((p) => p.concordancia === 'BROAD')?.justificacion).toContain('historial');
   });
 
-  it('con historial de conversiones cambia la puja, y lo justifica con el número observado', () => {
+  /**
+   * Optimizar a conversiones exige DOS cosas: historial suficiente y que Google reciba las conversiones.
+   * Con la medición sólo del lado de SOEC, pedirle a Google que optimice por ellas sería pedirle que
+   * optimice contra una columna vacía.
+   */
+  it('con historial de conversiones Y conversión en Google cambia la puja, y lo justifica con el número', () => {
     expect(planificar(entradaPlan()).plan.puja.estrategia).toBe('MAXIMIZE_CLICKS_WITH_CPC_CEILING');
-    const conHistorial = planificar(entradaPlan({ historialDeConversiones: 45 })).plan.puja;
+    const conHistorial = planificar(entradaPlan({ historialDeConversiones: 45, medicionEnGoogle: 'GOOGLE_CONVERSION_READY' })).plan.puja;
     expect(conHistorial.estrategia).toBe('MAXIMIZE_CONVERSIONS');
     expect(conHistorial.justificacion).toContain('45');
+  });
+
+  it('con historial pero SIN conversión en Google, la puja sigue siendo por clics', () => {
+    const puja = planificar(entradaPlan({ historialDeConversiones: 45 })).plan.puja;
+    expect(puja.estrategia).toBe('MAXIMIZE_CLICKS_WITH_CPC_CEILING');
   });
 
   it('un territorio no segmentable se excluye del plan y queda como prerrequisito explícito', () => {

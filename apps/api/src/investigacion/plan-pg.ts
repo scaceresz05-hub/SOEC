@@ -50,6 +50,19 @@ export interface PropuestaPresupuesto {
   readonly base: 'HUMAN_MANDATE' | 'USER_CEILING' | 'NONE';
   /** Tope diario autorizado por la persona, si existe. Ningún plan puede proponer más que esto. */
   readonly topeMandatoDiarioClp: number | null;
+  /**
+   * TRES CIFRAS QUE NO SON LA MISMA, y tratarlas como una es cómo alguien se encuentra un cargo del doble
+   * de lo que autorizó:
+   *
+   *  · `topeDuroDiarioClp`        — lo que autorizó una persona. Es el límite real, el que no se cruza.
+   *  · `presupuestoMedioGoogleClp`— lo que se le declara a Google. Google lo trata como PROMEDIO y puede
+   *    gastar hasta el doble en un día concreto, así que se declara la MITAD del tope humano.
+   *  · `limiteDiarioGoogleClp`    — el máximo que Google podría gastar en un día con ese promedio: el doble
+   *    del anterior, que por construcción es exactamente el tope humano.
+   */
+  readonly topeDuroDiarioClp: number | null;
+  readonly presupuestoMedioGoogleClp: number | null;
+  readonly limiteDiarioGoogleClp: number | null;
   readonly explicacion: string;
 }
 

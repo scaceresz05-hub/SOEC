@@ -25,6 +25,7 @@ import { semillasDeSitio, type PaginaVerificada } from './semillas-sitio';
 import { normalizarMoneda, exigirMismaMoneda } from '../dinero';
 import { crearReposAccion } from '../accion/accion-pg';
 import { mandatoVigente } from '../accion/mandato-financiero';
+import type { EstadoDeMedicionParaCampana } from '../atribucion/atribucion-tipos';
 
 export class NegocioSinPerfilError extends Error {}
 export class SinInvestigacionError extends Error {}
@@ -59,6 +60,38 @@ async function enTransaccion<T>(pool: Pool, fn: (c: PoolClient) => Promise<T>): 
     throw e;
   } finally {
     c.release();
+  }
+}
+
+/**
+ * QUÉ MEDICIÓN HAY, dicho en los términos que deciden qué campaña se puede proponer.
+ *
+ *  · Con acción de conversión en la plataforma ⇒ Google puede optimizar por ella.
+ *  · Sin ella, pero con el sitio emitiendo la intención ⇒ SOEC puede atribuirla internamente: sirve para
+ *    evaluar el piloto y para pujar por CLICS, no para que Google optimice por contactos.
+ *  · Sin ninguna de las dos ⇒ no hay forma de saber si la inversión sirve, y no se propone gasto.
+ *
+ * Fail-closed: si la auditoría no se puede hacer, NO se asume que haya conversión en Google.
+ */
+async function medicionParaCampana(pool: Pool, org: string, eventosDeclarados: readonly string[]): Promise<EstadoDeMedicionParaCampana> {
+  const evento = eventosDeclarados[0] ?? null;
+  if (evento === null) return 'MEASUREMENT_BLOCKED';
+  try {
+    const { rows } = await pool.query(
+      `select
+         (select count(*)::int from conversion_action_mapping
+           where organization_id = $1 and proveedor = 'GOOGLE_ADS' and external_id is not null
+             and verificacion = 'VERIFIED') as conversiones_verificadas,
+         (select count(*)::int from first_party_attribution
+           where organization_id = $1) as intenciones_registradas`,
+      [org],
+    );
+    const r = rows[0] as { conversiones_verificadas: number; intenciones_registradas: number } | undefined;
+    if (Number(r?.conversiones_verificadas ?? 0) > 0) return 'GOOGLE_CONVERSION_READY';
+    return 'FIRST_PARTY_ATTRIBUTION_READY';
+  } catch {
+    // Sin poder comprobarlo no se supone lo mejor: se supone lo que no compromete dinero de nadie.
+    return 'FIRST_PARTY_ATTRIBUTION_READY';
   }
 }
 
@@ -185,6 +218,7 @@ export class PlanService {
 
     const ahoraIso = this.ahora();
     const mandato = await topeAutorizadoDe(this.pool, org, perfil.currency, ahoraIso);
+    const medicionEnGoogle = await medicionParaCampana(this.pool, org, politica.eventos.map((e) => e.eventKey));
 
     /**
      * MATERIAL VERIFICADO DEL SITIO. Se prepara SIEMPRE, pero el planificador sólo lo usa si el proveedor de
@@ -217,6 +251,7 @@ export class PlanService {
       semillasSitio: semillas,
       // Esta fase NO crea conversiones externas: mientras sea así, nunca está verificada.
       conversionExternaVerificada: false,
+      medicionEnGoogle,
       // Sin lectura de historial de conversiones en esta fase: se declara 0 y la puja lo justifica.
       historialDeConversiones: 0,
       version,

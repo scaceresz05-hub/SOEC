@@ -91,6 +91,7 @@ const entrada = (over: Partial<EntradaPlanificador> = {}): EntradaPlanificador =
   mandato: { diarioMinor: 2_500, totalMinor: 30_000, currency: 'CLP' },
   semillasSitio: semillas(),
   conversionExternaVerificada: false,
+  medicionEnGoogle: 'FIRST_PARTY_ATTRIBUTION_READY',
   historialDeConversiones: 0,
   version: 1,
   ahora: AHORA,
@@ -311,5 +312,67 @@ describe('aislamiento entre negocios', () => {
     const { grupos: gruposOtro } = planificar(entrada({ organizationId: 'org-otro', semillasSitio: otras, oferta: [oferta('ortodoncia', 'ortodoncia')], landings: [landing('ortodoncia', '/orto')] }));
     expect(gruposOtro.every((g) => g.organizationId === 'org-otro')).toBe(true);
     expect(JSON.stringify(gruposOtro)).not.toMatch(/curic/i);
+  });
+});
+
+/**
+ * LO QUE GOOGLE PUEDE OPTIMIZAR Y LO QUE NO. Con la intención de contacto medida sólo por SOEC, pedirle a
+ * Google «maximiza conversiones» es pedirle que optimice contra una columna vacía: gastaría el presupuesto
+ * aprendiendo de nada. Y el presupuesto diario de Google es un PROMEDIO, así que declararle el tope humano
+ * es autorizarle el doble.
+ */
+describe('piloto sin conversión en Google', () => {
+  it('con atribución sólo interna, la puja es por CLICS y nunca por conversiones', () => {
+    const { plan } = planificar(entrada({ medicionEnGoogle: 'FIRST_PARTY_ATTRIBUTION_READY', historialDeConversiones: 500 }));
+    expect(plan.puja.estrategia).toBe('MAXIMIZE_CLICKS_WITH_CPC_CEILING');
+    expect(plan.puja.justificacion).toMatch(/todavía no recibe ninguna acción como conversión/i);
+  });
+
+  it('ni siquiera con historial alto se propone MAXIMIZE_CONVERSIONS si Google no las recibe', () => {
+    for (const historial of [30, 100, 5_000]) {
+      const { plan } = planificar(entrada({ medicionEnGoogle: 'FIRST_PARTY_ATTRIBUTION_READY', historialDeConversiones: historial }));
+      expect(plan.puja.estrategia).not.toBe('MAXIMIZE_CONVERSIONS');
+    }
+  });
+
+  it('con conversión en Google e historial suficiente, sí se propone optimizar a conversiones', () => {
+    const { plan } = planificar(entrada({ medicionEnGoogle: 'GOOGLE_CONVERSION_READY', historialDeConversiones: 120 }));
+    expect(plan.puja.estrategia).toBe('MAXIMIZE_CONVERSIONS');
+  });
+
+  it('la limitación se dice en el propio plan, sin adornos', () => {
+    const { plan } = planificar(entrada({ medicionEnGoogle: 'FIRST_PARTY_ATTRIBUTION_READY' }));
+    expect(plan.evidencia.limitaciones.join(' ')).toMatch(/Google todavía no recibe la intención de contacto como conversión/i);
+  });
+
+  it('sin ninguna medición no se propone gasto: el plan queda BLOQUEADO', () => {
+    const { plan } = planificar(entrada({ medicionEnGoogle: 'MEASUREMENT_BLOCKED' }));
+    expect(plan.estado).toBe('BLOCKED');
+    expect(plan.prerequisitos.join(' ')).toMatch(/no hay forma de medir/i);
+  });
+});
+
+describe('el límite diario que se le declara a Google', () => {
+  it('a un tope humano de 2.500 se le declaran 1.250, y su máximo diario vuelve a ser 2.500', () => {
+    const { plan } = planificar(entrada());
+    expect(plan.presupuesto.topeDuroDiarioClp).toBe(2_500);
+    expect(plan.presupuesto.presupuestoMedioGoogleClp).toBe(1_250);
+    expect(plan.presupuesto.limiteDiarioGoogleClp).toBe(2_500);
+  });
+
+  it('el máximo diario de Google NUNCA supera el tope humano, sea cual sea el mandato', () => {
+    for (const diario of [1_000, 2_500, 3_333, 9_999]) {
+      const { plan } = planificar(entrada({
+        mandato: { diarioMinor: diario, totalMinor: diario * 20, currency: 'CLP' },
+        techoDeclarado: { modalidad: 'DAILY', montoMinor: 1_000_000 },
+      }));
+      expect(plan.presupuesto.limiteDiarioGoogleClp!).toBeLessThanOrEqual(diario);
+      expect(plan.presupuesto.presupuestoMedioGoogleClp! * 2).toBeLessThanOrEqual(diario);
+    }
+  });
+
+  it('la explicación dice por qué se declara la mitad, en vez de dejarlo como un detalle técnico', () => {
+    const { plan } = planificar(entrada());
+    expect(plan.presupuesto.explicacion).toMatch(/lo trata como un promedio y puede gastar hasta el doble/i);
   });
 });
