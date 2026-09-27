@@ -118,3 +118,35 @@ describe('aislamiento entre negocios', () => {
     expect(r.porEstado.ATTRIBUTED).toBe(1);
   });
 });
+
+/**
+ * SONDAS DE CAMPO. Comprobar en producción que el camino funciona exige mandar alguna intención que no es
+ * de nadie. Contarlas como intenciones reales sería inventar un dato — justo lo que este sistema existe para
+ * no hacer. Se guardan (borrarlas escondería lo que se hizo) y se declaran aparte.
+ */
+describe('las sondas de prueba no se mezclan con el piloto', () => {
+  it('una intención con prefijo PROBE- queda fuera de las cifras y se cuenta aparte', async () => {
+    await repo.registrarSiNueva(intencion(ORG, 'PROBE-I92-1'));
+    await repo.resolver(ORG, 'PROBE-I92-1', { estado: 'GCLID_NOT_FOUND', resueltoEn: AHORA });
+    await repo.registrarSiNueva(intencion(ORG, 'REAL-1'));
+    await repo.resolver(ORG, 'REAL-1', { estado: 'ATTRIBUTED', campaignId: '111', campaignName: 'CP', resueltoEn: AHORA });
+
+    const r = await repo.resumen(ORG);
+    expect(r.porEstado.ATTRIBUTED).toBe(1);
+    expect(r.porEstado.GCLID_NOT_FOUND, 'la sonda no puede aparecer como intención').toBeUndefined();
+    expect(r.sondasDePrueba).toBe(1);
+  });
+
+  it('una sonda atribuida tampoco suma a ninguna campaña', async () => {
+    await repo.registrarSiNueva(intencion(ORG, 'PROBE-FALSA'));
+    await repo.resolver(ORG, 'PROBE-FALSA', { estado: 'ATTRIBUTED', campaignId: '999', campaignName: 'inventada', resueltoEn: AHORA });
+    const r = await repo.resumen(ORG);
+    expect(r.porCampana).toEqual([]);
+    expect(r.sondasDePrueba).toBe(1);
+  });
+
+  it('las sondas siguen guardadas: no se borra lo que se hizo', async () => {
+    await repo.registrarSiNueva(intencion(ORG, 'PROBE-I92-2'));
+    expect(await repo.obtener(ORG, 'PROBE-I92-2')).not.toBeNull();
+  });
+});

@@ -133,25 +133,43 @@ export class RepositorioAtribucion {
   }
 
   /**
+   * SONDAS DE CAMPO. Comprobar en producción que el camino funciona exige mandar alguna intención que no es
+   * de nadie. Se marcan con este prefijo y quedan FUERA de las cifras del piloto: una sonda mía contada como
+   * intención sería exactamente el tipo de dato inventado que este sistema existe para no producir.
+   *
+   * Siguen guardadas —borrarlas escondería lo que se hizo— pero no se mezclan con lo real.
+   */
+  private static readonly PREFIJO_DE_PRUEBA = 'PROBE-';
+
+  /**
    * Resumen del piloto: cuántas intenciones hay por estado y cuántas se atribuyeron a cada campaña. Es lo
    * único que se puede afirmar con esta medición — y se afirma sobre lo guardado, no sobre una estimación.
+   * Las sondas de campo no entran: no son intenciones de nadie.
    */
   async resumen(org: string): Promise<{
     readonly porEstado: Readonly<Record<string, number>>;
+    /** Cuántas sondas de campo hay guardadas. Se declara para que nadie las eche de menos ni las cuente. */
+    readonly sondasDePrueba: number;
     readonly porCampana: ReadonlyArray<{ readonly campaignId: string; readonly campaignName: string | null; readonly intenciones: number }>;
   }> {
+    const patron = `${RepositorioAtribucion.PREFIJO_DE_PRUEBA}%`;
     const estados = await this.pool.query(
-      'select estado, count(*)::int as n from first_party_attribution where organization_id = $1 group by estado',
-      [org],
+      'select estado, count(*)::int as n from first_party_attribution where organization_id = $1 and ref not like $2 group by estado',
+      [org, patron],
     );
     const campanas = await this.pool.query(
       `select campaign_id, max(campaign_name) as campaign_name, count(*)::int as n
          from first_party_attribution
-        where organization_id = $1 and estado = 'ATTRIBUTED' and campaign_id is not null
+        where organization_id = $1 and estado = 'ATTRIBUTED' and campaign_id is not null and ref not like $2
         group by campaign_id order by n desc`,
-      [org],
+      [org, patron],
+    );
+    const sondas = await this.pool.query(
+      'select count(*)::int as n from first_party_attribution where organization_id = $1 and ref like $2',
+      [org, patron],
     );
     return {
+      sondasDePrueba: Number((sondas.rows[0] as { n: number } | undefined)?.n ?? 0),
       porEstado: Object.fromEntries(estados.rows.map((r: { estado: string; n: number }) => [r.estado, Number(r.n)])),
       porCampana: campanas.rows.map((r: { campaign_id: string; campaign_name: string | null; n: number }) => ({
         campaignId: String(r.campaign_id),
