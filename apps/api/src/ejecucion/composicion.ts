@@ -79,6 +79,29 @@ export async function clienteDeLecturaGoogle(org: string, o: OpcionesComposicion
 }
 
 /**
+ * Cliente de SÓLO LECTURA de la cuenta, sin exigir NINGUNA capacidad operativa. Leer qué conversiones existen
+ * en la cuenta de un negocio no cambia nada en ella; gobernar esa lectura con `MEDICION_REAL` o
+ * `AUTONOMIA_ADS` sería repetir el defecto que ya apareció en facturación y en investigación: un permiso de
+ * EJECUCIÓN decidiendo si se puede MIRAR. Lo único que se exige es lo que hace falta para preguntar: la
+ * plataforma configurada y la cuenta conectada del propio negocio.
+ */
+export async function clienteDeAuditoriaDeCuenta(org: string, o: OpcionesComposicionEjecucion): Promise<{ cliente: GoogleAdsMutateHttpClient; customerId: string } | null> {
+  const developerToken = o.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+  if (!o.composicionGoogleAds || !developerToken) return null;
+  const cuenta = await cuentaDe(o.pool, org);
+  if (cuenta === null) return null;
+  return {
+    cliente: new GoogleAdsMutateHttpClient({
+      resolverAccessToken: () => obtenerAccessTokenDeOrg(o.composicionGoogleAds!, org),
+      developerToken,
+      loginCustomerId: cuenta.loginCustomerId,
+      ...(o.log ? { logger: (i: unknown) => o.log?.({ googleAdsAuditoriaMedicion: i }) } : {}),
+    }),
+    customerId: cuenta.customerId,
+  };
+}
+
+/**
  * Señal observada de una conversión: cuántos eventos de ese tipo ha visto SOEC. Es lo ÚNICO que convierte
  * «medición instalada» en «medición verificada». Si no hay nada observado, devuelve cero — nunca un supuesto.
  */

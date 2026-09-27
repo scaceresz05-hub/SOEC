@@ -154,8 +154,11 @@ import { registerInvestigacionRoutes } from './investigacion/investigacion-route
 import { proveedoresDeOrganizacion, sondasDeDemandaDeOrganizacion } from './investigacion/composicion';
 import { RepositorioInvestigacion } from './investigacion/investigacion-pg';
 import { RepositorioNegocios } from './negocio/negocio-pg';
+import { RepositorioPolitica } from './politica/politica-pg';
 import { registerEjecucionRoutes } from './ejecucion/ejecucion-routes';
-import { clienteDeEscrituraGoogle, clienteDeLecturaGoogle, crearObservadorDeEventos } from './ejecucion/composicion';
+import { clienteDeAuditoriaDeCuenta, clienteDeEscrituraGoogle, clienteDeLecturaGoogle, crearObservadorDeEventos } from './ejecucion/composicion';
+import { auditarMedicion } from './ejecucion/auditoria-medicion';
+import { nombreExternoDe } from './ejecucion/conversiones';
 import { registerOptimizacionRoutes } from './optimizacion/optimizacion-routes';
 import { registerAceptacionRoutes } from './aceptacion/aceptacion-routes';
 import { registerHandoffRoutes } from './handoff/handoff-routes';
@@ -531,6 +534,28 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           pool, env: process.env, composicionGoogleAds, log: (i) => console.log(JSON.stringify(i)),
         })),
         observarEventos: deps.ejecucionObservarEventos ?? crearObservadorDeEventos(pool),
+        /**
+         * AUDITORÍA DE MEDICIÓN (sólo lectura). Junta las dos mitades que hay que mirar antes de tocar la
+         * cuenta de nadie: qué conversiones existen en la plataforma y qué eventos ha observado SOEC del
+         * sitio. El evento y el nombre estable salen de lo que el negocio declaró, no de una constante.
+         */
+        auditarMedicion: async (org) => {
+          const perfil = await new RepositorioNegocios(pool).perfil(org);
+          const politica = await new RepositorioPolitica(pool).completa(org);
+          const primario = politica.eventos.find((e) => e.rol === 'PRIMARY') ?? politica.eventos[0] ?? null;
+          const evento = primario?.eventKey ?? null;
+          const observar = deps.ejecucionObservarEventos ?? crearObservadorDeEventos(pool);
+          const cuenta = await clienteDeAuditoriaDeCuenta(org, {
+            pool, env: process.env, composicionGoogleAds, log: (i) => console.log(JSON.stringify(i)),
+          });
+          return auditarMedicion(org, {
+            cliente: cuenta?.cliente ?? null,
+            customerId: cuenta?.customerId ?? null,
+            eventoDeclarado: evento,
+            nombreEstableEsperado: evento === null || perfil === null ? null : nombreExternoDe(perfil.displayName, evento),
+            observarEventosDelSitio: async () => (evento === null ? { observados: 0, desde: null } : observar(org, evento)),
+          });
+        },
         log: (i) => console.log(JSON.stringify(i)),
       });
       // OPTIMIZACIÓN (Autonomy Fase G): el ciclo observar → evaluar → decidir → gobernar → ejecutar →

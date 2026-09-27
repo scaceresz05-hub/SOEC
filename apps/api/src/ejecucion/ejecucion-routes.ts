@@ -16,6 +16,7 @@ import {
   EjecucionNoEncontradaError,
 } from './ejecucion-tipos';
 import { EjecucionService, NegocioSinPerfilError, SinPlanError, type DepsEjecucion } from './ejecucion-service';
+import type { AuditoriaDeMedicion } from './auditoria-medicion';
 
 function manejarError(e: unknown, reply: FastifyReply): FastifyReply {
   if (e instanceof EjecucionBloqueadaError) {
@@ -30,6 +31,11 @@ function manejarError(e: unknown, reply: FastifyReply): FastifyReply {
 
 export interface OpcionesEjecucionRoutes extends DepsEjecucion {
   readonly refrescar?: () => Promise<void>;
+  /**
+   * Auditoría de medición de SÓLO LECTURA. Se inyecta desde la composición para que la ruta no sepa nada de
+   * Google: sin ella, la ruta lo dice en vez de devolver un diagnóstico vacío que parecería un «no hay nada».
+   */
+  readonly auditarMedicion?: (org: string) => Promise<AuditoriaDeMedicion>;
 }
 
 export function registerEjecucionRoutes(app: FastifyInstance, pool: Pool, opciones: OpcionesEjecucionRoutes = {}): void {
@@ -57,6 +63,25 @@ export function registerEjecucionRoutes(app: FastifyInstance, pool: Pool, opcion
     try {
       const cuerpo = (req.body ?? {}) as Parameters<EjecucionService['guardarMaterial']>[2];
       return reply.send(await servicio().guardarMaterial(org, actor, cuerpo));
+    } catch (e) {
+      return manejarError(e, reply);
+    }
+  });
+
+  /**
+   * ── AUDITORÍA DE MEDICIÓN (SÓLO LECTURA) ──
+   *
+   * Qué conversiones existen HOY en la cuenta del negocio, qué emite su sitio, y cuál de las dos mitades
+   * falta. No crea nada: es la lectura que hay que hacer ANTES de tocar la cuenta de un cliente, y la que
+   * permite distinguir «no hay conversión» de «no pude preguntar».
+   */
+  app.get('/campana/medicion/auditoria', async (req, reply) => {
+    const { org } = datos(req);
+    if (opciones.auditarMedicion === undefined) {
+      return reply.code(501).send({ error: 'SIN_AUDITORIA', message: 'este despliegue no tiene configurada la auditoría de medición' });
+    }
+    try {
+      return reply.send(await opciones.auditarMedicion(org));
     } catch (e) {
       return manejarError(e, reply);
     }
