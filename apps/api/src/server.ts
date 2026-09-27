@@ -45,6 +45,7 @@ import { investigacionMigrations } from './investigacion/investigacion-pg';
 import { planMigrations } from './investigacion/plan-pg';
 import { ejecucionMigrations } from './ejecucion/ejecucion-pg';
 import { atribucionMigrations } from './atribucion/atribucion-pg';
+import { atribuirIntencionDeOrganizacion } from './atribucion/atribucion-composicion';
 import { optimizacionMigrations } from './optimizacion/optimizacion-pg';
 import { handoffMigrations } from './handoff/handoff-pg';
 import { provisionamientoMigrations } from './provisionamiento/provisionamiento-pg';
@@ -403,7 +404,17 @@ async function main(): Promise<void> {
     // Las organizaciones que hoy NO son ingeribles quedan marcadas como deshabilitadas con su motivo, para que
     // el read model no conserve un estado viejo de cuando sí lo eran.
     void sincronizarSaludDelPlan({ store: storeIngesta, env: process.env, salud, descubrir, elegibles, secretStore }).catch(() => undefined);
-    iniciarIngestaServidor({ store: storeIngesta, env: process.env, salud, descubrir, elegibles, secretStore, log: (i) => console.log(JSON.stringify(i)) }, INTERVALO_INGESTA_MS);
+    /**
+     * La ingesta entrega a la ATRIBUCIÓN las intenciones de contacto que traigan identificador de clic. Si el
+     * sitio todavía no lo envía, esto no hace nada: no hay evento con `gclid` que atribuir.
+     */
+    iniciarIngestaServidor({
+      store: storeIngesta, env: process.env, salud, descubrir, elegibles, secretStore,
+      atribuir: (org, intencion) => atribuirIntencionDeOrganizacion(pool, org, intencion, {
+        pool, env: process.env, composicionGoogleAds: compGoogleAds, log: (i) => console.log(JSON.stringify(i)),
+      }),
+      log: (i) => console.log(JSON.stringify(i)),
+    }, INTERVALO_INGESTA_MS);
     console.log(JSON.stringify({ ingesta: 'started', intervaloMs: INTERVALO_INGESTA_MS, organizaciones: plan.map((p) => ({ org: p.org, fuentes: p.fuentes, omitidas: p.omitidas })) }));
   } else {
     console.log(JSON.stringify({ ingesta: 'disabled' }));

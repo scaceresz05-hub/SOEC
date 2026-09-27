@@ -67,10 +67,13 @@ export interface EventoInspeccionable {
   readonly event_name: string;
   readonly path?: string | null;
   readonly lead_id?: number | null;
+  /** Identificador del clic de anuncio. Correlaciona con un contacto: vale la MISMA regla que `lead_id`. */
+  readonly gclid?: string | null;
 }
 
 export type ViolacionPrivacidadGrowth =
   | 'INTERES_POR_SERVICIO_CON_LEADREF'
+  | 'INTERES_POR_SERVICIO_CON_GCLID'
   | 'CONTACTO_CON_TRATAMIENTO';
 
 /** Nombre base del evento: lo anterior al primer separador. `whatsapp_intent:x` → `whatsapp_intent`. */
@@ -119,6 +122,15 @@ export function violacionDePrivacidadGrowth(
   // (1) interés por tratamiento: jamás correlacionable con una persona.
   if (esInteresPorServicio(nombre) && ev.lead_id != null) {
     return 'INTERES_POR_SERVICIO_CON_LEADREF';
+  }
+  /**
+   * (1 bis) EL IDENTIFICADOR DE CLIC TAMBIÉN CORRELACIONA. Un `gclid` identifica un clic concreto de un
+   * anuncio; pegado a «vio la página de implantes» reconstruye exactamente lo que la regla V1 existe para
+   * impedir: qué tratamiento consultó una persona a la que se puede seguir la pista. Vale la misma regla que
+   * para `lead_id`, y por la misma razón.
+   */
+  if (esInteresPorServicio(nombre) && ev.gclid != null && String(ev.gclid).trim() !== '') {
+    return 'INTERES_POR_SERVICIO_CON_GCLID';
   }
   // (2) intención de contacto: jamás portadora de tratamiento (ni por nombre, ni por ruta).
   if (esCorrelacionableConContacto(nombre)) {

@@ -23,6 +23,12 @@ import type { AdaptadorExterno } from '@soec/adaptadores';
 import { ConcurrencyError, type Attribution, type EventStore, type RequestContext } from '@soec/contracts';
 import type { ObservacionService } from '@soec/motor-medicion';
 import { type EventoGrowth, esDiagnostico, mapearEventoGrowth, observacionIdDe } from './mapa-growth';
+import { EVENTOS_CORRELACIONABLES_CON_CONTACTO, nombreBaseDeEvento } from './politica-privacidad-growth';
+
+/** ¿Es una intención de contacto? Se compara por el nombre BASE: `whatsapp_intent` y `whatsapp_intent:x`. */
+function esIntencionDeContacto(eventName: string): boolean {
+  return EVENTOS_CORRELACIONABLES_CON_CONTACTO.includes(nombreBaseDeEvento(eventName ?? '').toLowerCase());
+}
 
 export interface DependenciasIngestaGrowth {
   readonly adaptador: AdaptadorExterno;
@@ -31,6 +37,16 @@ export interface DependenciasIngestaGrowth {
   readonly org: string;
   /** Provider de la FUENTE registrada de ESTA organización. No hay valor por defecto. */
   readonly provider: string;
+  /**
+   * ATRIBUCIÓN FIRST-PARTY (Fase I.9.2). Se llama con las intenciones de contacto que traen identificador de
+   * clic, para averiguar de qué anuncio vinieron. Opcional a propósito: si no está compuesta, la ingesta
+   * sigue funcionando exactamente igual — la atribución es una capa encima, no un requisito.
+   *
+   * NO envía nada a Google: consulta `click_view` y guarda el resultado en la base de SOEC.
+   */
+  readonly atribuir?: (intencion: { ref: string; gclid: string | null; eventTimestamp: string }) => Promise<unknown>;
+  /** Observabilidad opcional. Sanitizada: aquí nunca viaja un identificador ni una credencial. */
+  readonly log?: (info: Record<string, unknown>) => void;
 }
 
 export interface ResumenIngesta {
@@ -118,6 +134,23 @@ export class IngestaGrowth {
       if (!yaExistia) nuevos += 1;
       if (esDiagnostico(ev)) diagnosticos += 1;
       if (ev.event_id > maxEventId) maxEventId = ev.event_id;
+
+      /**
+       * De qué anuncio vino esta intención. Sólo para eventos de contacto con identificador de clic, sólo si
+       * la atribución está compuesta, y NUNCA para eventos de prueba —un lead de diagnóstico no es un
+       * paciente y no puede aparecer en las cifras del piloto—.
+       *
+       * El fallo se traga a propósito: la atribución es información de apoyo; si falla, la ingesta de
+       * observaciones no puede caerse con ella. La intención ya quedó persistida como observación real.
+       */
+      const gclid = typeof ev.gclid === 'string' && ev.gclid.trim() !== '' ? ev.gclid.trim() : null;
+      if (this.deps.atribuir !== undefined && gclid !== null && !esDiagnostico(ev) && esIntencionDeContacto(ev.event_name)) {
+        try {
+          await this.deps.atribuir({ ref: obsId, gclid, eventTimestamp: ev.occurred_at });
+        } catch (e) {
+          this.deps.log?.({ atribucion: 'fallo_al_atribuir', org: this.deps.org, error: e instanceof Error ? e.message.slice(0, 120) : 'desconocido' });
+        }
+      }
     }
 
     const cursorDespues = parsed.next_cursor ?? maxEventId;

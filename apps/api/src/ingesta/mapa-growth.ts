@@ -29,6 +29,15 @@ export interface EventoGrowth {
   readonly utm_campaign: string | null;
   readonly value: number | null;
   readonly lead_id: number | null;
+  /**
+   * Identificador del CLIC de anuncio (`gclid`), capturado por el propio sitio cuando la visita vino de
+   * Google Ads. Opcional: la mayoría de las visitas no vienen de un anuncio y entonces no existe.
+   *
+   * Es un identificador de un clic, no de una persona, pero correlaciona con un contacto — así que la
+   * política de privacidad lo trata igual que `lead_id`: puede acompañar a un evento de contacto y JAMÁS a
+   * un interés por tratamiento.
+   */
+  readonly gclid?: string | null;
   /** Naturaleza estructural del origen: true ⇒ lead/evento de PRUEBA (SmileFlow lo marcó en la fuente). */
   readonly is_test?: boolean | null;
 }

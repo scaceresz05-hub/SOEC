@@ -88,7 +88,14 @@ interface Corrible {
  * Construye lo corrible de UNA organización. Devuelve `null` si no tiene ninguna fuente ingerible: no es un
  * error, es una organización que todavía no está conectada.
  */
-function prepararOrganizacion(org: string, store: EventStore, env: NodeJS.ProcessEnv, secretStore?: SecretStore): Corrible | null {
+/**
+ * Atribuidor inyectado: convierte una intención de contacto con identificador de clic en «de qué anuncio
+ * vino». Opcional en toda la cadena — sin él la ingesta funciona exactamente igual, que es como tiene que ser
+ * una capa de apoyo.
+ */
+export type AtribuidorDeIntenciones = (org: string, intencion: { ref: string; gclid: string | null; eventTimestamp: string }) => Promise<unknown>;
+
+function prepararOrganizacion(org: string, store: EventStore, env: NodeJS.ProcessEnv, secretStore?: SecretStore, atribuir?: AtribuidorDeIntenciones): Corrible | null {
   const negocio = buscarNegocio(org);
   if (!negocio) return null;
   const observaciones = new ObservacionService(store, {} as never);
@@ -118,7 +125,11 @@ function prepararOrganizacion(org: string, store: EventStore, env: NodeJS.Proces
       // cifrado por tenant (credenciales de empresas conectadas desde la interfaz). Sin él, sólo entorno.
       const almacen = secretStore ?? new SecretStoreEnv(env);
       const adaptador = crearGrowthAdapter(fuenteGrowth, { secretStore: almacen, esquemaEgress: ESQUEMA_EGRESS_GROWTH, env });
-      growth = new IngestaGrowth({ adaptador, observaciones, store, org, provider: fuenteGrowth.provider });
+      growth = new IngestaGrowth({
+        adaptador, observaciones, store, org, provider: fuenteGrowth.provider,
+        ...(atribuir ? { atribuir: (intencion) => atribuir(org, intencion) } : {}),
+        log: (i) => console.log(JSON.stringify(i)),
+      });
       fuentes.push({ provider: fuenteGrowth.provider, ingesta: growth });
       nombres.push(fuenteGrowth.sourceId);
     } catch (e) {
@@ -143,6 +154,8 @@ function prepararOrganizacion(org: string, store: EventStore, env: NodeJS.Proces
  * capacidad `INGESTA_GROWTH` habilitada. `undefined` ⇒ no se filtra (tests unitarios y despliegues sin base).
  */
 export interface OpcionesIngesta {
+  /** Atribución first-party (Fase I.9.2). Sin ella, la ingesta no cambia en nada. */
+  readonly atribuir?: AtribuidorDeIntenciones;
   readonly elegibles?: () => Promise<ReadonlySet<string>>;
   /** Almacén de secretos de la composición (entorno + depósito cifrado por tenant). */
   readonly secretStore?: SecretStore;
@@ -162,7 +175,7 @@ export async function planDeIngesta(
   const elegibles = opciones.elegibles ? await opciones.elegibles() : null;
   for (const org of await descubrir()) {
     if (elegibles !== null && !elegibles.has(org)) continue; // capacidad no habilitada: no es un fallo
-    const c = prepararOrganizacion(org, store, env, opciones.secretStore);
+    const c = prepararOrganizacion(org, store, env, opciones.secretStore, opciones.atribuir);
     if (c !== null) plan.push({ org: c.org, negocio: c.negocio, fuentes: c.fuentes, omitidas: c.omitidas });
   }
   return plan;
@@ -180,6 +193,8 @@ export interface DepsIngestaRuntime {
   readonly elegibles?: () => Promise<ReadonlySet<string>>;
   /** Almacén de secretos con el que se resuelven las credenciales de las fuentes. */
   readonly secretStore?: SecretStore;
+  /** Atribución first-party (Fase I.9.2). Opcional: su ausencia no altera la ingesta. */
+  readonly atribuir?: AtribuidorDeIntenciones;
 }
 
 /**
@@ -240,7 +255,7 @@ export async function correrIngestaDeTodas(deps: DepsIngestaRuntime, intervaloMs
  */
 export async function sincronizarSaludDelPlan(deps: DepsIngestaRuntime): Promise<void> {
   if (!deps.salud) return;
-  const opciones: OpcionesIngesta = { elegibles: deps.elegibles, secretStore: deps.secretStore };
+  const opciones: OpcionesIngesta = { elegibles: deps.elegibles, secretStore: deps.secretStore, ...(deps.atribuir ? { atribuir: deps.atribuir } : {}) };
   const ingeribles = new Set((await planDeIngesta(deps.store, deps.env, deps.descubrir, opciones)).map((p) => p.org));
   const elegibles = deps.elegibles ? await deps.elegibles() : null;
   for (const org of await (deps.descubrir ?? descubridorDelRegistro)()) {
