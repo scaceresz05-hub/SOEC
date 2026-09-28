@@ -207,7 +207,9 @@ export async function correrIngestaDeTodas(deps: DepsIngestaRuntime, intervaloMs
   const elegibles = deps.elegibles ? await deps.elegibles() : null;
   for (const org of await (deps.descubrir ?? descubridorDelRegistro)()) {
     if (elegibles !== null && !elegibles.has(org)) continue; // sin capacidad habilitada no se ingiere
-    const corrible = prepararOrganizacion(org, deps.store, deps.env, deps.secretStore);
+    // El atribuidor viaja también AQUÍ. Ésta es la función que corre en cada tick: olvidarlo dejaba la
+    // atribución compuesta sólo para el listado del plan, y en la pasada real nunca se llamaba.
+    const corrible = prepararOrganizacion(org, deps.store, deps.env, deps.secretStore, deps.atribuir);
     if (corrible === null) continue; // organización sin fuentes ingeribles: no es un fallo
     const inicio = ahora();
     await deps.salud?.marcarInicio(JOB, org, inicio).catch(() => undefined);

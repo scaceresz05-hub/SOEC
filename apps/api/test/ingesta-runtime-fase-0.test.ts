@@ -5,6 +5,7 @@
  * y de una variable global de una sola organización. Ahora el runtime descubre las organizaciones ingeribles
  * del registro, corre cada una con sus cursores y un fallo no arrastra a las demás.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { InMemoryEventStore } from '@soec/event-store';
 import { correrIngestaDeTodas, planDeIngesta, sincronizarSaludDelPlan } from '../src/ingesta/ingesta-runtime';
@@ -86,6 +87,22 @@ describe('salud del plan · no se conservan estados viejos', () => {
     expect(deshabilitadas.map((d) => d.org)).toContain('org-smileflow');
     expect(deshabilitadas.find((d) => d.org === 'org-smileflow')?.motivo).toMatch(/credencial/);
     expect(deshabilitadas.map((d) => d.org)).not.toContain('org-cp-odontologia');
+  });
+});
+
+/**
+ * LA ATRIBUCIÓN TIENE QUE LLEGAR A LA PASADA REAL.
+ *
+ * Salió de validar en producción: la atribución estaba compuesta, el evento se ingirió con su
+ * identificador de clic… y no se atribuyó nada. El atribuidor se pasaba al listado del plan pero no a
+ * `correrIngestaDeTodas`, que es la función que corre en cada tick. Compuesto pero no conectado es
+ * peor que ausente: parece que funciona.
+ */
+describe('el atribuidor llega a la pasada real de ingesta', () => {
+  it('correrIngestaDeTodas se lo entrega a cada organización', async () => {
+    const fuente = String(readFileSync(new URL('../src/ingesta/ingesta-runtime.ts', import.meta.url), 'utf8'));
+    const enLaPasada = /correrIngestaDeTodas[\s\S]*?prepararOrganizacion\(org, deps\.store, deps\.env, deps\.secretStore, deps\.atribuir\)/.test(fuente);
+    expect(enLaPasada, 'correrIngestaDeTodas debe pasar deps.atribuir a prepararOrganizacion').toBe(true);
   });
 });
 
